@@ -9,10 +9,12 @@
 . ./cmd.sh ## You'll want to change cmd.sh to something that will work on your system.
            ## This relates to the queue.
 . ./path.sh
-stage=1
+
+
+stage=7
 stop_stage=100
-wsj0=/data/csr_1
-wsj1=/data/csr_2_comp
+wsj0=/mnt/nas_workspace2/spmiData/WSJ/csr_1/
+wsj1=/mnt/nas_workspace2/spmiData/WSJ/csr_2_comp/
 
 . utils/parse_options.sh
 
@@ -24,10 +26,10 @@ fi
 if [ $NODE == 0 ]; then
   if [ $stage -le 1 ] && [ $stop_stage -ge 1 ]; then
     echo "Data Preparation and FST Construction"
-    # Use the same datap prepatation script from Kaldi
+    # Use the same data prepatation script from Kaldi
     local/wsj_data_prep.sh $wsj0/??-{?,??}.? $wsj1/??-{?,??}.?  || exit 1;
 
-    # # Construct the phoneme-based lexicon from the CMU dict
+    # Construct the phoneme-based lexicon from the CMU dict
     local/wsj_prepare_phn_dict.sh || exit 1;
     ctc-crf/ctc_compile_dict_token.sh data/local/dict_phn data/local/lang_phn_tmp data/lang_phn || exit 1;
 
@@ -95,8 +97,7 @@ if [ $NODE == 0 ]; then
     done
     for set in dev93 eval92 cv tr; do
       tmp_data=`eval echo '$'data_$set`
-      feats="ark,s,cs:apply-cmvn --norm-vars=true --utt2spk=ark:$tmp_data/utt2spk scp:$tmp_data/cmvn.scp scp:$tmp_data/feats.scp ark:- \
-      | add-deltas ark:- ark:- | subsample-feats --n=3 ark:- ark:- |"
+      feats="ark,s,cs:apply-cmvn --norm-vars=true --utt2spk=ark:$tmp_data/utt2spk scp:$tmp_data/cmvn.scp scp:$tmp_data/feats.scp ark:- |"
 
       ark_dir=$(readlink -f data/all_ark)/$set.ark
       copy-feats "$feats" "ark,scp:$ark_dir,data/all_ark/$set.scp" || exit 1
@@ -105,16 +106,16 @@ if [ $NODE == 0 ]; then
 
   if [ $stage -le 5 ] && [ $stop_stage -ge 5 ]; then
     mkdir -p data/pickle
-    python3 ctc-crf/convert_to.py -f=pickle -W \
+    python3 ctc-crf/convert_to.py -f=pickle --describe='L//4' --filer 2000 \
         data/all_ark/cv.scp $data_cv/text_number $data_cv/weight data/pickle/cv.pickle || exit 1
-    python3 ctc-crf/convert_to.py -f=pickle \
+    python3 ctc-crf/convert_to.py -f=pickle --describe='L//4' --filer 2000 \
         data/all_ark/tr.scp $data_tr/text_number $data_tr/weight data/pickle/tr.pickle || exit 1
   fi
 
 fi
 
 PARENTDIR='.'
-dir="exp/demo"
+dir="exp/rnnt"
 DATAPATH=$PARENTDIR/data/
 ########################################################################
 # For multi-nodes training,                                            #
@@ -160,7 +161,7 @@ if [ $NODE -ne 0 ]; then
   exit 0
 fi
 
-nj=20
+nj=$(nproc)
 if [ $stage -le 7 ] && [ $stop_stage -ge 7 ]; then
   for set in dev93 eval92; do
     ark_dir=$dir/logits/$set
@@ -187,7 +188,8 @@ if [ $stage -le 7 ] && [ $stop_stage -ge 7 ]; then
     mkdir -p $dir/decode_$set_tg
     steps/lmrescore.sh --cmd "$decode_cmd" --mode 3 data/lang_phn_test_{tgpr,tg} data/test_$set $dir/decode_${set}_{tgpr,tg} || exit 1;
   done
+
+  grep WER $dir/decode_eval92_*/wer_* | utils/best_wer.sh
+  grep WER $dir/decode_dev93_*/wer_* | utils/best_wer.sh
 fi
 
-grep WER $dir/decode_eval92_*/wer_* | utils/best_wer.sh
-grep WER $dir/decode_dev93_*/wer_* | utils/best_wer.sh

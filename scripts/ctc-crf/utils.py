@@ -334,7 +334,7 @@ def train(trainloader, epoch: int, args, manager: Manager):
 
     for i, minibatch in enumerate(trainloader):
         if args.debug and i > 20:
-            if args.gpu==0:
+            if args.gpu == 0:
                 highlight_msg("In debug mode, quit training.")
             dist.barrier()
             break
@@ -393,7 +393,7 @@ def test(testloader, args, manager: Manager):
     with torch.no_grad():
         for i, minibatch in enumerate(testloader):
             if args.debug and i > 20:
-                if args.gpu==0:
+                if args.gpu == 0:
                     highlight_msg("In debug mode, quit evaluating.")
                 dist.barrier()
                 break

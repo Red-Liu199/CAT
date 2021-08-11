@@ -135,3 +135,41 @@ class sortedPadCollate():
         weights = torch.cat([x[2] for x in batch_sorted])
 
         return mats, input_lengths, labels, label_lengths, weights
+
+
+class sortedPadCollateTransducer():
+    def __call__(self, batch):
+        """Collect data into batch by desending order and add padding.
+
+        Args: 
+            batch  : list of (mat, label, weight)
+            mat    : torch.FloatTensor
+            label  : torch.IntTensor
+            weight : torch.FloatTensor
+
+        Return: 
+            (logits, input_lengths, labels, label_lengths, weights)
+        """
+        batches = [(mat, label, weight, mat.size(0))
+                   for mat, label, weight in batch]
+        batch_sorted = sorted(batches, key=lambda item: item[3], reverse=True)
+
+        mats = utils.pad_list([x[0] for x in batch_sorted])
+
+        labels = utils.pad_list([x[1] for x in batch_sorted]).to(torch.long)
+
+        input_lengths = torch.LongTensor([x[3] for x in batch_sorted])
+
+        label_lengths = torch.LongTensor([x[1].size(0) for x in batch_sorted])
+
+        weights = torch.cat([x[2] for x in batch_sorted])
+
+        ########## DEBUG CODE ###########
+        # print(type(mats), mats.size())
+        # print(type(input_lengths), input_lengths.size())
+        # print(type(labels), labels.size())
+        # print(type(label_lengths), label_lengths.size())
+        # exit(1)
+        #################################
+
+        return mats, input_lengths, labels, label_lengths, weights

@@ -62,6 +62,7 @@ if __name__ == "__main__":
         pickle_dataset = []
 
     count = 0
+    L_MAX = args.filer if args.filer > 0 else float('inf')
     with open(args.scp, 'r') as fi:
         lines = fi.readlines()
         for line in tqdm(lines):
@@ -74,7 +75,6 @@ if __name__ == "__main__":
 
             described_length = int(
                 eval(args.describe.replace('L', str(feature.shape[0]))))
-            L_MAX = args.filer if args.filer > 0 else float('inf')
 
             if described_length < ctc_len(label) or feature.shape[0] > L_MAX:
                 count += 1
