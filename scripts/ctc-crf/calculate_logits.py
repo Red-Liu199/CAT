@@ -61,8 +61,8 @@ def main_worker(gpu, ngpus_per_node, args, num_jobs):
         world_size=args.world_size, rank=args.rank)
 
     world_size = dist.get_world_size()
-    local_writers = [open(f"{args.output_dir}/decode.{i+1}.ark", "wb")
-                     for i in range(args.rank, num_jobs, world_size)]
+    local_writers = [
+        f"{args.output_dir}/decode.{i+1}.ark" for i in range(args.rank, num_jobs, world_size)]
 
     inferset = InferDataset(args.input_scp)
     res = len(inferset) % args.world_size
@@ -130,19 +130,19 @@ def single_worker(device, num_jobs, args, idx_beg=0):
     cal_logit(model, testloader, device, local_writers)
 
 
+@torch.no_grad()
 def cal_logit(model, testloader, device, local_writers):
     results = []
-    with torch.no_grad():
-        for batch in tqdm(testloader):
-            key, x, x_lens = batch
-            x_lens = x_lens.flatten()
-            x = x.to(device, non_blocking=True)
-            netout, _ = model.forward(x, x_lens)
+    for batch in tqdm(testloader):
+        key, x, x_lens = batch
+        x_lens = x_lens.flatten()
+        x = x.to(device, non_blocking=True)
+        netout, _ = model.forward(x, x_lens)
 
-            r = netout.cpu().data.numpy()
-            r[r == -np.inf] = -1e16
-            r = r[0]
-            results.append((key[0], r))
+        r = netout.cpu().data.numpy()
+        r[r == -np.inf] = -1e16
+        r = r[0]
+        results.append((key[0], r))
 
     num_local_writers = len(local_writers)
     len_interval = len(results)//num_local_writers

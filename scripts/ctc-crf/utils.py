@@ -376,6 +376,7 @@ def train(trainloader, epoch: int, args, manager: Manager):
             progress.display(i)
 
 
+@torch.no_grad()
 def test(testloader, args, manager: Manager):
 
     model = manager.model
@@ -390,42 +391,41 @@ def test(testloader, args, manager: Manager):
 
     beg = time.time()
     end = time.time()
-    with torch.no_grad():
-        for i, minibatch in enumerate(testloader):
-            if args.debug and i > 20:
-                if args.gpu == 0:
-                    highlight_msg("In debug mode, quit evaluating.")
-                dist.barrier()
-                break
-            # measure data loading time
-            logits, input_lengths, labels, label_lengths, path_weights = minibatch
-            logits, labels, input_lengths, label_lengths = logits.cuda(
-                args.gpu, non_blocking=True), labels, input_lengths, label_lengths
-            path_weights = path_weights.cuda(args.gpu, non_blocking=True)
+    for i, minibatch in enumerate(testloader):
+        if args.debug and i > 20:
+            if args.gpu == 0:
+                highlight_msg("In debug mode, quit evaluating.")
+            dist.barrier()
+            break
+        # measure data loading time
+        logits, input_lengths, labels, label_lengths, path_weights = minibatch
+        logits, labels, input_lengths, label_lengths = logits.cuda(
+            args.gpu, non_blocking=True), labels, input_lengths, label_lengths
+        path_weights = path_weights.cuda(args.gpu, non_blocking=True)
 
-            data_time.update(time.time() - end)
+        data_time.update(time.time() - end)
 
-            loss = model(logits, labels, input_lengths, label_lengths)
+        loss = model(logits, labels, input_lengths, label_lengths)
 
-            if args.iscrf:
-                weight = torch.mean(path_weights)
-                real_loss = loss - weight
-            else:
-                real_loss = loss
+        if args.iscrf:
+            weight = torch.mean(path_weights)
+            real_loss = loss - weight
+        else:
+            real_loss = loss
 
-            dist.all_reduce(real_loss, dist.ReduceOp.SUM)
-            real_loss = real_loss / dist.get_world_size()
+        dist.all_reduce(real_loss, dist.ReduceOp.SUM)
+        real_loss = real_loss / dist.get_world_size()
 
-            # measure accuracy and record loss
-            losses_real.update(real_loss.item(), logits.size(0))
+        # measure accuracy and record loss
+        losses_real.update(real_loss.item(), logits.size(0))
 
-            # measure elapsed time
-            batch_time.update(time.time() - end)
+        # measure elapsed time
+        batch_time.update(time.time() - end)
 
-            end = time.time()
+        end = time.time()
 
-            if (i % args.print_freq == 0 or args.debug) and args.gpu == 0:
-                progress.display(i)
+        if (i % args.print_freq == 0 or args.debug) and args.gpu == 0:
+            progress.display(i)
 
     manager.log_update(
         [losses_real.avg, time.time() - beg], loc='log_eval')
