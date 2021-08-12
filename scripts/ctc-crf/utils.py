@@ -270,8 +270,8 @@ class Manager(object):
                         f"{args.ckptpath}/checkpoint.pt", f"{args.ckptpath}/bestckpt.pt")
 
                     # save model for inference
-                    torch.save(self.model.module.infer.state_dict(),
-                               args.ckptpath + "/infer.pt")
+                    # torch.save(self.model.module.infer.state_dict(),
+                    #            args.ckptpath + "/infer.pt")
             else:
                 raise ValueError(f"Unknown state: {state}.")
             torch.cuda.empty_cache()

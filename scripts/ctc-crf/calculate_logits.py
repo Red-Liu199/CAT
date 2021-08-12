@@ -7,7 +7,7 @@ Author: Hongyu Xiang, Keyu An, Zheng Huahuan
 import json
 import utils
 import argparse
-import kaldi_io
+import kaldiio
 import numpy as np
 from tqdm import tqdm
 from train import build_model
@@ -101,10 +101,10 @@ def main_worker(gpu, ngpus_per_node, args, num_jobs):
 def single_worker(device, num_jobs, args, idx_beg=0):
 
     if idx_beg > 0 and num_jobs == 1:
-        local_writers = [open(f"{args.output_dir}/decode.{args.nj}.ark", 'wb')]
+        local_writers = [f"{args.output_dir}/decode.{args.nj}.ark"]
     else:
-        local_writers = [open(f"{args.output_dir}/decode.{i+1}.ark", 'wb')
-                         for i in range(num_jobs)]
+        local_writers = [
+            f"{args.output_dir}/decode.{i+1}.ark" for i in range(num_jobs)]
 
     inferset = InferDataset(args.input_scp)
     inferset.dataset = inferset.dataset[idx_beg:]
@@ -142,15 +142,16 @@ def cal_logit(model, testloader, device, local_writers):
             r = netout.cpu().data.numpy()
             r[r == -np.inf] = -1e16
             r = r[0]
-            results.append((r, key[0]))
+            results.append((key[0], r))
 
     num_local_writers = len(local_writers)
-    for i, (r, utt) in enumerate(results):
-        kaldi_io.write_mat(
-            local_writers[i % num_local_writers], r, key=utt)
+    len_interval = len(results)//num_local_writers
+    results = [results[i*len_interval:(i+1)*len_interval]
+               for i in range(num_local_writers)]
 
-    for write in local_writers:
-        write.close()
+    for writer, result in zip(local_writers, results):
+        kaldiio.save_ark(writer, dict(result))
+
     return None
 
 

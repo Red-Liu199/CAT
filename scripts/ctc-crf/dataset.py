@@ -4,7 +4,7 @@ Apache 2.0.
 Author: Hongyu Xiang, Keyu An, Zheng Huahuan (zhh20@mails.tsinghua.edu.cn)
 """
 
-import kaldi_io
+import kaldiio
 import h5py
 import utils
 import pickle
@@ -67,7 +67,7 @@ class SpeechDatasetPickle(Dataset):
 
     def __getitem__(self, idx):
         key, feature_path, label, weight = self.dataset[idx]
-        mat = np.array(kaldi_io.read_mat(feature_path))
+        mat = kaldiio.load_mat(feature_path)
         return torch.FloatTensor(mat), torch.IntTensor(label), torch.FloatTensor(weight)
 
 
@@ -80,7 +80,7 @@ class SpeechDatasetMemPickle(Dataset):
 
         for data in self.dataset:
             key, feature_path, label, weight = data
-            mat = np.array(kaldi_io.read_mat(feature_path))
+            mat = kaldiio.load_mat(feature_path)
             self.data_batch.append(
                 [torch.FloatTensor(mat), torch.IntTensor(label), torch.FloatTensor(weight)])
 
@@ -103,7 +103,7 @@ class InferDataset(Dataset):
 
     def __getitem__(self, index):
         key, feature_path = self.dataset[index]
-        mat = np.array(kaldi_io.read_mat(feature_path))
+        mat = kaldiio.load_mat(feature_path)
         return key, torch.FloatTensor(mat), torch.LongTensor([mat.shape[0]])
 
 
