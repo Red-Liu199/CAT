@@ -115,7 +115,7 @@ if [ $NODE == 0 ]; then
 fi
 
 PARENTDIR='.'
-dir="exp/rnnt"
+dir="exp/conformer-s-v1"
 DATAPATH=$PARENTDIR/data/
 ########################################################################
 # For multi-nodes training,                                            #
@@ -162,9 +162,11 @@ if [ $NODE -ne 0 ]; then
 fi
 
 nj=$(nproc)
+decode_dir=$dir/decode
+mkdir -p $decode_dir
 if [ $stage -le 7 ] && [ $stop_stage -ge 7 ]; then
-  for set in dev93 eval92; do
-    ark_dir=$dir/logits/$set
+  for set in eval92 dev93; do
+    ark_dir=$decode_dir/logits/$set
     mkdir -p $ark_dir
     python3 ctc-crf/calculate_logits.py             \
       --resume=$dir/ckpt/infer.pt                   \
@@ -174,22 +176,21 @@ if [ $stage -le 7 ] && [ $stop_stage -ge 7 ]; then
       --output_dir=$ark_dir                         \
       || exit 1
 
-      for lmtype in tgpr bd_tgpr; do
+
+      for lmtype in bd_tgpr; do
         # reuse logits
-        mkdir -p $dir/decode_${set}_$lmtype
-        ln -s $(readlink -f $dir/logits/$set) $dir/decode_${set}_$lmtype/logits
+        mkdir -p $decode_dir/decode_${set}_$lmtype
+        ln -snf $(readlink -f $decode_dir/logits/$set) $decode_dir/decode_${set}_$lmtype/logits
         ctc-crf/decode.sh --stage 1 \
           --cmd "$decode_cmd" --nj $nj --acwt 1.0 \
-          data/lang_phn_test_$lmtype data/test_${set} data/all_ark/$set.scp $dir/decode_${set}_$lmtype
+          data/lang_phn_test_$lmtype data/test_${set} data/all_ark/$set.scp $decode_dir/decode_${set}_$lmtype
       done
 
-    mkdir -p $dir/decode_$set_bd_fgconst
-    steps/lmrescore_const_arpa.sh --cmd "$decode_cmd" data/lang_phn_test_bd_{tgpr,fgconst} data/test_$set $dir/decode_${set}_bd_{tgpr,fgconst} || exit 1;
-    mkdir -p $dir/decode_$set_tg
-    steps/lmrescore.sh --cmd "$decode_cmd" --mode 3 data/lang_phn_test_{tgpr,tg} data/test_$set $dir/decode_${set}_{tgpr,tg} || exit 1;
+    mkdir -p $decode_dir/decode_${set}_bd_fgconst
+    steps/lmrescore_const_arpa.sh --cmd "$decode_cmd" data/lang_phn_test_bd_{tgpr,fgconst} data/test_$set $decode_dir/decode_${set}_bd_{tgpr,fgconst} || exit 1;
   done
 
-  grep WER $dir/decode_eval92_*/wer_* | utils/best_wer.sh
-  grep WER $dir/decode_dev93_*/wer_* | utils/best_wer.sh
+  grep WER $decode_dir/decode_eval92_*/wer_* | utils/best_wer.sh
+  grep WER $decode_dir/decode_dev93_*/wer_* | utils/best_wer.sh
 fi
 
