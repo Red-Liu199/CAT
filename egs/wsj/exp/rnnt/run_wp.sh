@@ -5,6 +5,8 @@
 
 data_train=data/train_tr95_sp
 data_dev=data/train_cv05_sp
+
+dir="exp/rnnt"
 nj=$(nproc)
 
 # train sentencepiece
@@ -80,20 +82,44 @@ python3 ctc-crf/convert_to.py -f=pickle --describe='L//4' --filer 2000 \
 cat $spmdata/train/conver2pickle.log | tail -n 1
 
 echo "Convert data to pickle done."
-fi
+
 
 echo "NN training"
 
-dir="exp/rnnt"
 # CUDA_VISIBLE_DEVICES="3"  \
 python3 ctc-crf/rnnt_train.py --seed=0  \
-    --world-size 1 --rank 0             \
+    --world-size 1 --rank 0  -p 50      \
     --dist-url='tcp://127.0.0.1:13944'  \
-    --batch_size=32                     \
+    --batch_size=20                     \
     --dir=$dir                          \
     --config=$dir/config.json           \
     --data=data/                        \
-    --trset=data/spm/tr.pickle          \
-    --devset=data/spm/cv.pickle         \
-    --resume=$dir/ckpt/checkpoint.pt    \
+    --trset=$spmdata/tr.pickle          \
+    --devset=$spmdata/cv.pickle         \
     || exit 1
+
+fi
+echo "Decoding..."
+dec_dir=$dir/decode
+mkdir -p $dec_dir
+for set in eval92 dev93; do
+    mkdir -p $dec_dir/$set
+    python3 ctc-crf/transducer_decode.py    \
+        --resume=$dir/ckpt/bestckpt.pt      \
+        --config=$dir/config.json           \
+        --nj=$nj                            \
+        --input_scp=data/all_ark/$set.scp   \
+        --output_dir=$dec_dir/$set          \
+        --spmodel=$spmdata/spm.model        \
+        || exit 1
+
+    if [ -f $dec_dir/$set/decode.0.tmp ]; then
+        cat $dec_dir/$set/decode.?.tmp | sort -k 1 > $dec_dir/$set/decode.txt
+        rm $dec_dir/$set/*.tmp
+    fi
+    if [ -f $dec_dir/$set/decode.txt ]; then
+        $KALDI_ROOT/src/bin/compute-wer --text --mode=present ark:data/test_$set/text ark:$dec_dir/$set/decode.txt
+    else
+        echo "No decoded text found."
+    fi
+done

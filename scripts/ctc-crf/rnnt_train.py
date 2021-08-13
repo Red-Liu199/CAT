@@ -111,22 +111,6 @@ def main_worker(gpu, ngpus_per_node, args):
         utils.gen_readme(args.dir+'/readme.md',
                          model=manager.model, gpu_info=gpu_info)
 
-    
-    ########## DEBUG CODE ###########
-    
-    if args.decode:
-        for i, minibatch in enumerate(testloader):
-            logits, input_lengths, labels, label_lengths, path_weights = minibatch
-            logits, labels, input_lengths, label_lengths = logits.cuda(
-                args.gpu, non_blocking=True), labels, input_lengths, label_lengths
-
-            predict = manager.model.module.decode(logits, input_lengths)
-            print(predict)
-            print(labels)
-            break
-        return
-    #################################
-
     # training
     manager.run(train_sampler, trainloader, testloader, args)
 
@@ -140,31 +124,83 @@ class Transducer(nn.Module):
         self.specaug = specaug
 
     @torch.no_grad()
-    def decode(self, inputs: torch.FloatTensor, input_lengths: torch.LongTensor, mode='greedy') -> torch.LongTensor:
+    def decode(self, inputs: torch.FloatTensor, input_lengths: torch.LongTensor, mode='greedy', beam_size: int = 0) -> torch.LongTensor:
         encoder_output, o_lens = self.encoder(inputs, input_lengths)
-        bos_token = inputs.new_zeros(1, 1).to(torch.long)
-        decoder_output_init, hidden_dec_init = self.decoder(bos_token)
-        outputs = []
-        for seq, T in zip(encoder_output, o_lens):
-            pred_tokens = []
-            decoder_output = decoder_output_init
-            hidden_dec = hidden_dec_init
-            for t in range(T):
-                step_out = self.joint(seq[t], decoder_output.view(-1))
-                
-                ########## DEBUG CODE ###########
-                # print(step_out)
-                #################################
-                
-                pred = step_out.argmax(dim=0)
-                pred = int(pred.item())
-                if pred != 0:
-                    pred_tokens.append(pred)
-                decoder_input = torch.tensor([[pred]], device=inputs.device, dtype=torch.long)
-                decoder_output, hidden_dec = self.decoder(
-                    decoder_input, hidden_dec)
 
-            outputs.append(torch.tensor(pred_tokens, device=inputs.device, dtype=torch.long))
+        if mode == 'greedy':
+            bos_token = inputs.new_zeros(1, 1).to(torch.long)
+            decoder_output_init, hidden_dec_init = self.decoder(bos_token)
+            outputs = []
+            for seq, T in zip(encoder_output, o_lens):
+                pred_tokens = []
+                decoder_output = decoder_output_init
+                hidden_dec = hidden_dec_init
+                for t in range(T):
+                    step_out = self.joint(seq[t], decoder_output.view(-1))
+                    pred = step_out.argmax(dim=0)
+                    pred = int(pred.item())
+                    if pred != 0:
+                        pred_tokens.append(pred)
+                    decoder_input = torch.tensor(
+                        [[pred]], device=inputs.device, dtype=torch.long)
+                    decoder_output, hidden_dec = self.decoder(
+                        decoder_input, hidden_dec)
+
+                outputs.append(torch.tensor(
+                    pred_tokens, device=inputs.device, dtype=torch.long))
+
+            return utils.pad_list(outputs).to(torch.long)
+        elif mode == 'beam':
+            assert beam_size > 0
+            return self.beam_search_decode(encoder_output, o_lens, beam_size)
+        else:
+            raise ValueError("Unknown decode mode: {}".format(mode))
+
+    def beam_search_decode(self, encoder_output: torch.FloatTensor, lengths: torch.LongTensor, beam_size: int = 5) -> torch.LongTensor:
+
+        outputs = []
+        for seq, T in zip(encoder_output, lengths):
+            ongoing_beams = [BeamSearcher(self, seq[:T])]
+
+            while True:
+                log_ps = []
+                count_stop_beams = 0
+                for i, beam in enumerate(ongoing_beams):
+                    hypo = beam.search_forward()
+                    hypo = hypo.view(-1).tolist()
+                    if len(hypo) == 1:
+                        count_stop_beams += 1
+                    log_ps += [(_log_p, i, tok)
+                               for tok, _log_p in enumerate(hypo)]
+
+                if count_stop_beams == beam_size:
+                    log_p, idx_best_beam, _ = max(
+                        log_ps, key=lambda item: item[0])
+                    pred_tokens = [
+                        tok for tok in ongoing_beams[idx_best_beam]._preds if tok != 0]
+                    outputs.append(torch.tensor(
+                        pred_tokens, device=encoder_output.device, dtype=torch.long))
+                    break
+                else:
+                    new_beams = []
+
+                    while True:
+                        idx_log, (max_log_p, idx_beam, tok) = max(
+                            enumerate(log_ps), key=lambda item: item[1][0])
+
+                        del log_ps[idx_log]
+                        beam = ongoing_beams[idx_beam].slice_beam(tok)[0]
+                        if tok == 0:    # next frame
+                            new_beams.append(beam)
+                        else:       # next label
+                            ongoing_beams.append(beam)
+                            hypo = beam.search_forward().view(-1).tolist()
+                            log_ps += [(_log_p, len(ongoing_beams)-1, tok)
+                                       for tok, _log_p in enumerate(hypo)]
+
+                        if len(new_beams) >= beam_size:
+                            ongoing_beams = new_beams
+                            break
 
         return utils.pad_list(outputs).to(torch.long)
 
@@ -197,6 +233,74 @@ class Transducer(nn.Module):
         return loss
 
 
+class BeamSearcher():
+    def __init__(self, model: Transducer, seq: torch.FloatTensor) -> None:
+        self._trans = model
+        self._seq = seq
+
+        self.log_p = 0.
+        self._preds = []
+
+        self._cur_t_step = 0
+        self._hidden = None
+        self._decoder_out_cur = None
+        self._hypothesis_cur = None
+
+    def search_forward(self) -> torch.FloatTensor:
+        if self._cur_t_step >= self._seq.size(0):
+            return self.log_p  # .unsqueeze(0)
+
+        if len(self._preds) == 0:   # init state
+            bos_token = torch.tensor(
+                [[0]], device=self._seq.device, dtype=torch.long)
+            decoder_out, hidden_o = self._trans.decoder(bos_token)
+        elif self._preds[-1] == 0:  # if last token is <blk>, go to next frame
+            self._cur_t_step += 1
+            if self._cur_t_step >= self._seq.size(0):
+                return self.log_p  # .unsqueeze(0)
+            decoder_out, hidden_o = self._decoder_out_cur, self._hidden
+        else:       # if last token isn't <blk>, frame stops
+            l_token = torch.tensor([[self._preds[-1]]],
+                                   device=self._seq.device, dtype=torch.long)
+            decoder_out, hidden_o = self._trans.decoder(l_token, self._hidden)
+
+        frame = self._seq[self._cur_t_step]
+        hypothesis = self._trans.joint(frame, decoder_out.view(-1))
+        self._hidden = hidden_o
+        self._decoder_out_cur = decoder_out
+        self._hypothesis_cur = hypothesis
+
+        return self.log_p + hypothesis
+
+    def slice_beam(self, tokens: Union[Sequence[int], int]):
+        if self._cur_t_step >= self._seq.size(0):
+            return [self]
+
+        if isinstance(tokens, int):
+            tokens = [tokens]
+
+        searchers = []
+        for token in tokens:
+            new_searcher = self.replica()
+            new_searcher.log_p += self._hypothesis_cur[token]
+            new_searcher._preds.append(token)
+            searchers.append(new_searcher)
+        return searchers
+
+    def replica(self):
+        replica = BeamSearcher(self._trans, self._seq)
+        replica.log_p = self.log_p
+        replica._preds = self._preds[:]
+        replica._cur_t_step = self._cur_t_step
+        replica._hidden = self._hidden
+        replica._decoder_out_cur = self._decoder_out_cur
+        replica._hypothesis_cur = self._hypothesis_cur
+        return replica
+
+    def __str__(self) -> str:
+        return "[{}/{}]: {}".format(self._cur_t_step, self._seq.size(0), self._preds)
+
+
 class JointNet(nn.Module):
     """
     Joint `encoder_output` and `decoder_output`.
@@ -218,14 +322,14 @@ class JointNet(nn.Module):
         )
 
     def forward(self, encoder_output: torch.FloatTensor, decoder_output: torch.FloatTensor) -> torch.FloatTensor:
-        assert (encoder_output.dim() == 3 and decoder_output.dim() == 3) or (encoder_output.dim() == 1 and decoder_output.dim() == 1)
+        assert (encoder_output.dim() == 3 and decoder_output.dim() == 3) or (
+            encoder_output.dim() == 1 and decoder_output.dim() == 1)
 
-        
         ########## DEBUG CODE ###########
         # print("encoder output to join:", encoder_output.size())
         # print("decoder output to join:", decoder_output.size())
         #################################
-        
+
         encoder_output = self.fc_enc(encoder_output)
         decoder_output = self.fc_dec(decoder_output)
 
@@ -249,7 +353,7 @@ class JointNet(nn.Module):
         return outputs
 
 
-def build_model(args, configuration, train=True) -> nn.Module:
+def build_model(args, configuration, dist=True) -> nn.Module:
     def _build_encoder(config) -> Tuple[nn.Module, Union[nn.Module, None]]:
         NetKwargs = config['kwargs']
         _encoder = getattr(model_zoo, config['type'])(**NetKwargs)
@@ -286,6 +390,8 @@ def build_model(args, configuration, train=True) -> nn.Module:
 
     model = Transducer(encoder=encoder, decoder=decoder,
                        jointnet=jointnet, specaug=specaug)
+    if not dist:
+        return model
 
     torch.cuda.set_device(args.gpu)
     model.cuda(args.gpu)

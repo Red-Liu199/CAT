@@ -146,10 +146,11 @@ def cal_logit(model, testloader, device, local_writers):
 
     num_local_writers = len(local_writers)
     len_interval = len(results)//num_local_writers
-    results = [results[i*len_interval:(i+1)*len_interval]
-               for i in range(num_local_writers)]
+    split_results = [
+        results[i*len_interval:(i+1)*len_interval] for i in range(num_local_writers)]
+    split_results[-1] += results[num_local_writers*len_interval:]
 
-    for writer, result in zip(local_writers, results):
+    for writer, result in zip(local_writers, split_results):
         kaldiio.save_ark(writer, dict(result))
 
     return None

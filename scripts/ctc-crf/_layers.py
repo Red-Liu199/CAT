@@ -102,7 +102,8 @@ class Conv2dSubdampling(nn.Module):
         out = out.permute(0, 2, 1, 3)
         # [B, T//4, OD, D//4] -> [B, T//4, OD * D//4]
         out = out.contiguous().view(B, NT, OD*ND)
-        lens_out = (lens//2)//2
+        lens_out = torch.div(lens, 2, rounding_mode='floor')
+        lens_out = torch.div(lens_out, 2, rounding_mode='floor')
         return out, lens_out
 
 

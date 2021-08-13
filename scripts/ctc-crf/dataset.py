@@ -4,11 +4,14 @@ Apache 2.0.
 Author: Hongyu Xiang, Keyu An, Zheng Huahuan (zhh20@mails.tsinghua.edu.cn)
 """
 
+import os
 import kaldiio
 import h5py
 import utils
 import pickle
 import numpy as np
+from kaldiio import ReadHelper
+from typing import Union, Tuple, Sequence
 
 import torch
 from torch.utils.data import Dataset
@@ -31,7 +34,7 @@ class SpeechDataset(Dataset):
         label = dataset.attrs['label']
         weight = dataset.attrs['weight']
         hdf5_file.close()
-        return torch.FloatTensor(mat), torch.IntTensor(label), torch.FloatTensor(weight)
+        return torch.tensor(mat, dtype=torch.float), torch.IntTensor(label), torch.tensor(weight, dtype=torch.float)
 
 
 class SpeechDatasetMem(Dataset):
@@ -45,7 +48,7 @@ class SpeechDatasetMem(Dataset):
           label = dataset.attrs['label']
           weight = dataset.attrs['weight']
           self.data_batch.append(
-              [torch.FloatTensor(mat), torch.IntTensor(label), torch.FloatTensor(weight)])
+              [torch.tensor(mat, dtype=torch.float), torch.IntTensor(label), torch.tensor(weight, dtype=torch.float)])
 
         hdf5_file.close()
         print("read all data into memory")
@@ -68,7 +71,7 @@ class SpeechDatasetPickle(Dataset):
     def __getitem__(self, idx):
         key, feature_path, label, weight = self.dataset[idx]
         mat = kaldiio.load_mat(feature_path)
-        return torch.FloatTensor(mat), torch.IntTensor(label), torch.FloatTensor(weight)
+        return torch.tensor(mat, dtype=torch.float), torch.IntTensor(label), torch.tensor(weight, dtype=torch.float)
 
 
 class SpeechDatasetMemPickle(Dataset):
@@ -82,7 +85,7 @@ class SpeechDatasetMemPickle(Dataset):
             key, feature_path, label, weight = data
             mat = kaldiio.load_mat(feature_path)
             self.data_batch.append(
-                [torch.FloatTensor(mat), torch.IntTensor(label), torch.FloatTensor(weight)])
+                [torch.tensor(mat, dtype=torch.float), torch.IntTensor(label), torch.tensor(weight, dtype=torch.float)])
 
     def __len__(self):
         return len(self.data_batch)
@@ -104,7 +107,7 @@ class InferDataset(Dataset):
     def __getitem__(self, index):
         key, feature_path = self.dataset[index]
         mat = kaldiio.load_mat(feature_path)
-        return key, torch.FloatTensor(mat), torch.LongTensor([mat.shape[0]])
+        return key, torch.tensor(mat, dtype=torch.float), torch.LongTensor([mat.shape[0]])
 
 
 class sortedPadCollate():
@@ -138,18 +141,19 @@ class sortedPadCollate():
 
 
 class sortedPadCollateTransducer():
+    """Collect data into batch by desending order and add padding.
+
+    Args: 
+        batch  : list of (mat, label, weight)
+        mat    : torch.FloatTensor
+        label  : torch.IntTensor
+        weight : torch.FloatTensor
+
+    Return: 
+        (logits, input_lengths, labels, label_lengths, weights)
+    """
+
     def __call__(self, batch):
-        """Collect data into batch by desending order and add padding.
-
-        Args: 
-            batch  : list of (mat, label, weight)
-            mat    : torch.FloatTensor
-            label  : torch.IntTensor
-            weight : torch.FloatTensor
-
-        Return: 
-            (logits, input_lengths, labels, label_lengths, weights)
-        """
         batches = [(mat, label, weight, mat.size(0))
                    for mat, label, weight in batch]
         batch_sorted = sorted(batches, key=lambda item: item[3], reverse=True)
@@ -164,12 +168,62 @@ class sortedPadCollateTransducer():
 
         weights = torch.cat([x[2] for x in batch_sorted])
 
-        ########## DEBUG CODE ###########
-        # print(type(mats), mats.size())
-        # print(type(input_lengths), input_lengths.size())
-        # print(type(labels), labels.size())
-        # print(type(label_lengths), label_lengths.size())
-        # exit(1)
-        #################################
-
         return mats, input_lengths, labels, label_lengths, weights
+
+
+class ScpDataset(Dataset):
+    """
+    Read data from scp file ranging [idx_beg, idx_end)
+    """
+    def __init__(self, scp_file, idx_beg: int = 0, idx_end: int = -1) -> None:
+        super().__init__()
+
+        if not os.path.isfile(scp_file):
+            raise FileNotFoundError(f"{scp_file} is not a valid file.")
+
+        assert idx_beg >= 0 and idx_end >= -1
+
+        if idx_end == -1:
+            idx_end = float('inf')
+
+        self._dataset = []
+        idx = 0
+        with ReadHelper('scp:'+scp_file) as reader:
+            for key, mat in reader:
+                if idx < idx_beg:
+                    idx += 1
+                    continue
+                if idx >= idx_end:
+                    break
+                self._dataset.append(
+                    [key, torch.tensor(mat, dtype=torch.float)])
+                idx += 1
+
+    def __len__(self) -> int:
+        return len(self._dataset)
+
+    def __getitem__(self, index: int) -> Tuple[str, torch.FloatTensor]:
+        return self._dataset[index]
+
+
+class TestPadCollate():
+    """Collect data into batch and add padding.
+
+    Args: 
+        batch   : list of (key, feature)
+        key     : str
+        feature : torch.FloatTensor
+        
+    Return: 
+        (keys, logits, lengths)
+    """
+
+    def __call__(self, batch: Sequence[Tuple[str, torch.FloatTensor]]) -> Tuple[Sequence[str], torch.FloatTensor, torch.LongTensor]:
+
+        keys = [key for key, _ in batch]
+
+        mats = utils.pad_list([feature for _, feature in batch])
+
+        lengths = torch.LongTensor([feature.size(0) for _, feature in batch])
+
+        return keys, mats, lengths
