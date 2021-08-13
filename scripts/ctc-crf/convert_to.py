@@ -75,7 +75,8 @@ if __name__ == "__main__":
             described_length = int(
                 eval(args.describe.replace('L', str(feature.shape[0]))))
 
-            if described_length < ctc_len(label) or feature.shape[0] > L_MAX:
+            # if described_length < ctc_len(label) or feature.shape[0] > L_MAX:
+            if feature.shape[0] > L_MAX:
                 count += 1
                 continue
 

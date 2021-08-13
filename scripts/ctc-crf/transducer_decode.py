@@ -10,7 +10,7 @@ import utils
 import argparse
 import sentencepiece as spm
 from tqdm import tqdm
-from rnnt_train import build_model, Transducer
+from transducer_train import build_model, Transducer
 from dataset import ScpDataset, TestPadCollate
 from collections import OrderedDict
 
@@ -27,7 +27,7 @@ def main(args):
         raise FileNotFoundError(
             "Invalid sentencepiece model location: {}".format(args.spmodel))
 
-    if not torch.cuda.is_available():
+    if not torch.cuda.is_available() or args.cpu:
         utils.highlight_msg("Using CPU.")
         single_worker('cpu', f"{args.output_dir}/decode.0.tmp", args)
         return None
@@ -87,9 +87,8 @@ def main_worker(gpu, ngpus_per_node, args, len_dataset: int = -1):
         model = load_checkpoint(model, args.resume, loc=f'cuda:{args.gpu}')
 
     model.eval()
-    sp = spm.SentencePieceProcessor(model_file=args.spmodel)
 
-    decode(model.module, sp, testloader, args.gpu,
+    decode(args, model.module, testloader, args.gpu,
            f"{args.output_dir}/decode.{args.rank}.tmp")
 
 
@@ -112,20 +111,20 @@ def single_worker(device, path_out, args, idx_beg=0):
 
     model.eval()
 
-    sp = spm.SentencePieceProcessor(model_file=args.spmodel)
-
-    decode(model, sp, testloader, device, path_out)
+    decode(args, model, testloader, device, path_out)
 
 
 @torch.no_grad()
-def decode(model: Transducer, sp: spm.SentencePieceProcessor, testloader, device, local_writer):
+def decode(args, model: Transducer, testloader, device, local_writer):
+    sp = spm.SentencePieceProcessor(model_file=args.spmodel)
     results = []
     for batch in tqdm(testloader):
         # for batch in testloader:
         key, x, x_lens = batch
         x = x.to(device, non_blocking=True)
 
-        pred = model.decode(x, x_lens, mode='beam', beam_size=3)
+        pred = model.decode(x, x_lens, mode=args.mode,
+                            beam_size=args.beam_size)
 
         seq = sp.decode(pred.data.cpu().tolist())
         results.append((key, seq))
@@ -158,10 +157,12 @@ if __name__ == "__main__":
     parser.add_argument("--output_dir", type=str)
     parser.add_argument("--config", type=str, default=None, metavar='PATH',
                         help="Path to configuration file of backbone.")
+    parser.add_argument("--mode", type=str,
+                        choices=['greedy', 'beam', 'prefix'], default='beam')
+    parser.add_argument("--beam_size", type=int, default=3)
     parser.add_argument("--spmodel", type=str, default='',
                         help="SPM model location.")
-
-    parser.add_argument("--nj", type=int)
+    parser.add_argument("--cpu", action='store_true', default=False)
     parser.add_argument("--resume", type=str, default=None,
                         help="Path to location of checkpoint.")
 

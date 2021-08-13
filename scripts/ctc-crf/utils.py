@@ -7,6 +7,7 @@ Author: Zheng Huahuan (zhh20@mails.tsinghua.edu.cn)
 import os
 import time
 import json
+import math
 import shutil
 import scheduler
 from collections import OrderedDict
@@ -331,13 +332,12 @@ def train(trainloader, epoch: int, args, manager: Manager):
         prefix="Epoch: [{}]".format(epoch))
 
     end = time.time()
+    fold = args.grad_accum_fold
+    assert fold >= 1
+    pre_steps = int(math.ceil(len(trainloader)/float(fold)) * (epoch-1))
 
+    optimizer.zero_grad()
     for i, minibatch in enumerate(trainloader):
-        if args.debug and i > 20:
-            if args.gpu == 0:
-                highlight_msg("In debug mode, quit training.")
-            dist.barrier()
-            break
         # measure data loading time
         logits, input_lengths, labels, label_lengths, path_weights = minibatch
         logits, labels, input_lengths, label_lengths = logits.cuda(
@@ -345,7 +345,6 @@ def train(trainloader, epoch: int, args, manager: Manager):
 
         data_time.update(time.time() - end)
 
-        optimizer.zero_grad()
         loss = model(logits, labels, input_lengths, label_lengths)
 
         with torch.no_grad():
@@ -358,22 +357,39 @@ def train(trainloader, epoch: int, args, manager: Manager):
 
         loss.backward()
 
-        optimizer.step()
-        scheduler.update_lr((epoch - 1) * len(trainloader) + i + 1)
+        # update every fold times and won't drop the last batch
+        if fold == 1 or (i+1) % fold == 0 or (i+1) == len(trainloader):
+            # for Adam optimizer, even though fold > 1, it's no need to change lr
+            # if using SGD, use init_lr_fold = init_lr / fold
+            # if fold > 1:
+            #     for param in model.parameters():
+            #         if param.requires_grad:
+            #             param.grad.data /= fold
+            optimizer.step()
+            optimizer.zero_grad()
+            scheduler.update_lr(pre_steps + (i + 1)/fold)
 
-        # measure accuracy and record loss; item() can sync all processes.
-        tolog = [loss.item(), real_loss.item(),
-                 logits.size(0), time.time()-end]
-        end = time.time()
-        losses.update(tolog[0], tolog[2])
-        losses_real.update(tolog[1], tolog[2])
-        # measure elapsed time
-        batch_time.update(tolog[-1])
-        manager.log_update(
-            [epoch, tolog[0], tolog[1], scheduler.lr_cur, tolog[-1]], loc='log_train')
+            # measure accuracy and record loss; item() can sync all processes.
+            tolog = [loss.item(), real_loss.item(),
+                     logits.size(0), time.time()-end]
+            end = time.time()
+            losses.update(tolog[0], tolog[2])
+            losses_real.update(tolog[1], tolog[2])
+            # measure elapsed time
+            batch_time.update(tolog[-1])
+            manager.log_update(
+                [epoch, tolog[0], tolog[1], scheduler.lr_cur, tolog[-1]], loc='log_train')
 
-        if (i % args.print_freq == 0 or args.debug) and args.gpu == 0:
-            progress.display(i)
+            if ((i+1)/fold % args.print_freq == 0 or args.debug) and args.gpu == 0:
+                progress.display(i+1)
+
+            if args.debug and (i+1)/fold >= 20:
+                if args.gpu == 0:
+                    highlight_msg("In debug mode, quit training.")
+                dist.barrier()
+                break
+        else:
+            continue
 
 
 @torch.no_grad()
@@ -392,7 +408,7 @@ def test(testloader, args, manager: Manager):
     beg = time.time()
     end = time.time()
     for i, minibatch in enumerate(testloader):
-        if args.debug and i > 20:
+        if args.debug and i >= 20:
             if args.gpu == 0:
                 highlight_msg("In debug mode, quit evaluating.")
             dist.barrier()
@@ -424,8 +440,8 @@ def test(testloader, args, manager: Manager):
 
         end = time.time()
 
-        if (i % args.print_freq == 0 or args.debug) and args.gpu == 0:
-            progress.display(i)
+        if ((i+1) % args.print_freq == 0 or args.debug) and args.gpu == 0:
+            progress.display(i+1)
 
     manager.log_update(
         [losses_real.avg, time.time() - beg], loc='log_eval')

@@ -152,55 +152,71 @@ class Transducer(nn.Module):
             return utils.pad_list(outputs).to(torch.long)
         elif mode == 'beam':
             assert beam_size > 0
-            return self.beam_search_decode(encoder_output, o_lens, beam_size)
+            return self.beam_search_decode(encoder_output, o_lens, beam_size, is_prefix=False)
+        elif mode == 'prefix':
+            assert beam_size > 0
+            return self.beam_search_decode(encoder_output, o_lens, beam_size, is_prefix=True)
         else:
             raise ValueError("Unknown decode mode: {}".format(mode))
 
-    def beam_search_decode(self, encoder_output: torch.FloatTensor, lengths: torch.LongTensor, beam_size: int = 5) -> torch.LongTensor:
+    def beam_search_decode(self, encoder_output: torch.FloatTensor, lengths: torch.LongTensor, beam_size: int = 5, is_prefix: bool = True) -> torch.LongTensor:
 
         outputs = []
         for seq, T in zip(encoder_output, lengths):
             ongoing_beams = [BeamSearcher(self, seq[:T])]
 
-            while True:
+            ########## DEBUG CODE ###########
+            # import sentencepiece as spm
+            # sp = spm.SentencePieceProcessor(model_file='data/spm/spm.model')
+            #################################
+
+            for t in range(T):
                 log_ps = []
-                count_stop_beams = 0
+                # count_stop_beams = 0
                 for i, beam in enumerate(ongoing_beams):
-                    hypo = beam.search_forward()
-                    hypo = hypo.view(-1).tolist()
-                    if len(hypo) == 1:
-                        count_stop_beams += 1
+                    hypo = beam.search_forward().view(-1).tolist()
                     log_ps += [(_log_p, i, tok)
                                for tok, _log_p in enumerate(hypo)]
+                del beam
 
-                if count_stop_beams == beam_size:
-                    log_p, idx_best_beam, _ = max(
-                        log_ps, key=lambda item: item[0])
-                    pred_tokens = [
-                        tok for tok in ongoing_beams[idx_best_beam]._preds if tok != 0]
-                    outputs.append(torch.tensor(
-                        pred_tokens, device=encoder_output.device, dtype=torch.long))
-                    break
-                else:
-                    new_beams = []
-
-                    while True:
-                        idx_log, (max_log_p, idx_beam, tok) = max(
-                            enumerate(log_ps), key=lambda item: item[1][0])
-
-                        del log_ps[idx_log]
-                        beam = ongoing_beams[idx_beam].slice_beam(tok)[0]
-                        if tok == 0:    # next frame
+                new_beams = []
+                while True:
+                    idx_log, (max_log_p, idx_beam, tok) = max(
+                        enumerate(log_ps), key=lambda item: item[1][0])
+                    del log_ps[idx_log]
+                    beam = ongoing_beams[idx_beam].slice_beam(tok)[0]
+                    if tok == 0:    # next frame
+                        if is_prefix:   # prefix beam search
+                            new_beams = merge_beams(new_beams, beam)
+                        else:
                             new_beams.append(beam)
-                        else:       # next label
-                            ongoing_beams.append(beam)
-                            hypo = beam.search_forward().view(-1).tolist()
-                            log_ps += [(_log_p, len(ongoing_beams)-1, tok)
-                                       for tok, _log_p in enumerate(hypo)]
+                    else:           # next label
+                        ongoing_beams.append(beam)
+                        hypo = beam.search_forward().view(-1).tolist()
+                        log_ps += [(_log_p, len(ongoing_beams)-1, tok)
+                                   for tok, _log_p in enumerate(hypo)]
+                    if len(new_beams) >= beam_size:
+                        ongoing_beams = new_beams
+                        del new_beams
+                        break
+                    del beam
 
-                        if len(new_beams) >= beam_size:
-                            ongoing_beams = new_beams
-                            break
+                ########## DEBUG CODE ###########
+                # print("t=", t)
+                # for beam in ongoing_beams:
+                #     print(sp.decode(beam._preds))
+                #     # print(beam._preds)
+
+                # print("")
+                #################################
+
+            best_beam = max(ongoing_beams, key=lambda item: item.log_p)
+            outputs.append(torch.tensor(
+                best_beam._preds, device=encoder_output.device, dtype=torch.long))
+
+            ########## DEBUG CODE ###########
+            # exit(1)
+            #################################
 
         return utils.pad_list(outputs).to(torch.long)
 
@@ -240,6 +256,7 @@ class BeamSearcher():
 
         self.log_p = 0.
         self._preds = []
+        self._is_next_frame = False
 
         self._cur_t_step = 0
         self._hidden = None
@@ -250,11 +267,11 @@ class BeamSearcher():
         if self._cur_t_step >= self._seq.size(0):
             return self.log_p  # .unsqueeze(0)
 
-        if len(self._preds) == 0:   # init state
+        if len(self._preds) == 0 and self._is_next_frame is False:   # init state
             bos_token = torch.tensor(
                 [[0]], device=self._seq.device, dtype=torch.long)
             decoder_out, hidden_o = self._trans.decoder(bos_token)
-        elif self._preds[-1] == 0:  # if last token is <blk>, go to next frame
+        elif self._is_next_frame:  # if last token is <blk>, go to next frame
             self._cur_t_step += 1
             if self._cur_t_step >= self._seq.size(0):
                 return self.log_p  # .unsqueeze(0)
@@ -283,7 +300,11 @@ class BeamSearcher():
         for token in tokens:
             new_searcher = self.replica()
             new_searcher.log_p += self._hypothesis_cur[token]
-            new_searcher._preds.append(token)
+            if token == 0:      # for <blk> label, go to next frame
+                new_searcher._is_next_frame = True
+            else:
+                new_searcher._is_next_frame = False
+                new_searcher._preds.append(token)
             searchers.append(new_searcher)
         return searchers
 
@@ -291,6 +312,7 @@ class BeamSearcher():
         replica = BeamSearcher(self._trans, self._seq)
         replica.log_p = self.log_p
         replica._preds = self._preds[:]
+        replica._is_next_frame = self._is_next_frame
         replica._cur_t_step = self._cur_t_step
         replica._hidden = self._hidden
         replica._decoder_out_cur = self._decoder_out_cur
@@ -299,6 +321,45 @@ class BeamSearcher():
 
     def __str__(self) -> str:
         return "[{}/{}]: {}".format(self._cur_t_step, self._seq.size(0), self._preds)
+
+
+def merge_beams(beamers: Sequence[BeamSearcher], new_beam: BeamSearcher, inplace=True) -> Sequence[BeamSearcher]:
+    """Merge beams for prefix beam search
+
+    Args:
+        beamers (list(BeamSearcher)): merging operation destination.
+        new_beam (BeamSearcher): the new one to be merged
+        inplace (bool, optional): flag to merge in-place or not, default `True`.
+
+    Return:
+        merged_beams (list(BeamSearcher)):
+            if new_beam can be merged into beamers, merged_beams is identical to beamers;
+            if not, `merged_beams=beamers.append(new_beam)`
+    """
+    def _extend():
+        if inplace:
+            beamers.append(new_beam)
+            return beamers
+        else:
+            return [x.replica for x in beamers] + [new_beam.replica]
+
+    for idx, beam in enumerate(beamers):
+        new_hypos = new_beam._preds
+        exist_hypos = beam._preds
+        if len(new_hypos) != len(exist_hypos):
+            continue
+        elif all(new_hypos[i] == exist_hypos[i] for i in range(len(new_hypos))):
+
+            if inplace:
+                out_beams = beamers
+            else:
+                out_beams = [x.replica for x in beamers]
+
+            p1, p2 = beamers[idx].log_p, new_beam.log_p
+            out_beams[idx].log_p = torch.logaddexp(p1, p2)
+            return out_beams
+
+    return _extend()
 
 
 class JointNet(nn.Module):
@@ -410,6 +471,8 @@ if __name__ == "__main__":
 
     parser.add_argument("--seed", type=int, default=0,
                         help="Manual seed.")
+    parser.add_argument("--grad-accum-fold", type=int, default=1,
+                        help="Utilize gradient accumulation for K times. Default: K=1")
 
     parser.add_argument("--resume", type=str, default=None,
                         help="Path to location of checkpoint.")
