@@ -20,20 +20,22 @@ from torch.utils.data import Dataset
 class SpeechDataset(Dataset):
     def __init__(self, h5py_path):
         self.h5py_path = h5py_path
+        self.dataset = None
         hdf5_file = h5py.File(h5py_path, 'r')
-        self.keys = hdf5_file.keys()
-        hdf5_file.close()
+        self.keys = list(hdf5_file.keys())
 
     def __len__(self):
         return len(self.keys)
 
     def __getitem__(self, idx):
-        hdf5_file = h5py.File(self.h5py_path, 'r')
-        dataset = hdf5_file[self.keys[idx]]
-        mat = dataset.value
+        if self.dataset is None:
+            self.dataset = h5py.File(self.h5py_path, 'r')
+
+        dataset = self.dataset[self.keys[idx]]
+        mat = dataset[:]
         label = dataset.attrs['label']
         weight = dataset.attrs['weight']
-        hdf5_file.close()
+
         return torch.tensor(mat, dtype=torch.float), torch.IntTensor(label), torch.tensor(weight, dtype=torch.float)
 
 
@@ -175,6 +177,7 @@ class ScpDataset(Dataset):
     """
     Read data from scp file ranging [idx_beg, idx_end)
     """
+
     def __init__(self, scp_file, idx_beg: int = 0, idx_end: int = -1) -> None:
         super().__init__()
 

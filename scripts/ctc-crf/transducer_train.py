@@ -15,7 +15,6 @@ import numpy as np
 import model as model_zoo
 import dataset as DataSet
 from _specaug import SpecAug
-from _layers import LSTMPredictNet
 from collections import OrderedDict
 from typing import Union, Tuple, Sequence
 from warp_rnnt import rnnt_loss as RNNTLoss
@@ -247,6 +246,60 @@ class Transducer(nn.Module):
         #################################
 
         return loss
+
+
+class LSTMPredictNet(nn.Module):
+    """
+    RNN Decoder of Transducer
+    Args:
+        num_classes (int): number of classes, excluding the <blk>
+        hdim (int): hidden state dimension of decoders
+        odim (int): output dimension of decoder
+        *rnn_args/**rnn_kwargs : any arguments that can be passed as 
+            nn.LSTM(*rnn_args, **rnn_kwargs)
+    Inputs: inputs, input_lengths, hidden_states
+        inputs (torch.LongTensor): A target sequence passed to decoders. `IntTensor` of size ``(batch, seq_length)``
+        input_lengths (torch.LongTensor): The length of input tensor. ``(batch)``
+        hidden_states (torch.FloatTensor): A previous hidden state of decoders. `FloatTensor` of size ``(batch, seq_length, dimension)``
+    Returns:
+        (Tensor, Tensor):
+        * decoder_outputs (torch.FloatTensor): A output sequence of decoders. `FloatTensor` of size
+            ``(batch, seq_length, dimension)``
+        * hidden_states (torch.FloatTensor): A hidden state of decoders. `FloatTensor` of size
+            ``(batch, seq_length, dimension)``
+    Reference:
+        A Graves: Sequence Transduction with Recurrent Neural Networks
+        https://arxiv.org/abs/1211.3711.pdf
+    """
+
+    def __init__(self, num_classes: int, hdim: int, odim: int, *rnn_args, **rnn_kwargs):
+        super().__init__()
+        self.embedding = nn.Embedding(num_classes, hdim)
+
+        rnn_kwargs['batch_first'] = True
+        self.rnn = nn.LSTM(hdim, hdim, *rnn_args, **rnn_kwargs)
+        if 'bidirectional' in rnn_kwargs and rnn_kwargs['bidirectional']:
+            self.out_proj = nn.Linear(hdim*2, odim)
+        else:
+            self.out_proj = nn.Linear(hdim, odim)
+
+    def forward(self, input: torch.LongTensor, hidden: torch.FloatTensor = None) -> Tuple[torch.FloatTensor, Union[torch.FloatTensor, None]]:
+
+        embedded = self.embedding(input)
+        self.rnn.flatten_parameters()
+        '''
+        since the batch is sorted by time_steps length rather the target length
+        ...so here we don't use the pack_padded_sequence()
+        '''
+        # packed_input = pack_padded_sequence(
+        #     embedded, input_lengths.to("cpu"), batch_first=True)
+        # packed_output, hidden_o = self.rnn(packed_input, hidden)
+        # rnn_out, olens = pad_packed_sequence(packed_output, batch_first=True)
+        rnn_out, hidden_o = self.rnn(embedded, hidden)
+
+        out = self.out_proj(rnn_out)
+
+        return out, hidden_o
 
 
 class BeamSearcher():

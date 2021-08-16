@@ -223,6 +223,8 @@ if __name__ == "__main__":
                         help="Location of dev data. Default: <data>/[pickle|hdf5]/cv.[pickle|hdf5]")
     parser.add_argument("--dir", type=str, default=None, metavar='PATH',
                         help="Directory to save the log and model files.")
+    parser.add_argument("--grad-accum-fold", type=int, default=1,
+                        help="Utilize gradient accumulation for K times. Default: K=1")
 
     parser.add_argument('-p', '--print-freq', default=10, type=int,
                         metavar='N', help='print frequency (default: 10)')

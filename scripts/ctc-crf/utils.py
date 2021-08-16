@@ -256,7 +256,7 @@ class Manager(object):
             self.model.train()
             if self.rank == 0 and not self.DEBUG:
                 self.log_export(args.ckptpath)
-                plot_monitor(args.dir.split('/')[-1])
+                plot_monitor(args.ckptpath)
 
             if state == 2:
                 print("Break: GPU[%d]" % self.rank)
