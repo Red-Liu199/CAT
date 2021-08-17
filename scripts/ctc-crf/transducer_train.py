@@ -104,7 +104,7 @@ def main_worker(gpu, ngpus_per_node, args):
 
     if args.rank == 0:
         print("> Model built.")
-        print("Model size:{:.2f}M".format(
+        print("  Model size:{:.2f}M".format(
             utils.count_parameters(manager.model)/1e6))
 
         utils.gen_readme(args.dir+'/readme.md',

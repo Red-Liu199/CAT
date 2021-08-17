@@ -231,7 +231,7 @@ class Manager(object):
         self.DEBUG = args.debug
 
         if args.resume is not None:
-            print(f"Resuming from: {args.resume}")
+            print(f"[GPU {args.rank}]: Resuming from: {args.resume}")
             loc = f'cuda:{args.gpu}'
             checkpoint = torch.load(args.resume, map_location=loc)
             self.load(checkpoint)
@@ -251,7 +251,10 @@ class Manager(object):
             if isinstance(metrics, tuple):
                 # defaultly use the first one to evaluate
                 metrics = metrics[0]
-            state = self.scheduler.step(epoch, metrics)
+            state, info = self.scheduler.step(epoch, metrics)
+
+            if args.gpu == 0:
+                print(info)
 
             self.model.train()
             if self.rank == 0 and not self.DEBUG:
@@ -259,7 +262,7 @@ class Manager(object):
                 plot_monitor(args.ckptpath)
 
             if state == 2:
-                print("Break: GPU[%d]" % self.rank)
+                print("Terminated: GPU[%d]" % self.rank)
                 dist.barrier()
                 break
             elif self.rank != 0 or self.DEBUG:

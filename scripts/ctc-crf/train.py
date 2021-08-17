@@ -56,7 +56,8 @@ def main_worker(gpu, ngpus_per_node, args):
 
     args.batch_size = args.batch_size // ngpus_per_node
 
-    print("> Data prepare")
+    if args.gpu == 0:
+        print("> Data prepare")
     if args.h5py:
         data_format = "hdf5"
         utils.highlight_msg("H5py reading might cause error with Multi-GPUs.")
@@ -76,7 +77,8 @@ def main_worker(gpu, ngpus_per_node, args):
 
     tr_set = Dataset(args.trset)
     test_set = Dataset(args.devset)
-    print("Data prepared.")
+    if args.gpu == 0:
+        print("  Data prepared.")
 
     train_sampler = DistributedSampler(tr_set)
     test_sampler = DistributedSampler(test_set)
@@ -103,7 +105,7 @@ def main_worker(gpu, ngpus_per_node, args):
 
     if args.rank == 0:
         print("> Model built.")
-        print("Model size:{:.2f}M".format(
+        print("  Model size:{:.2f}M".format(
             utils.count_parameters(manager.model)/1e6))
 
         utils.gen_readme(args.dir+'/readme.md',

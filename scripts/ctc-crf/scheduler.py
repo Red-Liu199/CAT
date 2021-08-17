@@ -10,6 +10,7 @@ import math
 import torch
 import numpy as np
 from collections import OrderedDict
+from typing import Tuple
 
 
 def SetupOptim(type_optim: str, paramlist, **kwargs) -> torch.optim.Optimizer:
@@ -59,21 +60,23 @@ class Scheduler(object):
             else:
                 setattr(self, name, ckpt[name])
 
-    def impl_step(self, metric):
+    def impl_step(self, metric) -> Tuple[int, str]:
         raise NotImplementedError
 
-    def step(self, global_epoch, metric):
+    def step(self, global_epoch, metric) -> Tuple[int, str]:
         """Optimizer step
 
         Args:
             global_epoch (int): the global epoch (begins from 1)
             metric (obj): the metric for evaluate the performance
 
-        Returns:
-            int: choice of `[0, 1, 2]`, meaning
+        Returns: (state, info)
+            state (int): choice of `[0, 1, 2]`, meaning
                 0: continue training by the prior condition
                 1: continue training for metric is improving
                 2: stop training.
+            
+            info (str): information
         """
         if self.best_metric is None:
             self.best_metric = metric
@@ -102,6 +105,7 @@ class SchedulerEarlyStop(Scheduler):
     def impl_step(self, metric):
 
         state = 0
+        info = ''
         if self.epoch_cur <= self.epoch_min:
             if not (self._reverse_ ^ (metric < self.best_metric)):
                 self.best_metric = metric
@@ -114,21 +118,17 @@ class SchedulerEarlyStop(Scheduler):
             self.count_worse += 1
             if self.count_worse >= self.num_ahead:
                 lr = self.lr_cur
-                print("Validation metrics doesn't improve\nDecay the learning rate from {:.2e} to {:.2e}".format(
-                    lr, lr * self.gamma))
                 lr *= self.gamma
                 if lr < self.lr_stop:
-                    print("lr: {:.2e} < lr_stop: {:.2e}, terminate training.".format(
-                        lr, self.lr_stop))
                     state = 2
                 else:
                     self._adjust_lr_(lr)
                     self.count_worse = 0
 
-        print("Epoch: [{}@{}] | best={:.2f} | current={:.2f} | worse_count={} | lr={:.2e}".format(
-            self.epoch_cur, self.epoch_min, self.best_metric, metric, self.count_worse, self.lr_cur))
+        info = "Epoch: [{}@{}] | best={:.2f} | current={:.2f} | worse_count={} | lr={:.2e}".format(
+            self.epoch_cur, self.epoch_min, self.best_metric, metric, self.count_worse, self.lr_cur)
 
-        return state
+        return state, info
 
 
 class SchedulerFixedStop(Scheduler):
@@ -154,10 +154,10 @@ class SchedulerFixedStop(Scheduler):
 
         self.custom_update()
 
-        print("Epoch: [{}/{}] | best={:.2f} | current={:.2f} | lr={:.2e}".format(
-            self.epoch_cur, self.epoch_max, self.best_metric, metric, self.lr_cur))
+        info = "Epoch: [{}/{}] | best={:.2f} | current={:.2f} | lr={:.2e}".format(
+            self.epoch_cur, self.epoch_max, self.best_metric, metric, self.lr_cur)
 
-        return state
+        return state, info
 
 
 class SchedulerWarmupMileStone(SchedulerEarlyStop):
@@ -205,9 +205,9 @@ class SchedulerWarmupMileStone(SchedulerEarlyStop):
                 state = 1
             cur_lr = self.lr_cur
             self._adjust_lr_(cur_lr+self.lr_addon)
-            print("Epoch: [{}/{}] | best={:.2f} | current={:.2f} | lr={:.2e}".format(
-                self.epoch_cur, self.epoch_warmup, self.best_metric, metric, self.lr_cur))
-            return state
+            info = "Epoch: [{}/{}] | best={:.2f} | current={:.2f} | lr={:.2e}".format(
+                self.epoch_cur, self.epoch_warmup, self.best_metric, metric, self.lr_cur)
+            return state, info
         else:
             return super().impl_step(metric)
 
@@ -284,15 +284,14 @@ class SchedulerTransformerEarlyStop(SchedulerEarlyStop):
             if not (self._reverse_ ^ (metric < self.best_metric)):
                 self.best_metric = metric
 
-            print("Epoch: [{}] | best={:.2f} | current={:.2f} | lr={:.2e}".format(
-                self.epoch_cur, self.best_metric, metric, self.lr_cur))
-            return 0
+            return 0, "Epoch: [{}] | best={:.2f} | current={:.2f} | lr={:.2e}".format(
+                self.epoch_cur, self.best_metric, metric, self.lr_cur)
         else:
             lr0 = self.lr_cur
-            state = super().impl_step(metric)
+            states = super().impl_step(metric)
             lr1 = self.lr_cur
             self.lr_init *= lr1 / lr0
-            return state
+            return states
 
 
 class SchedulerIterAnnealing(SchedulerFixedStop):
