@@ -14,6 +14,7 @@ from collections import OrderedDict
 from monitor import plot_monitor
 from ctc_crf import CTC_CRF_LOSS as CRFLoss
 from ctc_crf import WARP_CTC_LOSS as CTCLoss
+from _specaug import SpecAug
 
 
 import torch
@@ -223,6 +224,15 @@ class Manager(object):
 
         self.model = func_buil_model(args, configures)
 
+        if 'specaug_config' not in configures:
+            specaug = None
+            if args.rank == 0:
+                highlight_msg("Disable SpecAug.")
+        else:
+            specaug = SpecAug(**configures['specaug_config'])
+            specaug = specaug.to(f'cuda:{args.gpu}')
+
+        self.specaug = specaug
         self.scheduler = GetScheduler(
             configures['scheduler'], self.model.parameters())
 
@@ -346,6 +356,9 @@ def train(trainloader, epoch: int, args, manager: Manager):
         logits, labels, input_lengths, label_lengths = logits.cuda(
             args.gpu, non_blocking=True), labels, input_lengths, label_lengths
 
+        if manager.specaug is not None:
+            logits, input_lengths = manager.specaug(logits, input_lengths)
+
         data_time.update(time.time() - end)
 
         loss = model(logits, labels, input_lengths, label_lengths)
@@ -362,8 +375,8 @@ def train(trainloader, epoch: int, args, manager: Manager):
 
         # update every fold times and won't drop the last batch
         if fold == 1 or (i+1) % fold == 0 or (i+1) == len(trainloader):
-            # for Adam optimizer, even though fold > 1, it's no need to change lr
-            # if using SGD, use init_lr_fold = init_lr / fold
+            # for Adam optimizer, even though fold > 1, it's no need to normalize grad
+            # if using SGD, let grad = grad_accum / fold as following or use a new_lr = init_lr / fold
             # if fold > 1:
             #     for param in model.parameters():
             #         if param.requires_grad:

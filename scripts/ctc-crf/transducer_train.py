@@ -114,12 +114,11 @@ def main_worker(gpu, ngpus_per_node, args):
 
 
 class Transducer(nn.Module):
-    def __init__(self, encoder: nn.Module = None, decoder: nn.Module = None, jointnet: nn.Module = None, specaug: nn.Module = None):
+    def __init__(self, encoder: nn.Module = None, decoder: nn.Module = None, jointnet: nn.Module = None):
         super().__init__()
         self.encoder = encoder
         self.decoder = decoder
         self.joint = jointnet
-        self.specaug = specaug
 
     @torch.no_grad()
     def decode(self, inputs: torch.FloatTensor, input_lengths: torch.LongTensor, mode='beam', beam_size: int = 3) -> torch.LongTensor:
@@ -291,20 +290,14 @@ class JointNet(nn.Module):
 
 
 def build_model(args, configuration, dist=True) -> nn.Module:
-    def _build_encoder(config) -> Tuple[nn.Module, Union[nn.Module, None]]:
+    def _build_encoder(config) -> nn.Module:
         NetKwargs = config['kwargs']
         _encoder = getattr(model_zoo, config['type'])(**NetKwargs)
 
         # FIXME: this is a hack
         _encoder.classifier = nn.Identity()
 
-        if 'specaug_config' not in config:
-            specaug = None
-            if args.rank == 0:
-                utils.highlight_msg("Disable SpecAug.")
-        else:
-            specaug = SpecAug(**config['specaug_config'])
-        return _encoder, specaug
+        return _encoder
 
     def _build_decoder(config) -> nn.Module:
         NetKwargs = config['kwargs']
@@ -321,12 +314,12 @@ def build_model(args, configuration, dist=True) -> nn.Module:
 
     assert 'encoder' in configuration and 'decoder' in configuration and 'joint' in configuration
 
-    encoder, specaug = _build_encoder(configuration['encoder'])
+    encoder = _build_encoder(configuration['encoder'])
     decoder = _build_decoder(configuration['decoder'])
     jointnet = _build_jointnet(configuration['joint'])
 
     model = Transducer(encoder=encoder, decoder=decoder,
-                       jointnet=jointnet, specaug=specaug)
+                       jointnet=jointnet)
     if not dist:
         return model
 
@@ -337,15 +330,7 @@ def build_model(args, configuration, dist=True) -> nn.Module:
 
     if hasattr(args, "pretrained_encoder") and args.pretrained_encoder is not None:
 
-        ########## DEBUG CODE ###########
-        # for name, param in model.named_parameters():
-        #     if 'encoder' in name:
-        #         print(param.data.view(-1)[:10])
-        #         break
-        #################################
-
         assert os.path.isfile(args.pretrained_encoder)
-
         checkpoint = torch.load(args.pretrained_encoder,
                                 map_location=f'cuda:{args.gpu}')
 
@@ -355,13 +340,7 @@ def build_model(args, configuration, dist=True) -> nn.Module:
             new_state_dict[k.replace('infer', 'encoder')] = v
         state_dict = new_state_dict
         model.load_state_dict(state_dict, strict=False)
-        ########## DEBUG CODE ###########
-        # for name, param in model.named_parameters():
-        #     if 'encoder' in name:
-        #         print(param.data.view(-1)[:10])
-        #         break
-        # exit(1)
-        #################################
+
     return model
 
 
