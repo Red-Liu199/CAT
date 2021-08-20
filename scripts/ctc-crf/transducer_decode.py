@@ -76,12 +76,7 @@ def main_worker(gpu, ngpus_per_node, args, len_dataset: int = -1):
     with open(args.config, 'r') as fi:
         configures = json.load(fi)
 
-    model = build_model(args, configures, dist=False)
-
-    torch.cuda.set_device(args.gpu)
-    model.cuda(args.gpu)
-    model = torch.nn.parallel.DistributedDataParallel(
-        model, device_ids=[args.gpu])
+    model = build_model(args, configures)
 
     if args.resume is not None:
         model = load_checkpoint(model, args.resume, loc=f'cuda:{args.gpu}')
@@ -158,7 +153,7 @@ if __name__ == "__main__":
     parser.add_argument("--config", type=str, default=None, metavar='PATH',
                         help="Path to configuration file of backbone.")
     parser.add_argument("--mode", type=str,
-                        choices=['greedy', 'beam', 'prefix'], default='beam')
+                        choices=['greedy', 'beam'], default='beam')
     parser.add_argument("--beam_size", type=int, default=3)
     parser.add_argument("--spmodel", type=str, default='',
                         help="SPM model location.")

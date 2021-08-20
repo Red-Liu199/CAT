@@ -18,6 +18,7 @@ from _specaug import SpecAug
 from collections import OrderedDict
 from typing import Union, Tuple, Sequence
 from warp_rnnt import rnnt_loss as RNNTLoss
+from beam_search_base import BeamSearchRNNTransducer
 
 import torch
 import torch.nn as nn
@@ -25,8 +26,6 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
-
-import ctc_crf_base
 
 
 def main(args):
@@ -123,7 +122,7 @@ class Transducer(nn.Module):
         self.specaug = specaug
 
     @torch.no_grad()
-    def decode(self, inputs: torch.FloatTensor, input_lengths: torch.LongTensor, mode='greedy', beam_size: int = 0) -> torch.LongTensor:
+    def decode(self, inputs: torch.FloatTensor, input_lengths: torch.LongTensor, mode='beam', beam_size: int = 3) -> torch.LongTensor:
         encoder_output, o_lens = self.encoder(inputs, input_lengths)
 
         if mode == 'greedy':
@@ -150,74 +149,11 @@ class Transducer(nn.Module):
 
             return utils.pad_list(outputs).to(torch.long)
         elif mode == 'beam':
-            assert beam_size > 0
-            return self.beam_search_decode(encoder_output, o_lens, beam_size, is_prefix=False)
-        elif mode == 'prefix':
-            assert beam_size > 0
-            return self.beam_search_decode(encoder_output, o_lens, beam_size, is_prefix=True)
+            assert beam_size > 1
+            searcher = BeamSearchRNNTransducer(self, beam_size, blank_id=0)
+            return searcher.forward(encoder_output, o_lens)
         else:
             raise ValueError("Unknown decode mode: {}".format(mode))
-
-    def beam_search_decode(self, encoder_output: torch.FloatTensor, lengths: torch.LongTensor, beam_size: int = 5, is_prefix: bool = True) -> torch.LongTensor:
-
-        outputs = []
-        for seq, T in zip(encoder_output, lengths):
-            ongoing_beams = [BeamSearcher(self, seq[:T])]
-
-            ########## DEBUG CODE ###########
-            # import sentencepiece as spm
-            # sp = spm.SentencePieceProcessor(model_file='data/spm/spm.model')
-            #################################
-
-            for t in range(T):
-                log_ps = []
-                # count_stop_beams = 0
-                for i, beam in enumerate(ongoing_beams):
-                    hypo = beam.search_forward().view(-1).tolist()
-                    log_ps += [(_log_p, i, tok)
-                               for tok, _log_p in enumerate(hypo)]
-                del beam
-
-                new_beams = []
-                while True:
-                    idx_log, (max_log_p, idx_beam, tok) = max(
-                        enumerate(log_ps), key=lambda item: item[1][0])
-                    del log_ps[idx_log]
-                    beam = ongoing_beams[idx_beam].slice_beam(tok)[0]
-                    if tok == 0:    # next frame
-                        if is_prefix:   # prefix beam search
-                            new_beams = merge_beams(new_beams, beam)
-                        else:
-                            new_beams.append(beam)
-                    else:           # next label
-                        ongoing_beams.append(beam)
-                        hypo = beam.search_forward().view(-1).tolist()
-                        log_ps += [(_log_p, len(ongoing_beams)-1, tok)
-                                   for tok, _log_p in enumerate(hypo)]
-                    if len(new_beams) >= beam_size:
-                        ongoing_beams = new_beams
-                        del new_beams
-                        break
-                    del beam
-
-                ########## DEBUG CODE ###########
-                # print("t=", t)
-                # for beam in ongoing_beams:
-                #     print(sp.decode(beam._preds))
-                #     # print(beam._preds)
-
-                # print("")
-                #################################
-
-            best_beam = max(ongoing_beams, key=lambda item: item.log_p)
-            outputs.append(torch.tensor(
-                best_beam._preds, device=encoder_output.device, dtype=torch.long))
-
-            ########## DEBUG CODE ###########
-            # exit(1)
-            #################################
-
-        return utils.pad_list(outputs).to(torch.long)
 
     def forward(self, inputs: torch.FloatTensor, targets: torch.LongTensor, input_lengths: torch.LongTensor, target_lengths: torch.LongTensor) -> torch.FloatTensor:
 
@@ -300,119 +236,6 @@ class LSTMPredictNet(nn.Module):
         out = self.out_proj(rnn_out)
 
         return out, hidden_o
-
-
-class BeamSearcher():
-    def __init__(self, model: Transducer, seq: torch.FloatTensor) -> None:
-        self._trans = model
-        self._seq = seq
-
-        self.log_p = 0.
-        self._preds = []
-        self._is_next_frame = False
-
-        self._cur_t_step = 0
-        self._hidden = None
-        self._decoder_out_cur = None
-        self._hypothesis_cur = None
-
-    def search_forward(self) -> torch.FloatTensor:
-        if self._cur_t_step >= self._seq.size(0):
-            return self.log_p  # .unsqueeze(0)
-
-        if len(self._preds) == 0 and self._is_next_frame is False:   # init state
-            bos_token = torch.tensor(
-                [[0]], device=self._seq.device, dtype=torch.long)
-            decoder_out, hidden_o = self._trans.decoder(bos_token)
-        elif self._is_next_frame:  # if last token is <blk>, go to next frame
-            self._cur_t_step += 1
-            if self._cur_t_step >= self._seq.size(0):
-                return self.log_p  # .unsqueeze(0)
-            decoder_out, hidden_o = self._decoder_out_cur, self._hidden
-        else:       # if last token isn't <blk>, frame stops
-            l_token = torch.tensor([[self._preds[-1]]],
-                                   device=self._seq.device, dtype=torch.long)
-            decoder_out, hidden_o = self._trans.decoder(l_token, self._hidden)
-
-        frame = self._seq[self._cur_t_step]
-        hypothesis = self._trans.joint(frame, decoder_out.view(-1))
-        self._hidden = hidden_o
-        self._decoder_out_cur = decoder_out
-        self._hypothesis_cur = hypothesis
-
-        return self.log_p + hypothesis
-
-    def slice_beam(self, tokens: Union[Sequence[int], int]):
-        if self._cur_t_step >= self._seq.size(0):
-            return [self]
-
-        if isinstance(tokens, int):
-            tokens = [tokens]
-
-        searchers = []
-        for token in tokens:
-            new_searcher = self.replica()
-            new_searcher.log_p += self._hypothesis_cur[token]
-            if token == 0:      # for <blk> label, go to next frame
-                new_searcher._is_next_frame = True
-            else:
-                new_searcher._is_next_frame = False
-                new_searcher._preds.append(token)
-            searchers.append(new_searcher)
-        return searchers
-
-    def replica(self):
-        replica = BeamSearcher(self._trans, self._seq)
-        replica.log_p = self.log_p
-        replica._preds = self._preds[:]
-        replica._is_next_frame = self._is_next_frame
-        replica._cur_t_step = self._cur_t_step
-        replica._hidden = self._hidden
-        replica._decoder_out_cur = self._decoder_out_cur
-        replica._hypothesis_cur = self._hypothesis_cur
-        return replica
-
-    def __str__(self) -> str:
-        return "[{}/{}]: {}".format(self._cur_t_step, self._seq.size(0), self._preds)
-
-
-def merge_beams(beamers: Sequence[BeamSearcher], new_beam: BeamSearcher, inplace=True) -> Sequence[BeamSearcher]:
-    """Merge beams for prefix beam search
-
-    Args:
-        beamers (list(BeamSearcher)): merging operation destination.
-        new_beam (BeamSearcher): the new one to be merged
-        inplace (bool, optional): flag to merge in-place or not, default `True`.
-
-    Return:
-        merged_beams (list(BeamSearcher)):
-            if new_beam can be merged into beamers, merged_beams is identical to beamers;
-            if not, `merged_beams=beamers.append(new_beam)`
-    """
-    def _extend():
-        if inplace:
-            beamers.append(new_beam)
-            return beamers
-        else:
-            return [x.replica for x in beamers] + [new_beam.replica]
-
-    for idx, beam in enumerate(beamers):
-        new_hypos = new_beam._preds
-        exist_hypos = beam._preds
-        if len(new_hypos) != len(exist_hypos):
-            continue
-        elif all(new_hypos[i] == exist_hypos[i] for i in range(len(new_hypos))):
-
-            if inplace:
-                out_beams = beamers
-            else:
-                out_beams = [x.replica for x in beamers]
-
-            p1, p2 = beamers[idx].log_p, new_beam.log_p
-            out_beams[idx].log_p = torch.logaddexp(p1, p2)
-            return out_beams
-
-    return _extend()
 
 
 class JointNet(nn.Module):
@@ -511,6 +334,34 @@ def build_model(args, configuration, dist=True) -> nn.Module:
     model.cuda(args.gpu)
     model = torch.nn.parallel.DistributedDataParallel(
         model, device_ids=[args.gpu])
+
+    if hasattr(args, "pretrained_encoder") and args.pretrained_encoder is not None:
+
+        ########## DEBUG CODE ###########
+        # for name, param in model.named_parameters():
+        #     if 'encoder' in name:
+        #         print(param.data.view(-1)[:10])
+        #         break
+        #################################
+
+        assert os.path.isfile(args.pretrained_encoder)
+
+        checkpoint = torch.load(args.pretrained_encoder,
+                                map_location=f'cuda:{args.gpu}')
+
+        new_state_dict = OrderedDict()
+        for k, v in checkpoint['model'].items():
+            # replace the 'infer' with 'encoder'
+            new_state_dict[k.replace('infer', 'encoder')] = v
+        state_dict = new_state_dict
+        model.load_state_dict(state_dict, strict=False)
+        ########## DEBUG CODE ###########
+        # for name, param in model.named_parameters():
+        #     if 'encoder' in name:
+        #         print(param.data.view(-1)[:10])
+        #         break
+        # exit(1)
+        #################################
     return model
 
 
@@ -526,6 +377,8 @@ if __name__ == "__main__":
                         help="Manual seed.")
     parser.add_argument("--grad-accum-fold", type=int, default=1,
                         help="Utilize gradient accumulation for K times. Default: K=1")
+    parser.add_argument("--pretrained-encoder", type=str, default=None,
+                        help="Path to pretrained encoder model")
 
     parser.add_argument("--resume", type=str, default=None,
                         help="Path to location of checkpoint.")

@@ -98,38 +98,4 @@ python3 ctc-crf/transducer_train.py --seed=0  \
     --devset=$spmdata/cv.pickle         \
     || exit 1
 
-fi
-echo "Decoding..."
-mode='prefix'
-beam_size=10
-dec_dir=$dir/decode-${mode}-${beam_size}
-mkdir -p $dec_dir
-for set in eval92 dev93; do
-    mkdir -p $dec_dir/$set
-    python3 ctc-crf/transducer_decode.py    \
-        --resume=$dir/ckpt/bestckpt.pt      \
-        --config=$dir/config.json           \
-        --input_scp=data/all_ark/$set.scp   \
-        --output_dir=$dec_dir/$set          \
-        --spmodel=$spmdata/spm.model        \
-        --mode=$mode                        \
-        --beam_size=$beam_size              \
-        || exit 1
-
-    if [ -f $dec_dir/$set/decode.0.tmp ]; then
-        cat $dec_dir/$set/decode.?.tmp | sort -k 1 > $dec_dir/$set/decode.txt
-        rm $dec_dir/$set/*.tmp
-    fi
-done
-
-echo "" > $dec_dir/result
-for set in eval92 dev93; do
-    if [ -f $dec_dir/$set/decode.txt ]; then
-        $KALDI_ROOT/src/bin/compute-wer --text --mode=present ark:data/test_$set/text ark:$dec_dir/$set/decode.txt >> $dec_dir/result
-        echo "" >> $dec_dir/result
-    else
-        echo "No decoded text found."
-    fi
-done
-
-cat $dec_dir/result
+./decode.sh $dir
