@@ -356,7 +356,9 @@ def build_model(args, configuration: dict, dist: bool = True) -> Union[nn.Module
         new_state_dict = OrderedDict()
         for k, v in checkpoint['model'].items():
             # replace the 'infer' with 'encoder'
+            # FIXME: 'infer' is deprecated, move to 'am' in the future
             new_state_dict[k.replace('infer', 'encoder')] = v
+            # new_state_dict[k.replace('am', 'encoder')] = v
         state_dict = new_state_dict
         model.load_state_dict(state_dict, strict=False)
 

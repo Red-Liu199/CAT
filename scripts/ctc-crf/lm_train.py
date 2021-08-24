@@ -12,13 +12,9 @@ import utils
 import os
 import argparse
 import numpy as np
-import model as model_zoo
-import dataset as DataSet
-from _specaug import SpecAug
+from dataset import sortedPadCollateLM, CorpusDataset
 from collections import OrderedDict
-from typing import Union, Tuple, Sequence
-from warp_rnnt import rnnt_loss as RNNTLoss
-from beam_search_base import BeamSearchRNNTransducer
+from typing import Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -28,14 +24,15 @@ from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
 
 
-def main(args):
+def main(args: argparse.Namespace):
     if not torch.cuda.is_available():
         utils.highlight_msg("CPU only training is unsupported.")
         return None
 
-    os.makedirs(args.dir+'/ckpt', exist_ok=True)
+    ckptpath = os.path.join(args.dir, 'ckpt')
+    os.makedirs(ckptpath, exist_ok=True)
     setattr(args, 'iscrf', False)
-    setattr(args, 'ckptpath', args.dir+'/ckpt')
+    setattr(args, 'ckptpath', ckptpath)
     if os.listdir(args.ckptpath) != [] and not args.debug and args.resume is None:
         raise FileExistsError(
             f"{args.ckptpath} is not empty! Refuse to run the experiment.")
@@ -46,7 +43,7 @@ def main(args):
     mp.spawn(main_worker, nprocs=ngpus_per_node, args=(ngpus_per_node, args))
 
 
-def main_worker(gpu, ngpus_per_node, args):
+def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
     args.gpu = gpu
 
     args.rank = args.rank * ngpus_per_node + gpu
@@ -58,25 +55,8 @@ def main_worker(gpu, ngpus_per_node, args):
 
     args.batch_size = args.batch_size // ngpus_per_node
 
-    if args.h5py:
-        data_format = "hdf5"
-        utils.highlight_msg("H5py reading might cause error with Multi-GPUs.")
-        Dataset = DataSet.SpeechDataset
-        if args.trset is None or args.devset is None:
-            raise FileNotFoundError(
-                "With '--hdf5' option, you must specify data location with '--trset' and '--devset'.")
-    else:
-        data_format = "pickle"
-        Dataset = DataSet.SpeechDatasetPickle
-
-    if args.trset is None:
-        args.trset = os.path.join(args.data, f'{data_format}/tr.{data_format}')
-    if args.devset is None:
-        args.devset = os.path.join(
-            args.data, f'{data_format}/cv.{data_format}')
-
-    tr_set = Dataset(args.trset)
-    test_set = Dataset(args.devset)
+    test_set = CorpusDataset(args.devset)
+    tr_set = CorpusDataset(args.trset)
 
     train_sampler = DistributedSampler(tr_set)
     test_sampler = DistributedSampler(test_set)
@@ -85,18 +65,20 @@ def main_worker(gpu, ngpus_per_node, args):
     trainloader = DataLoader(
         tr_set, batch_size=args.batch_size, shuffle=(train_sampler is None),
         num_workers=args.workers, pin_memory=True,
-        sampler=train_sampler, collate_fn=DataSet.sortedPadCollateTransducer())
+        sampler=train_sampler, collate_fn=sortedPadCollateLM())
 
     testloader = DataLoader(
         test_set, batch_size=args.batch_size, shuffle=(test_sampler is None),
         num_workers=args.workers, pin_memory=True,
-        sampler=test_sampler, collate_fn=DataSet.sortedPadCollateTransducer())
+        sampler=test_sampler, collate_fn=sortedPadCollateLM())
 
     logger = OrderedDict({
         'log_train': ['epoch,loss,loss_real,net_lr,time'],
         'log_eval': ['loss_real,time']
     })
     manager = utils.Manager(logger, build_model, args)
+    # lm training does not need specaug
+    manager.specaug = None
 
     # get GPU info
     gpu_info = utils.gather_all_gpu_info(args.gpu)
@@ -113,22 +95,22 @@ def main_worker(gpu, ngpus_per_node, args):
     manager.run(train_sampler, trainloader, testloader, args)
 
 
-class Transducer(nn.Module):
+class LMTrainer(nn.Module):
     def __init__(self, lm: nn.Module = None):
         super().__init__()
         self.lm = lm    # type:nn.Module
         self.criterion = nn.CrossEntropyLoss()
 
     def forward(self, inputs: torch.FloatTensor, targets: torch.LongTensor, input_lengths: torch.LongTensor, target_lengths: torch.LongTensor) -> torch.FloatTensor:
-        
+
         # preds: (N, S, C)
-        preds, _ = self.lm(inputs, input_lengths)
+        preds, _ = self.lm(inputs)
 
         # squeeze preds by concat all sentences
         logits = []
         for i, l in enumerate(input_lengths):
             logits.append(preds[i, :l])
-        
+
         # logits: (\sum{S_i}, C)
         logits = torch.cat(logits, dim=0)
         # targets: (\sum{S_i})
@@ -198,36 +180,17 @@ class LSTMPredictNet(nn.Module):
 
 
 def build_model(args, configuration, dist=True) -> nn.Module:
-    def _build_encoder(config) -> nn.Module:
-        NetKwargs = config['kwargs']
-        _encoder = getattr(model_zoo, config['type'])(**NetKwargs)
-
-        # FIXME: this is a hack
-        _encoder.classifier = nn.Identity()
-
-        return _encoder
-
     def _build_decoder(config) -> nn.Module:
         NetKwargs = config['kwargs']
         # FIXME: flexible decoder network like encoder.
         return LSTMPredictNet(**NetKwargs)
 
-    def _build_jointnet(config) -> nn.Module:
-        """
-            The joint network accept the concatence of outputs of the 
-            encoder and decoder. So the input dimensions MUST match that.
-        """
-        NetKwargs = config['kwargs']
-        return JointNet(**NetKwargs)
+    assert 'decoder' in configuration
 
-    assert 'encoder' in configuration and 'decoder' in configuration and 'joint' in configuration
-
-    encoder = _build_encoder(configuration['encoder'])
     decoder = _build_decoder(configuration['decoder'])
-    jointnet = _build_jointnet(configuration['joint'])
 
-    model = Transducer(encoder=encoder, decoder=decoder,
-                       jointnet=jointnet)
+    model = LMTrainer(decoder)
+
     if not dist:
         return model
 
@@ -235,19 +198,6 @@ def build_model(args, configuration, dist=True) -> nn.Module:
     model.cuda(args.gpu)
     model = torch.nn.parallel.DistributedDataParallel(
         model, device_ids=[args.gpu])
-
-    if hasattr(args, "pretrained_encoder") and args.pretrained_encoder is not None:
-
-        assert os.path.isfile(args.pretrained_encoder)
-        checkpoint = torch.load(args.pretrained_encoder,
-                                map_location=f'cuda:{args.gpu}')
-
-        new_state_dict = OrderedDict()
-        for k, v in checkpoint['model'].items():
-            # replace the 'infer' with 'encoder'
-            new_state_dict[k.replace('infer', 'encoder')] = v
-        state_dict = new_state_dict
-        model.load_state_dict(state_dict, strict=False)
 
     return model
 
@@ -264,19 +214,12 @@ if __name__ == "__main__":
                         help="Manual seed.")
     parser.add_argument("--grad-accum-fold", type=int, default=1,
                         help="Utilize gradient accumulation for K times. Default: K=1")
-    parser.add_argument("--pretrained-encoder", type=str, default=None,
-                        help="Path to pretrained encoder model")
 
     parser.add_argument("--resume", type=str, default=None,
                         help="Path to location of checkpoint.")
 
-    parser.add_argument("--decode", action="store_true",
-                        help="Configure to debug settings, would overwrite most of the options.")
-
     parser.add_argument("--debug", action="store_true",
                         help="Configure to debug settings, would overwrite most of the options.")
-    parser.add_argument("--h5py", action="store_true",
-                        help="Load data with H5py, defaultly use pickle (recommended).")
 
     parser.add_argument("--config", type=str, default=None, metavar='PATH',
                         help="Path to configuration file of training procedure.")

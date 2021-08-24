@@ -11,6 +11,7 @@ import utils
 import pickle
 import numpy as np
 from kaldiio import ReadHelper
+from tqdm import tqdm
 from typing import Union, Tuple, Sequence
 
 import torch
@@ -60,6 +61,28 @@ class SpeechDatasetMem(Dataset):
 
     def __getitem__(self, idx):
         return self.data_batch[idx]
+
+
+class CorpusDataset(Dataset):
+    def __init__(self, pickle_path: str) -> None:
+        super().__init__()
+        assert os.path.isfile(pickle_path)
+
+        self.dataset = None
+        with open(pickle_path, 'rb') as fi:
+            self._pathbin = pickle.load(fi)
+            self._seeks = pickle.load(fi)
+
+    def __len__(self):
+        return len(self._seeks)
+
+    def __getitem__(self, index: int) -> torch.LongTensor:
+        if self.dataset is None:
+            self.dataset = open(self._pathbin, 'rb')
+
+        self.dataset.seek(self._seeks[index], 0)
+        data = pickle.load(self.dataset)
+        return data
 
 
 class SpeechDatasetPickle(Dataset):
@@ -236,17 +259,15 @@ class sortedPadCollateLM():
     """Collect data into batch by desending order and add padding.
 
     Args: 
-        batch  : list of (mat, label, weight)
-        mat    : torch.FloatTensor
-        label  : torch.LongTensor
-        weight : torch.FloatTensor
+        batch  : list of label
+            label  : torch.LongTensor
 
     Return: 
-        (logits, input_lengths, labels, label_lengths, weights)
+        (labels_with_bos, label_lengths, labels_with_eos, `torch.empty(1)`, `torch.empty(1)`)
     """
 
-    def __call__(self, batch):
-        batches = [(label, label.size(0)) for _, label, _ in batch]
+    def __call__(self, batch: Sequence[torch.LongTensor]):
+        batches = [(label, label.size(0)) for label in batch]
 
         batch_sorted = sorted(batches, key=lambda item: item[1], reverse=True)
 

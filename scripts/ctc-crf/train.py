@@ -15,6 +15,8 @@ import numpy as np
 import model as model_zoo
 import dataset as DataSet
 from collections import OrderedDict
+from ctc_crf import CTC_CRF_LOSS as CRFLoss
+from ctc_crf import WARP_CTC_LOSS as CTCLoss
 
 import torch
 import torch.nn as nn
@@ -31,8 +33,9 @@ def main(args):
         utils.highlight_msg("CPU only training is unsupported")
         return None
 
-    os.makedirs(args.dir+'/ckpt', exist_ok=True)
-    setattr(args, 'ckptpath', args.dir+'/ckpt')
+    ckptpath = os.path.join(args.dir, 'ckpt')
+    os.makedirs(ckptpath, exist_ok=True)
+    setattr(args, 'ckptpath', ckptpath)
     if os.listdir(args.ckptpath) != [] and not args.debug and args.resume is None:
         raise FileExistsError(
             f"{args.ckptpath} is not empty! Refuse to run the experiment.")
@@ -43,7 +46,7 @@ def main(args):
     mp.spawn(main_worker, nprocs=ngpus_per_node, args=(ngpus_per_node, args))
 
 
-def main_worker(gpu, ngpus_per_node, args):
+def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
     args.gpu = gpu
 
     args.rank = args.rank * ngpus_per_node + gpu
@@ -122,20 +125,12 @@ def main_worker(gpu, ngpus_per_node, args):
         ctc_crf_base.release_env(gpus)
 
 
-class CAT_Model(nn.Module):
-    def __init__(self, NET=None, fn_loss='crf', lamb: float = 0.1, net_kwargs: dict = None):
+class AMTrainer(nn.Module):
+    def __init__(self, am: nn.Module, criterion: nn.Module):
         super().__init__()
-        if NET is None:
-            return None
 
-        self.infer = NET(**net_kwargs)
-
-        if fn_loss == "ctc":
-            self.loss_fn = utils.CTCLoss()
-        elif fn_loss == "crf":
-            self.loss_fn = utils.CRFLoss(lamb=lamb)
-        else:
-            raise ValueError(f"Unknown loss function: {fn_loss}")
+        self.am = am
+        self.criterion = criterion
 
     def forward(self, logits, labels, input_lengths, label_lengths):
         labels = labels.cpu()
@@ -154,12 +149,12 @@ class CAT_Model(nn.Module):
 def build_model(args, configuration, train=True) -> nn.Module:
 
     netconfigs = configuration['net']
-    net_kwargs = netconfigs['kwargs']
+    net_kwargs = netconfigs['kwargs']   # type:dict
     net = getattr(model_zoo, netconfigs['type'])
 
+    am_model = net(**net_kwargs)    # type:nn.Module
     if not train:
-        infer_model = net(**net_kwargs)
-        return infer_model
+        return am_model
 
     if 'lossfn' not in netconfigs:
         lossfn = 'crf'
@@ -170,18 +165,23 @@ def build_model(args, configuration, train=True) -> nn.Module:
     else:
         lossfn = netconfigs['lossfn']
 
-    if 'lamb' not in netconfigs:
-        lamb = 0.01
-        if lossfn == 'crf':
+    if lossfn == 'crf':
+        if 'lamb' not in netconfigs:
+            lamb = 0.01
             utils.highlight_msg([
                 "Warning: not specified \'lamb\' in configuration",
                 "Defaultly set to 0.01"
             ])
+        else:
+            lamb = netconfigs['lamb']
+        loss_fn = CRFLoss(lamb=lamb)
+    elif lossfn == "ctc":
+        loss_fn = CTCLoss()
     else:
-        lamb = netconfigs['lamb']
+        raise ValueError(f"Unknown loss function: {lossfn}")
 
     setattr(args, 'iscrf', lossfn == 'crf')
-    model = CAT_Model(net, lossfn, lamb, net_kwargs)
+    model = AMTrainer(am_model, loss_fn)
 
     torch.cuda.set_device(args.gpu)
     model.cuda(args.gpu)
