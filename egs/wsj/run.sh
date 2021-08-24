@@ -11,8 +11,8 @@
 . ./path.sh
 
 
-stage=7
-stop_stage=100
+stage=6
+stop_stage=6
 wsj0=/mnt/nas_workspace2/spmiData/WSJ/csr_1/
 wsj1=/mnt/nas_workspace2/spmiData/WSJ/csr_2_comp/
 
@@ -147,7 +147,7 @@ if [ $stage -le 6 ] && [ $stop_stage -ge 6 ]; then
   fi
 
   # uncomment the following line if you want to use specified GPUs
-  # CUDA_VISIBLE_DEVICES="0"                    \
+  CUDA_VISIBLE_DEVICES="8,7,6,5"                    \
   python3 ctc-crf/train.py --seed=0             \
     --world-size 1 --rank $NODE                 \
     --batch_size=128                            \

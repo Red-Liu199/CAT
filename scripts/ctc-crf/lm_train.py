@@ -16,7 +16,7 @@ import model as model_zoo
 import dataset as DataSet
 from _specaug import SpecAug
 from collections import OrderedDict
-from typing import Union, Tuple, Sequence, Iterable
+from typing import Union, Tuple, Sequence
 from warp_rnnt import rnnt_loss as RNNTLoss
 from beam_search_base import BeamSearchRNNTransducer
 
@@ -30,7 +30,7 @@ from torch.utils.data import DataLoader
 
 def main(args):
     if not torch.cuda.is_available():
-        utils.highlight_msg("CPU only training is unsupported")
+        utils.highlight_msg("CPU only training is unsupported.")
         return None
 
     os.makedirs(args.dir+'/ckpt', exist_ok=True)
@@ -60,7 +60,7 @@ def main_worker(gpu, ngpus_per_node, args):
 
     if args.h5py:
         data_format = "hdf5"
-        utils.highlight_msg("H5py reading might cause error with Multi-GPUs")
+        utils.highlight_msg("H5py reading might cause error with Multi-GPUs.")
         Dataset = DataSet.SpeechDataset
         if args.trset is None or args.devset is None:
             raise FileNotFoundError(
@@ -114,71 +114,25 @@ def main_worker(gpu, ngpus_per_node, args):
 
 
 class Transducer(nn.Module):
-    def __init__(self, encoder: nn.Module = None, decoder: nn.Module = None, jointnet: nn.Module = None):
+    def __init__(self, lm: nn.Module = None):
         super().__init__()
-        self.encoder = encoder
-        self.decoder = decoder
-        self.joint = jointnet
-
-    @torch.no_grad()
-    def decode(self, inputs: torch.FloatTensor, input_lengths: torch.LongTensor, mode='beam', beam_size: int = 3) -> torch.LongTensor:
-        encoder_output, o_lens = self.encoder(inputs, input_lengths)
-
-        if mode == 'greedy':
-            bos_token = inputs.new_zeros(1, 1).to(torch.long)
-            decoder_output_init, hidden_dec_init = self.decoder(bos_token)
-            outputs = []
-            for seq, T in zip(encoder_output, o_lens):
-                pred_tokens = []
-                decoder_output = decoder_output_init
-                hidden_dec = hidden_dec_init
-                for t in range(T):
-                    step_out = self.joint(seq[t], decoder_output.view(-1))
-                    pred = step_out.argmax(dim=0)
-                    pred = int(pred.item())
-                    if pred != 0:
-                        pred_tokens.append(pred)
-                    decoder_input = torch.tensor(
-                        [[pred]], device=inputs.device, dtype=torch.long)
-                    decoder_output, hidden_dec = self.decoder(
-                        decoder_input, hidden_dec)
-
-                outputs.append(torch.tensor(
-                    pred_tokens, device=inputs.device, dtype=torch.long))
-
-            return utils.pad_list(outputs).to(torch.long)
-        elif mode == 'beam':
-            assert beam_size > 1
-            searcher = BeamSearchRNNTransducer(self, beam_size, blank_id=0)
-            return searcher.forward(encoder_output, o_lens)
-        else:
-            raise ValueError("Unknown decode mode: {}".format(mode))
+        self.lm = lm    # type:nn.Module
+        self.criterion = nn.CrossEntropyLoss()
 
     def forward(self, inputs: torch.FloatTensor, targets: torch.LongTensor, input_lengths: torch.LongTensor, target_lengths: torch.LongTensor) -> torch.FloatTensor:
+        
+        # preds: (N, S, C)
+        preds, _ = self.lm(inputs, input_lengths)
 
-        output_encoder, o_lens = self.encoder(inputs, input_lengths)
-        padded_targets = torch.cat(
-            [targets.new_zeros((targets.size(0), 1)), targets], dim=-1)
-        output_decoder, _ = self.decoder(padded_targets)
-
-        ########## DEBUG CODE ###########
-        # print("Encoder output:", output_encoder.size())
-        # print("Decoder output:", output_decoder.size())
-        #################################
-
-        joint_out = self.joint(output_encoder, output_decoder)
-
-        ########## DEBUG CODE ###########
-        # print("JointNet output:", joint_out.size())
-        #################################
-
-        loss = RNNTLoss(joint_out, targets.to(dtype=torch.int32), o_lens.to(
-            dtype=torch.int32), target_lengths.to(dtype=torch.int32), reduction='mean', gather=True)
-
-        ########## DEBUG CODE ###########
-        # print(loss)
-        # exit(0)
-        #################################
+        # squeeze preds by concat all sentences
+        logits = []
+        for i, l in enumerate(input_lengths):
+            logits.append(preds[i, :l])
+        
+        # logits: (\sum{S_i}, C)
+        logits = torch.cat(logits, dim=0)
+        # targets: (\sum{S_i})
+        loss = self.criterion(logits, targets)
 
         return loss
 
@@ -218,6 +172,11 @@ class LSTMPredictNet(nn.Module):
         else:
             self.out_proj = nn.Linear(hdim, odim)
 
+        self.classifier = nn.Sequential(
+            nn.ReLU(),
+            nn.Linear(odim, num_classes)
+        )
+
     def forward(self, input: torch.LongTensor, hidden: torch.FloatTensor = None) -> Tuple[torch.FloatTensor, Union[torch.FloatTensor, None]]:
 
         embedded = self.embedding(input)
@@ -233,112 +192,42 @@ class LSTMPredictNet(nn.Module):
         rnn_out, hidden_o = self.rnn(embedded, hidden)
 
         out = self.out_proj(rnn_out)
+        out = self.classifier(out)
 
         return out, hidden_o
 
 
-class JointNet(nn.Module):
-    """
-    Joint `encoder_output` and `decoder_output`.
-    Args:
-        encoder_output (torch.FloatTensor): A output sequence of encoder. `FloatTensor` of size ``(batch, time_steps, dimensionA)``
-        decoder_output (torch.FloatTensor): A output sequence of decoder. `FloatTensor` of size ``(batch, label_length, dimensionB)``
-    Returns:
-        outputs (torch.FloatTensor): outputs of joint `encoder_output` and `decoder_output`. `FloatTensor` of size ``(batch, time_steps, label_length, dimensionA + dimensionB)``
-    """
+def build_model(args, configuration, dist=True) -> nn.Module:
+    def _build_encoder(config) -> nn.Module:
+        NetKwargs = config['kwargs']
+        _encoder = getattr(model_zoo, config['type'])(**NetKwargs)
 
-    def __init__(self, odim_encoder: int, odim_decoder: int, num_classes: int):
-        super().__init__()
-        in_features = odim_encoder+odim_decoder
-        self.fc_enc = nn.Linear(odim_encoder, in_features)
-        self.fc_dec = nn.Linear(odim_decoder, in_features)
-        self.fc = nn.Sequential(
-            nn.Tanh(),
-            nn.Linear(in_features, num_classes)
-        )
+        # FIXME: this is a hack
+        _encoder.classifier = nn.Identity()
 
-    def forward(self, encoder_output: torch.FloatTensor, decoder_output: torch.FloatTensor) -> torch.FloatTensor:
-        assert (encoder_output.dim() == 3 and decoder_output.dim() == 3) or (
-            encoder_output.dim() == 1 and decoder_output.dim() == 1)
+        return _encoder
 
-        ########## DEBUG CODE ###########
-        # print("encoder output to join:", encoder_output.size())
-        # print("decoder output to join:", decoder_output.size())
-        #################################
+    def _build_decoder(config) -> nn.Module:
+        NetKwargs = config['kwargs']
+        # FIXME: flexible decoder network like encoder.
+        return LSTMPredictNet(**NetKwargs)
 
-        encoder_output = self.fc_enc(encoder_output)
-        decoder_output = self.fc_dec(decoder_output)
+    def _build_jointnet(config) -> nn.Module:
+        """
+            The joint network accept the concatence of outputs of the 
+            encoder and decoder. So the input dimensions MUST match that.
+        """
+        NetKwargs = config['kwargs']
+        return JointNet(**NetKwargs)
 
-        if encoder_output.dim() == 3:
-            # expand the outputs
-            input_length = encoder_output.size(1)
-            target_length = decoder_output.size(1)
+    assert 'encoder' in configuration and 'decoder' in configuration and 'joint' in configuration
 
-            encoder_output = encoder_output.unsqueeze(2)
-            decoder_output = decoder_output.unsqueeze(1)
+    encoder = _build_encoder(configuration['encoder'])
+    decoder = _build_decoder(configuration['decoder'])
+    jointnet = _build_jointnet(configuration['joint'])
 
-            encoder_output = encoder_output.repeat(
-                [1, 1, target_length, 1])
-            decoder_output = decoder_output.repeat(
-                [1, input_length, 1, 1])
-
-        # concat_outputs = torch.cat([encoder_output, decoder_output], dim=-1)
-        # outputs = self.fc(concat_outputs).log_softmax(dim=-1)
-        outputs = self.fc(encoder_output+decoder_output).log_softmax(dim=-1)
-
-        return outputs
-
-
-def build_model(args, configuration: dict, dist: bool = True) -> Union[nn.Module, nn.parallel.DistributedDataParallel]:
-    def _build(config: dict, module: str) -> nn.Module:
-        assert 'kwargs' in config
-
-        settings = config['kwargs']     # type: dict
-        if module == 'encoder':
-            _model = getattr(model_zoo, config['type'])(
-                **settings)  # type: nn.Module
-            # FIXME: this is a hack, since we just feed the hidden output into joint network
-            _model.classifier = nn.Identity()
-        elif module == 'decoder':
-            # FIXME: flexible decoder network like encoder.
-            _model = LSTMPredictNet(**settings)
-        elif module == 'joint':
-            """
-                The joint network accept the concatence of outputs of the 
-                encoder and decoder. So the input dimensions MUST match that.
-            """
-            settings = config['kwargs']
-            _model = JointNet(**settings)
-        else:
-            raise ValueError(f"Unknow module: {module}")
-
-        # NOTE (Huahuan): In a strict sense, we should avoid invoke model.train() if we want to freeze the model
-        #                 ...for which would enable the operations like dropout during traing.
-        if 'freeze' in config and config['freeze']:
-            for param in _model.parameters():
-                if param.requires_grad:
-                    param.requires_grad = False
-            setattr(_model, 'freeze', True)
-        else:
-            setattr(_model, 'freeze', False)
-        return _model
-
-    assert 'encoder' in configuration
-    assert 'decoder' in configuration
-    assert 'joint' in configuration
-
-    encoder = _build(configuration['encoder'], 'encoder')
-    decoder = _build(configuration['decoder'], 'decoder')
-    jointnet = _build(configuration['joint'], 'joint')
-
-    if all(_model.freeze for _model in [encoder, decoder, jointnet]):
-        raise RuntimeError("It's illegal to freeze all parts of Transducer.")
-
-    model = Transducer(encoder=encoder, decoder=decoder, jointnet=jointnet)
-
-    if not all(not _model.freeze for _model in [encoder, decoder, jointnet]):
-        setattr(model, 'requires_slice', True)
-
+    model = Transducer(encoder=encoder, decoder=decoder,
+                       jointnet=jointnet)
     if not dist:
         return model
 
@@ -426,6 +315,6 @@ if __name__ == "__main__":
     torch.backends.cudnn.deterministic = True
 
     if args.debug:
-        utils.highlight_msg("Debugging")
+        utils.highlight_msg("Debugging.")
 
     main(args)

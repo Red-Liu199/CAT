@@ -7,14 +7,11 @@ In this file, we define universal models
 """
 
 import numpy as np
-import six
-import utils
 import _layers as nnlayers
 from collections import OrderedDict
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 
 def get_vgg2l_odim(idim, in_channel=1, out_channel=128):

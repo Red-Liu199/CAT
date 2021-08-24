@@ -28,7 +28,7 @@ import ctc_crf_base
 
 def main(args):
     if not torch.cuda.is_available():
-        utils.highlight_msg("CPU only training is unsupported.")
+        utils.highlight_msg("CPU only training is unsupported")
         return None
 
     os.makedirs(args.dir+'/ckpt', exist_ok=True)
@@ -59,7 +59,7 @@ def main_worker(gpu, ngpus_per_node, args):
         print("> Data prepare")
     if args.h5py:
         data_format = "hdf5"
-        utils.highlight_msg("H5py reading might cause error with Multi-GPUs.")
+        utils.highlight_msg("H5py reading might cause error with Multi-GPUs")
         Dataset = DataSet.SpeechDataset
         if args.trset is None or args.devset is None:
             raise FileNotFoundError(
@@ -163,16 +163,20 @@ def build_model(args, configuration, train=True) -> nn.Module:
 
     if 'lossfn' not in netconfigs:
         lossfn = 'crf'
-        utils.highlight_msg(
-            "Warning: not specified \'lossfn\' in configuration.\nDefaultly set to \'crf\'")
+        utils.highlight_msg([
+            "Warning: not specified \'lossfn\' in configuration",
+            "Defaultly set to \'crf\'"
+        ])
     else:
         lossfn = netconfigs['lossfn']
 
     if 'lamb' not in netconfigs:
         lamb = 0.01
         if lossfn == 'crf':
-            utils.highlight_msg(
-                "Warning: not specified \'lamb\' in configuration.\nDefaultly set to 0.01")
+            utils.highlight_msg([
+                "Warning: not specified \'lamb\' in configuration",
+                "Defaultly set to 0.01"
+            ])
     else:
         lamb = netconfigs['lamb']
 
@@ -244,6 +248,6 @@ if __name__ == "__main__":
     torch.backends.cudnn.deterministic = True
 
     if args.debug:
-        utils.highlight_msg("Debugging.")
+        utils.highlight_msg("Debugging")
 
     main(args)

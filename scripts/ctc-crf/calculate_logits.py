@@ -12,6 +12,7 @@ import numpy as np
 from tqdm import tqdm
 from train import build_model
 from dataset import InferDataset
+from collections import OrderedDict
 
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
@@ -22,7 +23,7 @@ import torch.multiprocessing as mp
 
 def main(args):
     if not torch.cuda.is_available():
-        utils.highlight_msg("Using CPU.")
+        utils.highlight_msg("Using CPU")
         single_worker('cpu', args.nj, args)
         return None
 
@@ -32,7 +33,10 @@ def main(args):
     num_jobs = args.nj
     if num_jobs <= ngpus_per_node:
         utils.highlight_msg(
-            f"Number of jobs (--nj={num_jobs}) is too small.\nUse only one GPU for avoiding errors.")
+            [
+                f"Number of jobs (--nj={num_jobs}) is too small",
+                "Use only one GPU for avoiding errors"
+            ])
         single_worker("cuda:0", num_jobs, args)
         return None
 
@@ -45,7 +49,7 @@ def main(args):
         return None
     else:
         # This is a hack for non-divisible length of data to number of GPUs
-        utils.highlight_msg("Using hack to deal with undivisible data length.")
+        utils.highlight_msg("Using hack to deal with undivisible seq length")
         mp.spawn(main_worker, nprocs=ngpus_per_node,
                  args=(ngpus_per_node, args, num_jobs-1))
         single_worker("cuda:0", 1, args, len(inferset)-res)
@@ -84,10 +88,10 @@ def main_worker(gpu, ngpus_per_node, args, num_jobs):
 
     torch.cuda.set_device(args.gpu)
     model.cuda(args.gpu)
-    model.load_state_dict(torch.load(
-        args.resume, map_location=f"cuda:{args.gpu}"))
     model = torch.nn.parallel.DistributedDataParallel(
         model, device_ids=[args.gpu])
+
+    load_checkpoint(model, args.resume, loc=f"cuda:{args.gpu}")
     model.eval()
 
     if args.rank == 0:
@@ -119,8 +123,8 @@ def single_worker(device, num_jobs, args, idx_beg=0):
     model = build_model(args, configures, train=False)
 
     model = model.to(device)
-    model.load_state_dict(torch.load(
-        args.resume, map_location=device))
+    load_checkpoint(model, args.resume, loc=device)
+
     model.eval()
 
     print("> Model built.")
@@ -154,6 +158,22 @@ def cal_logit(model, testloader, device, local_writers):
         kaldiio.save_ark(writer, dict(result))
 
     return None
+
+
+def load_checkpoint(model, path_ckpt, loc='cpu'):
+
+    checkpoint = torch.load(path_ckpt, map_location=loc)
+    state_dict = OrderedDict()
+    if isinstance(model, torch.nn.parallel.DistributedDataParallel):
+        for k, v in checkpoint['model'].items():
+            # remove the 'module.'
+            state_dict[k.replace('infer.', '')] = v
+    else:
+        for k, v in checkpoint['model'].items():
+            # remove the 'module.'
+            state_dict[k.replace('module.infer.', '')] = v
+    model.load_state_dict(state_dict)
+    return model
 
 
 if __name__ == "__main__":

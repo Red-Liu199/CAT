@@ -5,6 +5,7 @@ Author: Zheng Huahuan (zhh20@mails.tsinghua.edu.cn)
 """
 
 import os
+import argparse
 import time
 import json
 import math
@@ -12,22 +13,148 @@ import shutil
 import scheduler
 from collections import OrderedDict
 from monitor import plot_monitor
-from ctc_crf import CTC_CRF_LOSS as CRFLoss
-from ctc_crf import WARP_CTC_LOSS as CTCLoss
 from _specaug import SpecAug
-
+from typing import Callable, Union, Sequence, Iterable
 
 import torch
+import torch.nn as nn
 import torch.distributed as dist
 from torch.nn.utils.rnn import pad_sequence
 
 
-def GetScheduler(scheduler_configs, param_list) -> scheduler.Scheduler:
+class Manager(object):
+    def __init__(self, logger: OrderedDict, func_build_model: Callable[[argparse.Namespace, dict], Union[nn.Module, nn.parallel.DistributedDataParallel]], args: argparse.Namespace):
+        super().__init__()
+
+        with open(args.config, 'r') as fi:
+            configures = json.load(fi)  # type: dict
+
+        self.model = func_build_model(args, configures)
+
+        # Initial specaug module
+        if 'specaug_config' not in configures:
+            specaug = None
+            if args.rank == 0:
+                highlight_msg("Disable SpecAug")
+        else:
+            specaug = SpecAug(**configures['specaug_config'])
+            specaug = specaug.to(f'cuda:{args.gpu}')
+
+        self.specaug = specaug
+
+        # Initial scheduler and optimizer
+        assert 'scheduler' in configures
+
+        if isinstance(self.model, nn.parallel.DistributedDataParallel):
+            _model = self.model.module
+        else:
+            _model = self.model
+
+        if hasattr(_model, "requires_slice") and _model.requires_slice:
+            parameters = filter(lambda x: x.requires_grad,
+                                self.model.parameters())
+            self.scheduler = GetScheduler(
+                configures['scheduler'], parameters)
+        else:
+            self.scheduler = GetScheduler(
+                configures['scheduler'], self.model.parameters())
+        del _model
+
+        self.log = logger
+        self.rank = args.rank   # type: int
+        self.DEBUG = args.debug  # type: bool
+
+        if args.resume is not None:
+            print(f"[GPU {args.rank}]: Resuming from: {args.resume}")
+            loc = f'cuda:{args.gpu}'
+            checkpoint = torch.load(
+                args.resume, map_location=loc)  # type: OrderedDict
+            self.load(checkpoint)
+
+    def run(self, train_sampler: torch.utils.data.distributed.DistributedSampler, trainloader: torch.utils.data.DataLoader, testloader: torch.utils.data.DataLoader, args: argparse.Namespace):
+
+        epoch = self.scheduler.epoch_cur
+        self.model.train()
+        while True:
+            epoch += 1
+            train_sampler.set_epoch(epoch)
+
+            train(trainloader, epoch, args, self)
+
+            self.model.eval()
+            metrics = test(testloader, args, self)
+            if isinstance(metrics, tuple):
+                # defaultly use the first one to evaluate
+                metrics = metrics[0]
+            state, info = self.scheduler.step(epoch, metrics)
+
+            if args.gpu == 0:
+                print(info)
+
+            self.model.train()
+            if self.rank == 0 and not self.DEBUG:
+                self.log_export(args.ckptpath)
+                plot_monitor(args.ckptpath)
+
+            if state == 2:
+                print("Terminated: GPU[%d]" % self.rank)
+                dist.barrier()
+                break
+            elif self.rank != 0 or self.DEBUG:
+                continue
+            elif state == 0 or state == 1:
+                self.save("checkpoint", args.ckptpath)
+                if state == 1:
+                    shutil.copyfile(
+                        f"{args.ckptpath}/checkpoint.pt", f"{args.ckptpath}/bestckpt.pt")
+            else:
+                raise ValueError(f"Unknown state: {state}.")
+            torch.cuda.empty_cache()
+
+    def save(self, name: str, PATH: str = '') -> str:
+        """Save checkpoint.
+
+        The checkpoint file would be located at `PATH/name.pt`
+        or `name.pt` if `PATH` is empty.
+        """
+
+        PATH = os.path.join(PATH, name+'.pt')
+        torch.save(OrderedDict({
+            'model': self.model.state_dict(),
+            'scheduler': self.scheduler.state_dict(),
+            'log': OrderedDict(self.log)
+        }), PATH)
+        return PATH
+
+    def load(self, checkpoint: OrderedDict):
+        r'Load checkpoint.'
+
+        dist.barrier()
+        self.model.load_state_dict(checkpoint['model'])
+        self.scheduler.load_state_dict(checkpoint['scheduler'])
+        self.log = checkpoint['log']
+
+    def log_update(self, msg: list = [], loc: str = "log_train"):
+        self.log[loc].append(msg)
+
+    def log_export(self, PATH: str):
+        """Save log file in {PATH}/{key}.csv
+        """
+
+        for key, value in self.log.items():
+
+            with open(f"{PATH}/{key}.csv", 'w+', encoding='utf8') as file:
+                data = [','.join([str(x) for x in infos])
+                        for infos in value[1:]]
+                file.write(value[0] + '\n' + '\n'.join(data))
+
+
+def GetScheduler(scheduler_configs: dict, param_list: Iterable) -> scheduler.Scheduler:
     schdl_base = getattr(scheduler, scheduler_configs['type'])
     return schdl_base(scheduler_configs['optimizer'], param_list, **scheduler_configs['kwargs'])
 
 
-def pad_list(xs, pad_value=0, dim=0):
+def pad_list(xs: torch.Tensor, pad_value=0, dim=0) -> torch.Tensor:
     """Perform padding for the list of tensors.
 
     Args:
@@ -55,7 +182,7 @@ def pad_list(xs, pad_value=0, dim=0):
         return padded.transpose(1, dim+1).contiguous()
 
 
-def str2num(src: str) -> list:
+def str2num(src: str) -> Sequence[int]:
     return list(src.encode())
 
 
@@ -63,7 +190,7 @@ def num2str(num_list: list) -> str:
     return bytes(num_list).decode()
 
 
-def gather_all_gpu_info(local_gpuid: int, num_all_gpus: int = None) -> list:
+def gather_all_gpu_info(local_gpuid: int, num_all_gpus: int = None) -> Sequence[int]:
     """Gather all gpu info based on DDP backend
 
     This function is supposed to be invoked in all sub-process.
@@ -85,9 +212,9 @@ def gather_all_gpu_info(local_gpuid: int, num_all_gpus: int = None) -> list:
     return [num2str(x.tolist()).strip() for x in info_list]
 
 
-def gen_readme(path, model, gpu_info: list = []):
+def gen_readme(path: str, model: nn.Module, gpu_info: list = []) -> str:
     if os.path.exists(path):
-        highlight_msg(f"Not generate new readme, since '{path}' exists.")
+        highlight_msg(f"Not generate new readme, since '{path}' exists")
         return path
 
     model_size = count_parameters(model)/1e6
@@ -129,7 +256,7 @@ def gen_readme(path, model, gpu_info: list = []):
     return path
 
 
-def count_parameters(model):
+def count_parameters(model: nn.Module) -> int:
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
@@ -175,7 +302,11 @@ class AverageMeter(object):
         return fmtstr.format(**self.__dict__)
 
 
-def highlight_msg(msg: str):
+def highlight_msg(msg: Union[Sequence[str], str]):
+    if isinstance(msg, str):
+        print("\n>>> {} <<<\n".format(msg))
+        return
+
     try:
         terminal_col = os.get_terminal_size().columns
     except:
@@ -185,12 +316,7 @@ def highlight_msg(msg: str):
         print(msg)
         return None
 
-    if '\n' in msg:
-        msg = msg.split('\n')
-        len_msg = max([len(line) for line in msg])
-    else:
-        len_msg = len(msg)
-        msg = [msg]
+    len_msg = max([len(line) for line in msg])
 
     if len_msg > max_len:
         len_msg = max_len
@@ -215,120 +341,7 @@ def highlight_msg(msg: str):
     print(msg)
 
 
-class Manager(object):
-    def __init__(self, logger: OrderedDict, func_buil_model, args):
-        super().__init__()
-
-        with open(args.config, 'r') as fi:
-            configures = json.load(fi)
-
-        self.model = func_buil_model(args, configures)
-
-        if 'specaug_config' not in configures:
-            specaug = None
-            if args.rank == 0:
-                highlight_msg("Disable SpecAug.")
-        else:
-            specaug = SpecAug(**configures['specaug_config'])
-            specaug = specaug.to(f'cuda:{args.gpu}')
-
-        self.specaug = specaug
-        self.scheduler = GetScheduler(
-            configures['scheduler'], self.model.parameters())
-
-        self.log = logger
-        self.rank = args.rank
-        self.DEBUG = args.debug
-
-        if args.resume is not None:
-            print(f"[GPU {args.rank}]: Resuming from: {args.resume}")
-            loc = f'cuda:{args.gpu}'
-            checkpoint = torch.load(args.resume, map_location=loc)
-            self.load(checkpoint)
-
-    def run(self, train_sampler, trainloader, testloader, args):
-
-        epoch = self.scheduler.epoch_cur
-        self.model.train()
-        while True:
-            epoch += 1
-            train_sampler.set_epoch(epoch)
-
-            train(trainloader, epoch, args, self)
-
-            self.model.eval()
-            metrics = test(testloader, args, self)
-            if isinstance(metrics, tuple):
-                # defaultly use the first one to evaluate
-                metrics = metrics[0]
-            state, info = self.scheduler.step(epoch, metrics)
-
-            if args.gpu == 0:
-                print(info)
-
-            self.model.train()
-            if self.rank == 0 and not self.DEBUG:
-                self.log_export(args.ckptpath)
-                plot_monitor(args.ckptpath)
-
-            if state == 2:
-                print("Terminated: GPU[%d]" % self.rank)
-                dist.barrier()
-                break
-            elif self.rank != 0 or self.DEBUG:
-                continue
-            elif state == 0 or state == 1:
-                self.save("checkpoint", args.ckptpath)
-                if state == 1:
-                    shutil.copyfile(
-                        f"{args.ckptpath}/checkpoint.pt", f"{args.ckptpath}/bestckpt.pt")
-
-                    # save model for inference
-                    # torch.save(self.model.module.infer.state_dict(),
-                    #            args.ckptpath + "/infer.pt")
-            else:
-                raise ValueError(f"Unknown state: {state}.")
-            torch.cuda.empty_cache()
-
-    def save(self, name, PATH=''):
-        """Save checkpoint.
-
-        The checkpoint file would be located at `PATH/name.pt`
-        or `name.pt` if `PATH` is empty.
-        """
-
-        if PATH != '' and PATH[-1] != '/':
-            PATH += '/'
-        torch.save(OrderedDict({
-            'model': self.model.state_dict(),
-            'scheduler': self.scheduler.state_dict(),
-            'log': OrderedDict(self.log)
-        }), PATH+name+'.pt')
-
-    def load(self, checkpoint):
-        r'Load checkpoint.'
-
-        dist.barrier()
-        self.model.load_state_dict(checkpoint['model'])
-        self.scheduler.load_state_dict(checkpoint['scheduler'])
-        self.log = checkpoint['log']
-
-    def log_update(self, msg=[], loc="log_train"):
-        self.log[loc].append(msg)
-
-    def log_export(self, PATH):
-        """Save log file in {PATH}/{key}.csv
-        """
-
-        for key, value in self.log.items():
-
-            with open(f"{PATH}/{key}.csv", 'w+', encoding='utf8') as file:
-                data = [','.join([str(x) for x in infos])
-                        for infos in value[1:]]
-                file.write(value[0] + '\n' + '\n'.join(data))
-
-
-def train(trainloader, epoch: int, args, manager: Manager):
+def train(trainloader, epoch: int, args: argparse.Namespace, manager: Manager):
 
     scheduler = manager.scheduler
 
@@ -401,7 +414,7 @@ def train(trainloader, epoch: int, args, manager: Manager):
 
             if args.debug and (i+1)/fold >= 20:
                 if args.gpu == 0:
-                    highlight_msg("In debug mode, quit training.")
+                    highlight_msg("In debugging, quit loop")
                 dist.barrier()
                 break
         else:
@@ -409,7 +422,7 @@ def train(trainloader, epoch: int, args, manager: Manager):
 
 
 @torch.no_grad()
-def test(testloader, args, manager: Manager):
+def test(testloader, args: argparse.Namespace, manager: Manager) -> float:
 
     model = manager.model
 
@@ -426,7 +439,7 @@ def test(testloader, args, manager: Manager):
     for i, minibatch in enumerate(testloader):
         if args.debug and i >= 20:
             if args.gpu == 0:
-                highlight_msg("In debug mode, quit evaluating.")
+                highlight_msg("In debugging, quit loop")
             dist.barrier()
             break
         # measure data loading time

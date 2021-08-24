@@ -99,17 +99,17 @@ fi
 if [ $stage -le 3 ] && [ $stop_stage -ge 3 ]; then
     echo "NN training"
 
-    # CUDA_VISIBLE_DEVICES="3"  \
+    CUDA_VISIBLE_DEVICES="8,7,6,5"  \
     python3 ctc-crf/transducer_train.py --seed=0  \
         --world-size 1 --rank 0             \
         --dist-url='tcp://127.0.0.1:13944'  \
-        --batch_size=15                    \
+        --batch_size=32                    \
         --dir=$dir                          \
         --config=$dir/config.json           \
         --data=data/                        \
         --trset=$spmdata/tr.pickle          \
         --devset=$spmdata/cv.pickle         \
-        --grad-accum-fold=8                 \
+        --grad-accum-fold=4                \
         --pretrained-encoder=exp/conformer-s-v1/ckpt/bestckpt.pt    \
         || exit 1
 

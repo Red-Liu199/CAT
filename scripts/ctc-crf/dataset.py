@@ -230,3 +230,39 @@ class TestPadCollate():
         lengths = torch.LongTensor([feature.size(0) for _, feature in batch])
 
         return keys, mats, lengths
+
+
+class sortedPadCollateLM():
+    """Collect data into batch by desending order and add padding.
+
+    Args: 
+        batch  : list of (mat, label, weight)
+        mat    : torch.FloatTensor
+        label  : torch.LongTensor
+        weight : torch.FloatTensor
+
+    Return: 
+        (logits, input_lengths, labels, label_lengths, weights)
+    """
+
+    def __call__(self, batch):
+        batches = [(label, label.size(0)) for _, label, _ in batch]
+
+        batch_sorted = sorted(batches, key=lambda item: item[1], reverse=True)
+
+        xs = utils.pad_list([x[0] for x in batch_sorted]
+                            )   # type: torch.Tensor
+        # xs -> <s> + xs
+        xs = torch.cat([xs.new_zeros(xs.size(0), 1), xs], dim=1)
+
+        # labels -> labels + <s>
+        labels = [torch.cat([x, x.new_zeros(1)]) for x, _ in batch_sorted]
+        labels = torch.cat(labels)
+
+        input_lengths = torch.LongTensor([l+1 for _, l in batch_sorted])
+
+        label_lengths = torch.empty(1)
+
+        weights = torch.empty(1)
+
+        return xs, input_lengths, labels, label_lengths, weights

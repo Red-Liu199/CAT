@@ -39,8 +39,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.warning:
-        utils.highlight_msg(
-            "Calculation of CTC loss requires the input sequence to be longer than ctc_len(labels).\nCheck that in 'ctc-crf/convert_to.py' if your model does subsampling on seq.\nMake your modify at line 'if feature.shape[0] < ctc_len(label):' to filter unqualified seq.\nIf you have already done, ignore this.")
+        utils.highlight_msg([
+            "Calculation of CTC loss requires the input sequence to be longer than ctc_len(labels)",
+            "Check that in 'ctc-crf/convert_to.py' if your model does subsampling on seq",
+            "Make your modify at line 'if feature.shape[0] < ctc_len(label):' to filter unqualified seq",
+            "If you have already done, ignore this."])
 
     label_dict = {}
     with open(args.label, 'r') as fi:
@@ -72,8 +75,11 @@ if __name__ == "__main__":
             weight = weight_dict[key]
             feature = kaldiio.load_mat(loc_ark)
 
-            described_length = int(
-                eval(args.describe.replace('L', str(feature.shape[0]))))
+            if args.describe is not None:
+                described_length = int(
+                    eval(args.describe.replace('L', str(feature.shape[0]))))
+            else:
+                described_length = feature.shape[0]
 
             # if described_length < ctc_len(label) or feature.shape[0] > L_MAX:
             if feature.shape[0] > L_MAX:

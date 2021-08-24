@@ -13,10 +13,10 @@ lm_url=www.openslr.org/resources/11
 . ./cmd.sh
 . ./path.sh
 
-stage=1
+stage=7
 stop_stage=100
-data=/path/to/librispeech
-lm_src_dir=/path/to/librispeech_lm
+data="/mnt/nas_workspace2/spmiData/librispeech"
+lm_src_dir="/mnt/nas_workspace2/spmiData/librispeech_lm"
 
 NODE=$1
 if [ ! $NODE ]; then
@@ -114,9 +114,9 @@ if [ $NODE == 0 ]; then
 
     if [ $stage -le 5 ] && [ $stop_stage -ge 5 ]; then
         mkdir -p data/pickle
-        python3 ctc-crf/convert_to.py -f=pickle --describe='L//4' --filer=1750 \
+        python3 ctc-crf/convert_to.py -f=pickle --describe='L//4' --filer=2000 \
             data/all_ark/cv.scp $data_cv/text_number $data_cv/weight data/pickle/cv.pickle || exit 1
-        python3 ctc-crf/convert_to.py -f=pickle --describe='L//4' --filer=1750 \
+        python3 ctc-crf/convert_to.py -f=pickle --describe='L//4' --filer=2000 \
             data/all_ark/tr.scp $data_tr/text_number $data_tr/weight data/pickle/tr.pickle || exit 1
     fi
 
@@ -124,7 +124,7 @@ fi
 
 
 PARENTDIR='.'
-dir="exp/libri_phone"
+dir="exp/conformer-s-v1"
 DATAPATH=$PARENTDIR/data/
 
 if [ $stage -le 6 ] && [ $stop_stage -ge 6 ]; then
@@ -143,10 +143,11 @@ if [ $stage -le 6 ] && [ $stop_stage -ge 6 ]; then
     # CUDA_VISIBLE_DEVICES="0"                      \
     python3 ctc-crf/train.py --seed=0               \
         --world-size 1 --rank $NODE                 \
-        --batch_size=128                            \
+        --batch_size=288                            \
         --dir=$dir                                  \
         --config=$dir/config.json                   \
         --data=$DATAPATH                            \
+        --grad-accum-fold=2 \
         || exit 1
 fi
 
@@ -173,12 +174,12 @@ if [ $stage -le 7 ] && [ $stop_stage -ge 7 ]; then
             --cmd "$decode_cmd" --nj $nj --acwt 1.0 \
             data/lang_phn_tgsmall data/$set data/all_ark/$set.scp $dir/decode_${set}_tgsmall || exit 1
 
-        lm=tgmed
-        rescore_dir=$dir/decode_${set}_$lm
-        mkdir -p $rescore_dir
-        local/lmrescore.sh --cmd "$train_cmd" data/lang_phn_{tgsmall,$lm} data/$set $dir/decode_${set}_{tgsmall,$lm} $nj || exit 1;
+        # lm=tgmed
+        # rescore_dir=$dir/decode_${set}_$lm
+        # mkdir -p $rescore_dir
+        # local/lmrescore.sh --cmd "$train_cmd" data/lang_phn_{tgsmall,$lm} data/$set $dir/decode_${set}_{tgsmall,$lm} $nj || exit 1;
 
-        for lm in tglarge fglarge; do
+        for lm in fglarge; do
             rescore_dir=$dir/decode_${set}_$lm
             mkdir -p $rescore_dir
             local/lmrescore_const_arpa.sh --cmd "$train_cmd" data/lang_phn_{tgsmall,$lm} data/$set $dir/decode_${set}_{tgsmall,$lm} $nj || exit 1;
