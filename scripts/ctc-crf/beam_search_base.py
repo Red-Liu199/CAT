@@ -22,6 +22,7 @@
 
 import torch
 import torch.nn as nn
+from typing import Union, Tuple, Sequence
 
 
 class OpenspeechBeamSearchBase(nn.Module):
@@ -257,6 +258,170 @@ class BeamSearchRNNTransducer(OpenspeechBeamSearchBase):
                         if topk_targets[j] >= best_logp - self.expand_beam:
                             topk_hyp["prediction"].append(topk_idx[j].item())
                             topk_hyp["hidden_states"] = hidden_states
+                            process_hyps.append(topk_hyp)
+
+            ongoing_beams = sorted(
+                ongoing_beams,
+                key=lambda x: x["logp_score"] / len(x["prediction"]),
+                reverse=True,
+            )[0]
+
+            hypothesis.append(torch.LongTensor(
+                ongoing_beams["prediction"][1:]))
+            hypothesis_score.append(
+                ongoing_beams["logp_score"] / len(ongoing_beams["prediction"]))
+
+        return self._fill_sequence(hypothesis)
+
+
+class ConvMemBuffer(nn.Module):
+    def __init__(self, kernel_size: Union[int, Tuple[int, int]], channels: int) -> None:
+        super().__init__()
+        if isinstance(kernel_size, int):
+            kernel_size = (kernel_size, kernel_size)
+
+        self._mem = torch.zeros((channels,)+kernel_size)
+        self._last_t_u = [-1, -1]
+
+    def append(self, t: int, u: int, state: torch.Tensor):
+        if t < 0 or u < 0:
+            raise RuntimeError(
+                f"Invalid (t, u) is fed into buffer: ({t}, {u}).")
+
+        if t == 0 and u == 0:
+            self._last_t_u = [0, 0]
+        elif t > self._last_t_u[0]:
+            self._last_t_u[0] += 1
+            self._mem.roll(-1, 1)
+            self._mem[:, -1, :] = 0.
+        elif u > self._last_t_u[1]:
+            self._last_t_u[1] += 1
+            self._mem.roll(-1, 2)
+            self._mem[:, :, -1] = 0.
+        else:
+            raise RuntimeError(
+                f"Illegal (t, u) is fed into buffer: ({t}, {u}).")
+
+        self._mem[:, -1, -1] = state
+
+    @property
+    def mem(self) -> torch.Tensor:
+        return self._mem
+
+    def replica(self):
+        newbuffer = ConvMemBuffer(self._mem.size()[1:], self._mem.size(0))
+        newbuffer._mem = self._mem
+        newbuffer._last_t_u = self._last_t_u[:]
+        return newbuffer
+
+
+class BeamSearchConvTransducer(OpenspeechBeamSearchBase):
+    def __init__(
+            self,
+            transducer,
+            kernel_size: Union[int, Tuple[int, int]],
+            channels: int,
+            beam_size: int = 3,
+            expand_beam: float = 2.3,
+            state_beam: float = 2.3,
+            blank_id: int = 0,
+    ) -> None:
+        super(BeamSearchRNNTransducer, self).__init__(beam_size)
+        self._trans = transducer
+        self.expand_beam = expand_beam
+        self.state_beam = state_beam
+        self.blank_id = blank_id
+        self._buffer = ConvMemBuffer(kernel_size, channels)
+
+    def forward(self, encoder_outputs: torch.Tensor, max_length: int):
+        r"""
+        Beam search decoding.
+
+        Inputs: encoder_output, max_length
+            encoder_outputs (torch.FloatTensor): A output sequence of encoders. `FloatTensor` of size
+            ``(batch, seq_length, dimension)``
+            max_length (int): max decoding time step
+
+        Returns:
+            * predictions (torch.LongTensor): model predictions.
+        """
+        hypothesis = list()
+        hypothesis_score = list()
+
+        for batch_idx in range(encoder_outputs.size(0)):
+            blank = (
+                torch.ones((1, 1), device=encoder_outputs.device,
+                           dtype=torch.long) * self.blank_id
+            )
+            step_input = (
+                torch.ones((1, 1), device=encoder_outputs.device,
+                           dtype=torch.long) * self.sos_id
+            )
+            hyp = {
+                "prediction": [self.sos_id],
+                "logp_score": 0.0,
+                "hidden_states": None,
+                "mem_blocks": self._buffer.replica()
+            }
+            ongoing_beams = [hyp]
+
+            for t_step in range(max_length):
+                process_hyps = ongoing_beams
+                ongoing_beams = list()
+
+                while True:
+                    if len(ongoing_beams) >= self.beam_size:
+                        break
+
+                    a_best_hyp = max(
+                        process_hyps, key=lambda x: x["logp_score"] / len(x["prediction"]))
+
+                    if len(ongoing_beams) > 0:
+                        b_best_hyp = max(
+                            ongoing_beams,
+                            key=lambda x: x["logp_score"] /
+                            len(x["prediction"]),
+                        )
+
+                        a_best_prob = a_best_hyp["logp_score"]
+                        b_best_prob = b_best_hyp["logp_score"]
+
+                        if b_best_prob >= self.state_beam + a_best_prob:
+                            break
+
+                    process_hyps.remove(a_best_hyp)
+
+                    step_input[0, 0] = a_best_hyp["prediction"][-1]
+
+                    step_outputs, hidden_states = self._trans.decoder(
+                        step_input, a_best_hyp["hidden_states"])
+                    log_probs, mem_blocks = self._trans.joint(
+                        encoder_outputs[batch_idx, t_step, :], step_outputs.view(-1), a_best_hyp["mem_blocks"])
+
+                    topk_targets, topk_idx = log_probs.topk(k=self.beam_size)
+
+                    if topk_idx[0] != blank:
+                        best_logp = topk_targets[0]
+                    else:
+                        best_logp = topk_targets[1]
+
+                    for j in range(topk_targets.size(0)):
+                        topk_hyp = {
+                            "prediction": a_best_hyp["prediction"][:],
+                            "logp_score": a_best_hyp["logp_score"] + topk_targets[j],
+                            "hidden_states": a_best_hyp["hidden_states"],
+                            "mem_blocks": a_best_hyp["mem_blocks"].replica()
+                        }
+
+                        if topk_idx[j] == self.blank_id:
+                            ongoing_beams.append(topk_hyp)
+                            continue
+
+                        if topk_targets[j] >= best_logp - self.expand_beam:
+                            topk_hyp["prediction"].append(topk_idx[j].item())
+                            topk_hyp["hidden_states"] = hidden_states
+                            topk_hyp["mem_blocks"].append(t_step, len(
+                                topk_hyp["prediction"])-1, mem_blocks)
                             process_hyps.append(topk_hyp)
 
             ongoing_beams = sorted(
