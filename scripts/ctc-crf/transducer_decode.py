@@ -6,7 +6,7 @@ Author: Hongyu Xiang, Keyu An, Zheng Huahuan
 
 import os
 import json
-import utils
+import coreutils
 import argparse
 import sentencepiece as spm
 from tqdm import tqdm
@@ -28,7 +28,7 @@ def main(args):
             "Invalid sentencepiece model location: {}".format(args.spmodel))
 
     if not torch.cuda.is_available() or args.cpu:
-        utils.highlight_msg("Using CPU")
+        coreutils.highlight_msg("Using CPU")
         single_worker('cpu', f"{args.output_dir}/decode.0.tmp", args)
         return None
 
@@ -47,7 +47,8 @@ def main(args):
         return None
     else:
         # This is a hack for non-divisible length of data to number of GPUs
-        utils.highlight_msg("Using hack to deal with undivisible seq length")
+        coreutils.highlight_msg(
+            "Using hack to deal with undivisible seq length")
         mp.spawn(main_worker, nprocs=ngpus_per_node,
                  args=(ngpus_per_node, args, L_set-res))
 

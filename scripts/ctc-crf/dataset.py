@@ -7,7 +7,7 @@ Author: Hongyu Xiang, Keyu An, Zheng Huahuan (zhh20@mails.tsinghua.edu.cn)
 import os
 import kaldiio
 import h5py
-import utils
+import coreutils
 import pickle
 import numpy as np
 from kaldiio import ReadHelper
@@ -81,8 +81,8 @@ class CorpusDataset(Dataset):
             self.dataset = open(self._pathbin, 'rb')
 
         self.dataset.seek(self._seeks[index], 0)
-        data = pickle.load(self.dataset)
-        return data
+        data = pickle.load(self.dataset)    # type: Sequence[int]
+        return torch.LongTensor(data)
 
 
 class SpeechDatasetPickle(Dataset):
@@ -152,7 +152,7 @@ class sortedPadCollate():
                    for mat, label, weight in batch]
         batch_sorted = sorted(batches, key=lambda item: item[3], reverse=True)
 
-        mats = utils.pad_list([x[0] for x in batch_sorted])
+        mats = coreutils.pad_list([x[0] for x in batch_sorted])
 
         labels = torch.cat([x[1] for x in batch_sorted])
 
@@ -183,9 +183,10 @@ class sortedPadCollateTransducer():
                    for mat, label, weight in batch]
         batch_sorted = sorted(batches, key=lambda item: item[3], reverse=True)
 
-        mats = utils.pad_list([x[0] for x in batch_sorted])
+        mats = coreutils.pad_list([x[0] for x in batch_sorted])
 
-        labels = utils.pad_list([x[1] for x in batch_sorted]).to(torch.long)
+        labels = coreutils.pad_list(
+            [x[1] for x in batch_sorted]).to(torch.long)
 
         input_lengths = torch.LongTensor([x[3] for x in batch_sorted])
 
@@ -248,7 +249,7 @@ class TestPadCollate():
 
         keys = [key for key, _ in batch]
 
-        mats = utils.pad_list([feature for _, feature in batch])
+        mats = coreutils.pad_list([feature for _, feature in batch])
 
         lengths = torch.LongTensor([feature.size(0) for _, feature in batch])
 
@@ -271,8 +272,8 @@ class sortedPadCollateLM():
 
         batch_sorted = sorted(batches, key=lambda item: item[1], reverse=True)
 
-        xs = utils.pad_list([x[0] for x in batch_sorted]
-                            )   # type: torch.Tensor
+        xs = coreutils.pad_list([x[0] for x in batch_sorted]
+                                )   # type: torch.Tensor
         # xs -> <s> + xs
         xs = torch.cat([xs.new_zeros(xs.size(0), 1), xs], dim=1)
 

@@ -1,7 +1,6 @@
 import argparse
 import pickle
 import os
-import torch
 import string
 import random
 from tqdm import tqdm
@@ -9,6 +8,7 @@ from tqdm import tqdm
 
 def randName(L: int) -> str:
     return ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(L))
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -22,18 +22,18 @@ if __name__ == "__main__":
     if not os.path.isfile(args.intext):
         raise FileNotFoundError(f"{args.intext} does not exist!")
 
-    dataset = [0]
+    dataset = []
     binfile = args.outbin+randName(8)
     with open(args.intext, 'r') as fi:
         with open(binfile, 'wb') as fo:
             for i, line in tqdm(enumerate(fi)):
                 if args.strip:
-                    data = torch.LongTensor([int(x) for x in line.split()[1:]])
+                    data = [int(x) for x in line.split()[1:]]
                 else:
-                    data = torch.LongTensor([int(x) for x in line.split()])
+                    data = [int(x) for x in line.split()]
 
-                pickle.dump(data, fo)
                 dataset.append(fo.tell())
+                pickle.dump(data, fo)
 
     with open(args.outbin, 'wb') as fo:
         # save the file name of binary file

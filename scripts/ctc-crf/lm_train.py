@@ -8,7 +8,7 @@ Differed from `train_dist.py`, this one supports read configurations from json f
 and is more non-hard-coding style.
 """
 
-import utils
+import coreutils
 import os
 import argparse
 import numpy as np
@@ -26,7 +26,7 @@ from torch.utils.data import DataLoader
 
 def main(args: argparse.Namespace):
     if not torch.cuda.is_available():
-        utils.highlight_msg("CPU only training is unsupported.")
+        coreutils.highlight_msg("CPU only training is unsupported.")
         return None
 
     ckptpath = os.path.join(args.dir, 'ckpt')
@@ -76,23 +76,37 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         'log_train': ['epoch,loss,loss_real,net_lr,time'],
         'log_eval': ['loss_real,time']
     })
-    manager = utils.Manager(logger, build_model, args)
+    manager = coreutils.Manager(logger, build_model, args)
     # lm training does not need specaug
     manager.specaug = None
 
     # get GPU info
-    gpu_info = utils.gather_all_gpu_info(args.gpu)
+    gpu_info = coreutils.gather_all_gpu_info(args.gpu)
 
     if args.rank == 0:
         print("> Model built.")
         print("  Model size:{:.2f}M".format(
-            utils.count_parameters(manager.model)/1e6))
+            coreutils.count_parameters(manager.model)/1e6))
 
-        utils.gen_readme(args.dir+'/readme.md',
-                         model=manager.model, gpu_info=gpu_info)
+        coreutils.gen_readme(args.dir+'/readme.md',
+                             model=manager.model, gpu_info=gpu_info)
 
     # training
     manager.run(train_sampler, trainloader, testloader, args)
+
+    ppl = 0.
+    for minibatch in testloader:
+        logits, input_lengths, labels, label_lengths, path_weights = minibatch
+        logits, labels, input_lengths, label_lengths = logits.cuda(
+            args.gpu, non_blocking=True), labels, input_lengths, label_lengths
+
+        ppl_i = manager.model.module.test(logits, labels, input_lengths)
+        dist.all_reduce(ppl_i)
+        ppl += ppl_i
+
+    if args.rank == 0:
+        print("PPL for {} sentences: {:.2f}".format(
+            len(test_set), ppl/len(test_set)))
 
 
 class LMTrainer(nn.Module):
@@ -100,6 +114,29 @@ class LMTrainer(nn.Module):
         super().__init__()
         self.lm = lm    # type:nn.Module
         self.criterion = nn.CrossEntropyLoss()
+
+    @torch.no_grad()
+    def test(self, inputs: torch.LongTensor, targets: torch.LongTensor, input_lengths: torch.LongTensor):
+        targets = targets.to(inputs.device)
+        # preds: (N, S, C)
+        preds, _ = self.lm(inputs)
+        log_p = torch.log_softmax(preds, dim=-1)
+        # squeeze log_p by concat all sentences
+        # log_p: (\sum{S_i}, C)
+        log_p = torch.cat([log_p[i, :l]
+                          for i, l in enumerate(input_lengths)], dim=0)
+
+        # target_mask: (\sum{S_i}, C)
+        target_mask = torch.arange(log_p.size(1), device=log_p.device)[
+            None, :] == targets[:, None]
+        # log_p: (\sum{S_i}, )
+        log_p = torch.sum(log_p * target_mask, dim=-1)
+
+        ppl = [-1./input_lengths[i]*torch.sum(log_p[input_lengths[:i].sum(
+        ):input_lengths[:(i+1)].sum()]) for i in range(input_lengths.size(0))]
+        ppl = torch.stack(ppl)
+
+        return torch.sum(torch.exp(ppl))
 
     def forward(self, inputs: torch.FloatTensor, targets: torch.LongTensor, input_lengths: torch.LongTensor, target_lengths: torch.LongTensor) -> torch.FloatTensor:
 
@@ -125,7 +162,6 @@ class LSTMPredictNet(nn.Module):
     Args:
         num_classes (int): number of classes, excluding the <blk>
         hdim (int): hidden state dimension of decoders
-        odim (int): output dimension of decoder
         *rnn_args/**rnn_kwargs : any arguments that can be passed as 
             nn.LSTM(*rnn_args, **rnn_kwargs)
     Inputs: inputs, input_lengths, hidden_states
@@ -143,21 +179,18 @@ class LSTMPredictNet(nn.Module):
         https://arxiv.org/abs/1211.3711.pdf
     """
 
-    def __init__(self, num_classes: int, hdim: int, odim: int, *rnn_args, **rnn_kwargs):
+    def __init__(self, num_classes: int, hdim: int, *rnn_args, **rnn_kwargs):
         super().__init__()
         self.embedding = nn.Embedding(num_classes, hdim)
 
         rnn_kwargs['batch_first'] = True
         self.rnn = nn.LSTM(hdim, hdim, *rnn_args, **rnn_kwargs)
         if 'bidirectional' in rnn_kwargs and rnn_kwargs['bidirectional']:
-            self.out_proj = nn.Linear(hdim*2, odim)
+            odim = hdim*2
         else:
-            self.out_proj = nn.Linear(hdim, odim)
+            odim = hdim
 
-        self.classifier = nn.Sequential(
-            nn.ReLU(),
-            nn.Linear(odim, num_classes)
-        )
+        self.classifier = nn.Linear(odim, num_classes)
 
     def forward(self, input: torch.LongTensor, hidden: torch.FloatTensor = None) -> Tuple[torch.FloatTensor, Union[torch.FloatTensor, None]]:
 
@@ -173,8 +206,7 @@ class LSTMPredictNet(nn.Module):
         # rnn_out, olens = pad_packed_sequence(packed_output, batch_first=True)
         rnn_out, hidden_o = self.rnn(embedded, hidden)
 
-        out = self.out_proj(rnn_out)
-        out = self.classifier(out)
+        out = self.classifier(rnn_out)
 
         return out, hidden_o
 
@@ -258,6 +290,6 @@ if __name__ == "__main__":
     torch.backends.cudnn.deterministic = True
 
     if args.debug:
-        utils.highlight_msg("Debugging.")
+        coreutils.highlight_msg("Debugging.")
 
     main(args)

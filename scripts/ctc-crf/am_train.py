@@ -8,7 +8,7 @@ Differed from `train_dist.py`, this one supports read configurations from json f
 and is more non-hard-coding style.
 """
 
-import utils
+import coreutils
 import os
 import argparse
 import numpy as np
@@ -30,7 +30,7 @@ import ctc_crf_base
 
 def main(args):
     if not torch.cuda.is_available():
-        utils.highlight_msg("CPU only training is unsupported")
+        coreutils.highlight_msg("CPU only training is unsupported")
         return None
 
     ckptpath = os.path.join(args.dir, 'ckpt')
@@ -62,7 +62,8 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         print("> Data prepare")
     if args.h5py:
         data_format = "hdf5"
-        utils.highlight_msg("H5py reading might cause error with Multi-GPUs")
+        coreutils.highlight_msg(
+            "H5py reading might cause error with Multi-GPUs")
         Dataset = DataSet.SpeechDataset
         if args.trset is None or args.devset is None:
             raise FileNotFoundError(
@@ -100,18 +101,18 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         'log_train': ['epoch,loss,loss_real,net_lr,time'],
         'log_eval': ['loss_real,time']
     })
-    manager = utils.Manager(logger, build_model, args)
+    manager = coreutils.Manager(logger, build_model, args)
 
     # get GPU info
-    gpu_info = utils.gather_all_gpu_info(args.gpu)
+    gpu_info = coreutils.gather_all_gpu_info(args.gpu)
 
     if args.rank == 0:
         print("> Model built.")
         print("  Model size:{:.2f}M".format(
-            utils.count_parameters(manager.model)/1e6))
+            coreutils.count_parameters(manager.model)/1e6))
 
-        utils.gen_readme(args.dir+'/readme.md',
-                         model=manager.model, gpu_info=gpu_info)
+        coreutils.gen_readme(args.dir+'/readme.md',
+                             model=manager.model, gpu_info=gpu_info)
 
     # init ctc-crf, args.iscrf is set in build_model
     if args.iscrf:
@@ -158,7 +159,7 @@ def build_model(args, configuration, train=True) -> nn.Module:
 
     if 'lossfn' not in netconfigs:
         lossfn = 'crf'
-        utils.highlight_msg([
+        coreutils.highlight_msg([
             "Warning: not specified \'lossfn\' in configuration",
             "Defaultly set to \'crf\'"
         ])
@@ -168,7 +169,7 @@ def build_model(args, configuration, train=True) -> nn.Module:
     if lossfn == 'crf':
         if 'lamb' not in netconfigs:
             lamb = 0.01
-            utils.highlight_msg([
+            coreutils.highlight_msg([
                 "Warning: not specified \'lamb\' in configuration",
                 "Defaultly set to 0.01"
             ])
@@ -248,6 +249,6 @@ if __name__ == "__main__":
     torch.backends.cudnn.deterministic = True
 
     if args.debug:
-        utils.highlight_msg("Debugging")
+        coreutils.highlight_msg("Debugging")
 
     main(args)

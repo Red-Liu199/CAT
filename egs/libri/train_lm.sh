@@ -5,8 +5,8 @@
 # stage 2: picklize the datasets
 # stage 3: nn lm training
 
-stage=2
-stop_stage=2
+stage=3
+stop_stage=3
 
 text_dir=data/text
 mkdir -p $text_dir
@@ -87,13 +87,12 @@ if [ $stage -le 3 ] && [ $stop_stage -ge 3 ]; then
     # CUDA_VISIBLE_DEVICES="8,7,6,5"  \
     python3 ctc-crf/lm_train.py --seed=0        \
         --world-size 1 --rank 0 -j 1            \
-        --batch_size=10                         \
+        --batch_size=1152                       \
         --dir=$dir                              \
         --config=$dir/config.json               \
         --data=data/                            \
-        --trset=$text_dir/data/tr.pkl           \
-        --devset=$text_dir/data/dev.pkl         \
+        --trset=data/spm/data/tr.pkl            \
+        --devset=data/spm/data/dev.pkl          \
         --grad-accum-fold=1                     \
-        --debug \
         || exit 1
 fi

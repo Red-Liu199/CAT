@@ -163,7 +163,7 @@ class BeamSearchRNNTransducer(OpenspeechBeamSearchBase):
             transducer,
             beam_size: int = 3,
             expand_beam: float = 2.3,
-            state_beam: float = 4.6,
+            state_beam: float = 2.3,
             blank_id: int = 0,
     ) -> None:
         super(BeamSearchRNNTransducer, self).__init__(beam_size)
@@ -258,17 +258,6 @@ class BeamSearchRNNTransducer(OpenspeechBeamSearchBase):
                             topk_hyp["prediction"].append(topk_idx[j].item())
                             topk_hyp["hidden_states"] = hidden_states
                             process_hyps.append(topk_hyp)
-
-                    ########## DEBUG CODE ###########
-                    # print("t={}".format(t_step))
-                    # for beam in ongoing_beams:
-                    #     print("{:.3f}".format(beam['logp_score']), beam['prediction'])
-                    # print("")
-                    #################################
-
-            ########## DEBUG CODE ###########
-            # exit(1)
-            #################################
 
             ongoing_beams = sorted(
                 ongoing_beams,

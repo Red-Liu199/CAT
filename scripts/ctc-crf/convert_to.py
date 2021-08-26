@@ -7,7 +7,7 @@ Author: Hongyu Xiang, Keyu An, Zheng Huahuan
 import kaldiio
 import numpy as np
 import argparse
-import utils
+import coreutils
 import pickle
 import h5py
 from tqdm import tqdm
@@ -39,7 +39,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.warning:
-        utils.highlight_msg([
+        coreutils.highlight_msg([
             "Calculation of CTC loss requires the input sequence to be longer than ctc_len(labels)",
             "Check that in 'ctc-crf/convert_to.py' if your model does subsampling on seq",
             "Make your modify at line 'if feature.shape[0] < ctc_len(label):' to filter unqualified seq",

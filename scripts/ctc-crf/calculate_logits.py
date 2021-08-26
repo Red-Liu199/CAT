@@ -5,12 +5,12 @@ Author: Hongyu Xiang, Keyu An, Zheng Huahuan
 """
 
 import json
-import utils
+import coreutils
 import argparse
 import kaldiio
 import numpy as np
 from tqdm import tqdm
-from train import build_model
+from am_train import build_model
 from dataset import InferDataset
 from collections import OrderedDict
 
@@ -23,7 +23,7 @@ import torch.multiprocessing as mp
 
 def main(args):
     if not torch.cuda.is_available():
-        utils.highlight_msg("Using CPU")
+        coreutils.highlight_msg("Using CPU")
         single_worker('cpu', args.nj, args)
         return None
 
@@ -32,7 +32,7 @@ def main(args):
     print(f"> Global number of GPUs: {args.world_size}")
     num_jobs = args.nj
     if num_jobs <= ngpus_per_node:
-        utils.highlight_msg(
+        coreutils.highlight_msg(
             [
                 f"Number of jobs (--nj={num_jobs}) is too small",
                 "Use only one GPU for avoiding errors"
@@ -49,7 +49,8 @@ def main(args):
         return None
     else:
         # This is a hack for non-divisible length of data to number of GPUs
-        utils.highlight_msg("Using hack to deal with undivisible seq length")
+        coreutils.highlight_msg(
+            "Using hack to deal with undivisible seq length")
         mp.spawn(main_worker, nprocs=ngpus_per_node,
                  args=(ngpus_per_node, args, num_jobs-1))
         single_worker("cuda:0", 1, args, len(inferset)-res)
@@ -97,7 +98,7 @@ def main_worker(gpu, ngpus_per_node, args, num_jobs):
     if args.rank == 0:
         print("> Model built.")
         print("  Model size:{:.2f}M".format(
-            utils.count_parameters(model)/1e6))
+            coreutils.count_parameters(model)/1e6))
 
     cal_logit(model, testloader, args.gpu, local_writers)
 
@@ -129,7 +130,7 @@ def single_worker(device, num_jobs, args, idx_beg=0):
 
     print("> Model built.")
     print("  Model size:{:.2f}M".format(
-        utils.count_parameters(model)/1e6))
+        coreutils.count_parameters(model)/1e6))
 
     cal_logit(model, testloader, device, local_writers)
 

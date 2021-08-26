@@ -31,11 +31,15 @@ for set in test_clean test_other dev_clean dev_other; do
     fi
 done
 
+if [ ! $KALDI_ROOT ]; then
+    echo "No KALDI_ROOT specified."
+    exit 1
+fi
+
 echo "" > $dec_dir/result
 for set in test_clean test_other dev_clean dev_other; do
     if [ -f $dec_dir/decode_${set}.txt ]; then
-        $KALDI_ROOT/src/bin/compute-wer --text --mode=present ark:data/test_$set/text ark:$dec_dir/decode_${set}.txt >> $dec_dir/result
-        echo "" >> $dec_dir/result
+        $KALDI_ROOT/src/bin/compute-wer --text --mode=present ark:data/$set/text ark:$dec_dir/decode_${set}.txt | grep WER >> $dec_dir/result
     else
         echo "No decoded text found."
     fi
