@@ -119,8 +119,10 @@ def decode(args, model: Transducer, testloader, device, local_writer):
         key, x, x_lens = batch
         x = x.to(device, non_blocking=True)
 
-        pred = model.decode(x, x_lens, mode=args.mode,
-                            beam_size=args.beam_size)
+        # pred = model.decode(x, x_lens, mode=args.mode,
+        #                     beam_size=args.beam_size)
+        pred = model.decode_conv(
+            x, x_lens, beam_size=args.beam_size, kernel_size=(3, 3))
 
         seq = sp.decode(pred.data.cpu().tolist())
         results.append((key, seq))

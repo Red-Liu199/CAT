@@ -19,7 +19,7 @@ from lm_train import LSTMPredictNet
 from collections import OrderedDict
 from typing import Union, Tuple, Sequence, Iterable
 from warp_rnnt import rnnt_loss as RNNTLoss
-from beam_search_base import BeamSearchRNNTransducer
+from beam_search_base import BeamSearchRNNTransducer, BeamSearchConvTransducer, ConvMemBuffer
 
 import torch
 import torch.nn as nn
@@ -174,6 +174,13 @@ class Transducer(nn.Module):
         else:
             raise ValueError("Unknown decode mode: {}".format(mode))
 
+    @torch.no_grad()
+    def decode_conv(self, inputs: torch.FloatTensor, input_lengths: torch.LongTensor, beam_size: int, kernel_size: Union[int, Tuple[int, int]]):
+        encoder_output, o_lens = self.encoder(inputs, input_lengths)
+        searcher = BeamSearchConvTransducer(
+            self, kernel_size, beam_size, blank_id=0).to(inputs.device)
+        return searcher.forward(encoder_output, o_lens.max())
+
 
 class JointNet(nn.Module):
     """
@@ -257,12 +264,7 @@ class CausalConv2d(nn.Module):
 
     def __init__(self, in_channels: int, out_channels: int, kernel_size: int):
         super().__init__()
-        '''
-        padding (int, tuple(int, int)): padding to the top of T and left of U,
-            which would be extended to (padding+T, padding+U)
-        '''
-        padding = kernel_size - 1
-        if in_channels < 1 or out_channels < 1 or kernel_size < 2 or padding < 1:
+        if in_channels < 1 or out_channels < 1 or kernel_size < 2:
             raise ValueError(
                 f"Invalid initialization for CausalConv2d: {in_channels}, {out_channels}, {kernel_size}")
 
@@ -270,7 +272,6 @@ class CausalConv2d(nn.Module):
         self.causal_conv = nn.Sequential(OrderedDict({
             'relu': nn.ReLU(inplace=True),
             'bn': nn.BatchNorm2d(in_channels),
-            'padding': nn.ConstantPad2d(padding=(padding, 0, padding, 0), value=0.),
             # seperate convlution
             'depth_conv': nn.Conv2d(in_channels, in_channels, kernel_size=kernel_size, groups=in_channels),
             'point_conv': nn.Conv2d(in_channels, out_channels, kernel_size=1)
@@ -291,9 +292,18 @@ class ConvJointNet(nn.Module):
         K = max(odim_encoder, odim_decoder)
         self.fc_enc = nn.Linear(odim_encoder, K)
         self.fc_dec = nn.Linear(odim_decoder, K)
-        self.conv = CausalConv2d(K, num_classes, 3)
 
-    def forward(self, encoder_output: torch.FloatTensor, decoder_output: torch.FloatTensor, hidden=None) -> Tuple[torch.Tensor, Union[torch.Tensor, None]]:
+        kernel_size = 3
+        padding = kernel_size - 1
+        '''
+        padding (int, tuple(int, int)): padding to the top of T and left of U,
+            which would be extended to (padding+T, padding+U)
+        '''
+        self.padding = nn.ConstantPad2d(
+            padding=(padding, 0, padding, 0), value=0.),
+        self.conv = CausalConv2d(K, num_classes, kernel_size)
+
+    def forward(self, encoder_output: torch.FloatTensor, decoder_output: torch.FloatTensor, buffers: Sequence[ConvMemBuffer] = None, t: int = -1, u: int = -1) -> Tuple[torch.Tensor, Union[Sequence[ConvMemBuffer], None]]:
         encoder_output = self.fc_enc(encoder_output)
         decoder_output = self.fc_dec(decoder_output)
 
@@ -311,22 +321,23 @@ class ConvJointNet(nn.Module):
             decoder_output = decoder_output.unsqueeze(2)
 
             # (N, K, T_max, U_max)
-
-            ########## DEBUG CODE ###########
-            # print(encoder_output.size(), decoder_output.size())
-            # exit(1)
-            #################################
-
             expanded_x = encoder_output + decoder_output
 
             # (N, K, T_max, U_max) -> (N, T_max, U_max, V) -> (N, T_max, U_max, V)
-            conv_x = self.conv(expanded_x).permute(
+            padded_x = self.padding(expanded_x)
+            conv_x = self.conv(padded_x).permute(
                 0, 2, 3, 1).contiguous()  # type: torch.Tensor
             return conv_x.log_softmax(dim=-1), None
 
         else:
             # decoding
-            raise NotImplementedError
+            buffers = [x.replica() for x in buffers]
+            buffers[0].append(t, u, encoder_output+decoder_output)
+
+            # (K, S_t, S_u) -> (1, K, S_t, S_u) -> (1, V, 1, 1)
+            conv_x = self.conv(buffers[0].mem.unsqueeze(0))
+
+            return conv_x.view(-1), buffers
 
 
 @torch.no_grad()

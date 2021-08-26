@@ -275,12 +275,13 @@ class BeamSearchRNNTransducer(OpenspeechBeamSearchBase):
 
 
 class ConvMemBuffer(nn.Module):
-    def __init__(self, kernel_size: Union[int, Tuple[int, int]], channels: int) -> None:
+    def __init__(self, kernel_size: Union[int, Tuple[int, int]]) -> None:
         super().__init__()
         if isinstance(kernel_size, int):
             kernel_size = (kernel_size, kernel_size)
 
-        self._mem = torch.zeros((channels,)+kernel_size)
+        self._kernel_size = kernel_size
+        self._mem = None  # type: Union[None, torch.Tensor]
         self._last_t_u = [-1, -1]
 
     def append(self, t: int, u: int, state: torch.Tensor):
@@ -290,13 +291,14 @@ class ConvMemBuffer(nn.Module):
 
         if t == 0 and u == 0:
             self._last_t_u = [0, 0]
+            self._mem = state.new_zeros((state.size(0),)+self._kernel_size)
         elif t > self._last_t_u[0]:
             self._last_t_u[0] += 1
-            self._mem.roll(-1, 1)
+            self._mem = torch.roll(self._mem, - 1, 1)
             self._mem[:, -1, :] = 0.
         elif u > self._last_t_u[1]:
             self._last_t_u[1] += 1
-            self._mem.roll(-1, 2)
+            self._mem = torch.roll(self._mem, - 1, 2)
             self._mem[:, :, -1] = 0.
         else:
             raise RuntimeError(
@@ -309,7 +311,7 @@ class ConvMemBuffer(nn.Module):
         return self._mem
 
     def replica(self):
-        newbuffer = ConvMemBuffer(self._mem.size()[1:], self._mem.size(0))
+        newbuffer = ConvMemBuffer(self._kernel_size)
         newbuffer._mem = self._mem
         newbuffer._last_t_u = self._last_t_u[:]
         return newbuffer
@@ -320,18 +322,17 @@ class BeamSearchConvTransducer(OpenspeechBeamSearchBase):
             self,
             transducer,
             kernel_size: Union[int, Tuple[int, int]],
-            channels: int,
             beam_size: int = 3,
             expand_beam: float = 2.3,
             state_beam: float = 2.3,
             blank_id: int = 0,
     ) -> None:
-        super(BeamSearchRNNTransducer, self).__init__(beam_size)
+        super(BeamSearchConvTransducer, self).__init__(beam_size)
         self._trans = transducer
         self.expand_beam = expand_beam
         self.state_beam = state_beam
         self.blank_id = blank_id
-        self._buffer = ConvMemBuffer(kernel_size, channels)
+        self._buffer = ConvMemBuffer(kernel_size)
 
     def forward(self, encoder_outputs: torch.Tensor, max_length: int):
         r"""
@@ -361,7 +362,7 @@ class BeamSearchConvTransducer(OpenspeechBeamSearchBase):
                 "prediction": [self.sos_id],
                 "logp_score": 0.0,
                 "hidden_states": None,
-                "mem_blocks": self._buffer.replica()
+                "mem_blocks": [self._buffer.replica()]
             }
             ongoing_beams = [hyp]
 
@@ -396,7 +397,7 @@ class BeamSearchConvTransducer(OpenspeechBeamSearchBase):
                     step_outputs, hidden_states = self._trans.decoder(
                         step_input, a_best_hyp["hidden_states"])
                     log_probs, mem_blocks = self._trans.joint(
-                        encoder_outputs[batch_idx, t_step, :], step_outputs.view(-1), a_best_hyp["mem_blocks"])
+                        encoder_outputs[batch_idx, t_step, :], step_outputs.view(-1), a_best_hyp["mem_blocks"], t_step, len(a_best_hyp["prediction"])-1)
 
                     topk_targets, topk_idx = log_probs.topk(k=self.beam_size)
 
@@ -410,7 +411,7 @@ class BeamSearchConvTransducer(OpenspeechBeamSearchBase):
                             "prediction": a_best_hyp["prediction"][:],
                             "logp_score": a_best_hyp["logp_score"] + topk_targets[j],
                             "hidden_states": a_best_hyp["hidden_states"],
-                            "mem_blocks": a_best_hyp["mem_blocks"].replica()
+                            "mem_blocks": mem_blocks
                         }
 
                         if topk_idx[j] == self.blank_id:
@@ -420,8 +421,6 @@ class BeamSearchConvTransducer(OpenspeechBeamSearchBase):
                         if topk_targets[j] >= best_logp - self.expand_beam:
                             topk_hyp["prediction"].append(topk_idx[j].item())
                             topk_hyp["hidden_states"] = hidden_states
-                            topk_hyp["mem_blocks"].append(t_step, len(
-                                topk_hyp["prediction"])-1, mem_blocks)
                             process_hyps.append(topk_hyp)
 
             ongoing_beams = sorted(
