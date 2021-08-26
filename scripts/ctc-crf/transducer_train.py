@@ -262,25 +262,29 @@ class CausalConv2d(nn.Module):
         kernel_size  (int): the kernel size (kernel is square)
     """
 
-    def __init__(self, in_channels: int, out_channels: int, kernel_size: int):
+    def __init__(self, in_channels: int, out_channels: int, kernel_size: int, islast: bool = False):
         super().__init__()
         if in_channels < 1 or out_channels < 1 or kernel_size < 2:
             raise ValueError(
                 f"Invalid initialization for CausalConv2d: {in_channels}, {out_channels}, {kernel_size}")
 
-        # FIXME: I think a normalization is helpful so that the padding won't change the distribution of features.
-        self.causal_conv = nn.Sequential(OrderedDict({
-            'relu': nn.ReLU(inplace=True),
-            'bn': nn.BatchNorm2d(in_channels),
-            # seperate convlution
-            'depth_conv': nn.Conv2d(in_channels, in_channels, kernel_size=kernel_size, groups=in_channels),
-            'point_conv': nn.Conv2d(in_channels, out_channels, kernel_size=1)
-            # 'conv': nn.Conv2d(in_channels, out_channels, kernel_size)
-        }))
-
-        # this is for inference
-        self.state_buffer = torch.zeros(
-            (1, in_channels, kernel_size, kernel_size))
+        if islast:
+            self.causal_conv = nn.Sequential(OrderedDict({
+                # seperate convlution
+                'depth_conv': nn.Conv2d(in_channels, in_channels, kernel_size=kernel_size, groups=in_channels),
+                'point_conv': nn.Conv2d(in_channels, out_channels, kernel_size=1)
+                # 'conv': nn.Conv2d(in_channels, out_channels, kernel_size)
+            }))
+        else:
+            # FIXME: I think a normalization is helpful so that the padding won't change the distribution of features.
+            self.causal_conv = nn.Sequential(OrderedDict({
+                # seperate convlution
+                'depth_conv': nn.Conv2d(in_channels, in_channels, kernel_size=kernel_size, groups=in_channels),
+                'point_conv': nn.Conv2d(in_channels, out_channels, kernel_size=1),
+                'relu': nn.ReLU(inplace=True),
+                'bn': nn.BatchNorm2d(in_channels),
+                # 'conv': nn.Conv2d(in_channels, out_channels, kernel_size)
+            }))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.causal_conv(x)
@@ -292,6 +296,7 @@ class ConvJointNet(nn.Module):
         K = max(odim_encoder, odim_decoder)
         self.fc_enc = nn.Linear(odim_encoder, K)
         self.fc_dec = nn.Linear(odim_decoder, K)
+        self.act = nn.Tanh()
 
         kernel_size = 3
         padding = kernel_size - 1
@@ -300,8 +305,8 @@ class ConvJointNet(nn.Module):
             which would be extended to (padding+T, padding+U)
         '''
         self.padding = nn.ConstantPad2d(
-            padding=(padding, 0, padding, 0), value=0.),
-        self.conv = CausalConv2d(K, num_classes, kernel_size)
+            padding=(padding, 0, padding, 0), value=0.)
+        self.conv = CausalConv2d(K, num_classes, kernel_size, islast=True)
 
     def forward(self, encoder_output: torch.FloatTensor, decoder_output: torch.FloatTensor, buffers: Sequence[ConvMemBuffer] = None, t: int = -1, u: int = -1) -> Tuple[torch.Tensor, Union[Sequence[ConvMemBuffer], None]]:
         encoder_output = self.fc_enc(encoder_output)
@@ -321,7 +326,7 @@ class ConvJointNet(nn.Module):
             decoder_output = decoder_output.unsqueeze(2)
 
             # (N, K, T_max, U_max)
-            expanded_x = encoder_output + decoder_output
+            expanded_x = self.act(encoder_output + decoder_output)
 
             # (N, K, T_max, U_max) -> (N, T_max, U_max, V) -> (N, T_max, U_max, V)
             padded_x = self.padding(expanded_x)
@@ -332,6 +337,8 @@ class ConvJointNet(nn.Module):
         else:
             # decoding
             buffers = [x.replica() for x in buffers]
+            # (K,)
+            expanded_x = self.act(encoder_output + decoder_output)
             buffers[0].append(t, u, encoder_output+decoder_output)
 
             # (K, S_t, S_u) -> (1, K, S_t, S_u) -> (1, V, 1, 1)
