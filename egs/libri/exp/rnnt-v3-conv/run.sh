@@ -8,6 +8,7 @@ data_train="data/train_tr95"
 data_dev="data/train_cv05"
 stage=3
 stop_stage=3
+export CUDA_VISIBLE_DEVICES=8 #"8,7,6,5,4"
 
 dir=$(dirname $0)
 nj=$(nproc)
@@ -102,7 +103,6 @@ if [ $stage -le 3 ] && [ $stop_stage -ge 3 ]; then
     echo "NN training"
 
     ln -snf $dir/ckpt/monitor.png link-monitor.png
-    CUDA_VISIBLE_DEVICES="8,7,6,5,4"  \
     python3 ctc-crf/transducer_train.py --seed=0  \
         --world-size 1 --rank 0             \
         --dist-url='tcp://127.0.0.1:13944'  \
@@ -112,7 +112,7 @@ if [ $stage -le 3 ] && [ $stop_stage -ge 3 ]; then
         --data=data/                        \
         --trset=$spmdata/tr.pickle          \
         --devset=$spmdata/cv.pickle         \
-        --grad-accum-fold=15                 \
+        --grad-accum-fold=15                \
         || exit 1
 
     ./decode.sh $dir

@@ -10,15 +10,46 @@ import math
 import torch
 import numpy as np
 from collections import OrderedDict
-from typing import Tuple
+from typing import Tuple, Iterable, Union
+
+from torch.distributed.optim import ZeroRedundancyOptimizer
 
 
-def SetupOptim(type_optim: str, paramlist, **kwargs) -> torch.optim.Optimizer:
-    return getattr(torch.optim, type_optim)(paramlist, **kwargs)
+def SetupOptim(type_optim: str, paramlist: Iterable[torch.nn.parameter.Parameter], use_zero: bool = False, **kwargs) -> Union[torch.optim.Optimizer, ZeroRedundancyOptimizer]:
+    """Setup the optimizer.
+
+    Args:
+        type_optim (str): name of optimizer, should be an attribute of `torch.optim`, like `Adam`, `SGD`.
+        paramlist (Iterable[Parameter]): a iterator or generator that returns parameters to be optimized.
+        use_zero (bool, default False): a flag to determinte whether use `ZeroRedundancyOptimizer` or not,
+            ref to https://pytorch.org/tutorials/recipes/zero_redundancy_optimizer.html, which is supported since
+            torch 1.8.0
+        **kwargs: any keyword arguments can be passed into optimizer initializatio.
+    
+    Return:
+        optimizer (torch.optim.Optimizer | ZeroRedundancyOptimizer)
+
+    Example:
+        >>> # With `use_zero=False`
+        >>> model = nn.Linear(3,4)
+        >>> optimizer = SetupOptim('Adam', model.parameters(), lr=1e-3, betas=(0.9,0.99))
+        >>> # With `use_zero=True`
+        >>> # ... (init of DDP)
+        >>> model = torch.nn.parallel.DistributedDataParallel(model)
+        >>> optimizer = SetupOptim('Adam', model.parameters(), lr=1e-3, betas=(0.9,0.99))
+    """
+    if not use_zero:
+        return getattr(torch.optim, type_optim)(paramlist, **kwargs)
+    else:
+        print("Using zero reduncdancy optimizer...")
+        # FIXME: This is still a experimental function in torch 1.9.0
+        zerooptimizer = ZeroRedundancyOptimizer(
+            params=paramlist, optim=getattr(torch.optim, type_optim), **kwargs)
+        return zerooptimizer
 
 
 class Scheduler(object):
-    def __init__(self, optimizer_configs, paramlist, reverse_metric_direc=False):
+    def __init__(self, optimizer_configs: dict, paramlist: Iterable[torch.nn.parameter.Parameter], reverse_metric_direc=False):
         super().__init__()
         self.optimizer = SetupOptim(
             optimizer_configs['type_optim'], paramlist, **optimizer_configs['kwargs'])
@@ -34,7 +65,7 @@ class Scheduler(object):
     def update_lr(self, *args, **kwargs):
         return None
 
-    def _adjust_lr_(self, lr):
+    def _adjust_lr_(self, lr: float):
         for param_group in self.optimizer.param_groups:
             param_group['lr'] = lr
 
@@ -47,7 +78,7 @@ class Scheduler(object):
                 output[name] = value
         return output
 
-    def load_state_dict(self, ckpt: OrderedDict, optim_only=False):
+    def load_state_dict(self, ckpt: OrderedDict, optim_only: bool = False):
         if optim_only:
             self.optimizer.load_state_dict(ckpt['optimizer'])
             return None
@@ -63,7 +94,7 @@ class Scheduler(object):
     def impl_step(self, metric) -> Tuple[int, str]:
         raise NotImplementedError
 
-    def step(self, global_epoch, metric) -> Tuple[int, str]:
+    def step(self, global_epoch: int, metric) -> Tuple[int, str]:
         """Optimizer step
 
         Args:

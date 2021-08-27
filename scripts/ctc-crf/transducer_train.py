@@ -135,6 +135,21 @@ class Transducer(nn.Module):
         if isinstance(joint_out, tuple):
             joint_out = joint_out[0]
 
+        ########## DEBUG CODE ###########
+        # import matplotlib.pyplot as plt
+        # harvest = torch.sum(torch.exp(joint_out[0, :, :, 1:].cpu().detach()), dim=-1).transpose(0,1).numpy()
+        # print(harvest.shape)
+        # print(harvest)
+        # fig, ax = plt.subplots()
+        # im = ax.imshow(harvest)
+        # plt.xlabel('T')
+        # plt.ylabel('U')
+        # plt.tight_layout()
+        # plt.savefig("tmp.png", dpi=300)
+        # plt.close()
+        # exit(1)
+        #################################
+
         loss = RNNTLoss(joint_out, targets.to(dtype=torch.int32), o_lens.to(
             dtype=torch.int32), target_lengths.to(dtype=torch.int32), reduction='mean', gather=True)
 
@@ -170,7 +185,7 @@ class Transducer(nn.Module):
         elif mode == 'beam':
             assert beam_size > 1
             searcher = BeamSearchRNNTransducer(self, beam_size, blank_id=0)
-            return searcher.forward(encoder_output, o_lens)
+            return searcher.forward(encoder_output, o_lens.max())
         else:
             raise ValueError("Unknown decode mode: {}".format(mode))
 
@@ -262,9 +277,9 @@ class CausalConv2d(nn.Module):
         kernel_size  (int): the kernel size (kernel is square)
     """
 
-    def __init__(self, in_channels: int, out_channels: int, kernel_size: int, islast: bool = False):
+    def __init__(self, in_channels: int, out_channels: int, kernel_size: Union[int, Tuple[int, int]], islast: bool = False):
         super().__init__()
-        if in_channels < 1 or out_channels < 1 or kernel_size < 2:
+        if in_channels < 1 or out_channels < 1:
             raise ValueError(
                 f"Invalid initialization for CausalConv2d: {in_channels}, {out_channels}, {kernel_size}")
 
@@ -291,21 +306,23 @@ class CausalConv2d(nn.Module):
 
 
 class ConvJointNet(nn.Module):
-    def __init__(self, odim_encoder: int, odim_decoder: int, num_classes: int):
+    def __init__(self, odim_encoder: int, odim_decoder: int, num_classes: int, kernel_size: Union[int, Tuple[int, int]] = (3, 3)):
         super().__init__()
         K = max(odim_encoder, odim_decoder)
         self.fc_enc = nn.Linear(odim_encoder, K)
         self.fc_dec = nn.Linear(odim_decoder, K)
         self.act = nn.Tanh()
 
-        kernel_size = 3
-        padding = kernel_size - 1
+        # kernel among (T, U)
+        if isinstance(kernel_size, int):
+            kernel_size = (kernel_size, kernel_size)
+        padding = [kernel_size[0] - 1, kernel_size[1] - 1]
         '''
         padding (int, tuple(int, int)): padding to the top of T and left of U,
-            which would be extended to (padding+T, padding+U)
+            which would be extended to (padding[0]+T, padding[1]+U)
         '''
         self.padding = nn.ConstantPad2d(
-            padding=(padding, 0, padding, 0), value=0.)
+            padding=(padding[1], 0, padding[0], 0), value=0.)
         self.conv = CausalConv2d(K, num_classes, kernel_size, islast=True)
 
     def forward(self, encoder_output: torch.FloatTensor, decoder_output: torch.FloatTensor, buffers: Sequence[ConvMemBuffer] = None, t: int = -1, u: int = -1) -> Tuple[torch.Tensor, Union[Sequence[ConvMemBuffer], None]]:
@@ -319,19 +336,25 @@ class ConvJointNet(nn.Module):
             encoder_output = encoder_output.transpose(1, 2).contiguous()
             # (N, U_max, K) -> (N, K, U_max)
             decoder_output = decoder_output.transpose(1, 2).contiguous()
-
             # (N, K, T_max) -> (N, K, T_max, 1)
             encoder_output = encoder_output.unsqueeze(3)
             # (N, K, U_max) -> (N, K, 1, U_max)
             decoder_output = decoder_output.unsqueeze(2)
-
             # (N, K, T_max, U_max)
             expanded_x = self.act(encoder_output + decoder_output)
-
             # (N, K, T_max, U_max) -> (N, T_max, U_max, V) -> (N, T_max, U_max, V)
             padded_x = self.padding(expanded_x)
             conv_x = self.conv(padded_x).permute(
                 0, 2, 3, 1).contiguous()  # type: torch.Tensor
+
+            ########## DEBUG CODE ###########
+            # print(conv_x.device)
+            # print(expanded_x.size())
+            # print(padded_x.size())
+            # print(conv_x.size())
+            # exit(1)
+            #################################
+
             return conv_x.log_softmax(dim=-1), None
 
         else:
@@ -344,7 +367,7 @@ class ConvJointNet(nn.Module):
             # (K, S_t, S_u) -> (1, K, S_t, S_u) -> (1, V, 1, 1)
             conv_x = self.conv(buffers[0].mem.unsqueeze(0))
 
-            return conv_x.view(-1), buffers
+            return conv_x.view(-1).log_softmax(dim=-1), buffers
 
 
 @torch.no_grad()
