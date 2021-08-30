@@ -8,7 +8,6 @@ Directly execute: (in working directory)
 """
 
 import argparse
-import sys
 import os
 import pandas as pd
 import matplotlib.pyplot as plt

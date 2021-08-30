@@ -88,8 +88,7 @@ class Scheduler(object):
             if name not in ckpt:
                 continue
             if name == "optimizer":
-                # self.optimizer.load_state_dict(ckpt[name])
-                pass
+                self.optimizer.load_state_dict(ckpt[name])
             else:
                 setattr(self, name, ckpt[name])
 

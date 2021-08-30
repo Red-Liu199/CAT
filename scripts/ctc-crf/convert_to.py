@@ -11,6 +11,7 @@ import coreutils
 import pickle
 import h5py
 from tqdm import tqdm
+from typing import Callable
 
 
 def ctc_len(label):
@@ -67,6 +68,11 @@ if __name__ == "__main__":
     count = 0
     L_MAX = args.filer if args.filer > 0 else float('inf')
     num_lines = sum(1 for line in open(args.scp, 'r'))
+    if args.describe is None:
+        def formated_L(x): return x
+    else:
+        # type: Callable[[int], int]
+        formated_L = eval(f'lambda L: {args.describe}')
     with open(args.scp, 'r') as fi:
         for line in tqdm(fi, total=num_lines):
             key, loc_ark = line.split()
@@ -75,13 +81,7 @@ if __name__ == "__main__":
             weight = weight_dict[key]
             feature = kaldiio.load_mat(loc_ark)
 
-            if args.describe is not None:
-                described_length = int(
-                    eval(args.describe.replace('L', str(feature.shape[0]))))
-            else:
-                described_length = feature.shape[0]
-
-            # if described_length < ctc_len(label) or feature.shape[0] > L_MAX:
+            # if formated_L(feature.shape[0]) < ctc_len(label) or feature.shape[0] > L_MAX:
             if feature.shape[0] > L_MAX:
                 count += 1
                 continue

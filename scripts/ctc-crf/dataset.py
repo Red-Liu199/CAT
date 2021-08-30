@@ -9,9 +9,7 @@ import kaldiio
 import h5py
 import coreutils
 import pickle
-import numpy as np
 from kaldiio import ReadHelper
-from tqdm import tqdm
 from typing import Union, Tuple, Sequence
 
 import torch

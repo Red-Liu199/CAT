@@ -248,7 +248,7 @@ def gen_readme(path: str, model: nn.Module, gpu_info: list = []) -> str:
         "```",
         "",
         "### Monitor figure",
-        "![monitor](./monitor.png)",
+        "![monitor](./ckpt/monitor.png)",
         ""
     ]
     with open(path, 'w') as fo:
