@@ -20,7 +20,7 @@
         }
     },
     "decoder": {
-        "free": false,
+        "freeze": false,
         "pretrained": "exp/rnnt-v1-wp1024/lm-non-act-ckpt/bestckpt.pt",
         "kwargs": {
             "num_classes": 1024,
@@ -42,7 +42,6 @@
         "optimizer": {
             "type_optim": "Adam",
             "kwargs": {
-                "use_zero": true,
                 "lr": 3e-4,
                 "betas": [
                     0.9,

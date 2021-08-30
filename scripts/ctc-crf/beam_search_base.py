@@ -281,38 +281,46 @@ class ConvMemBuffer(nn.Module):
             kernel_size = (kernel_size, kernel_size)
 
         self._kernel_size = kernel_size
-        self._mem = None  # type: Union[None, torch.Tensor]
+        self._mem_T = None  # type: Union[None, torch.Tensor]
+        self._mem_U = None  # type: Union[None, torch.Tensor]
         self._last_t_u = [-1, -1]
 
-    def append(self, t: int, u: int, state: torch.Tensor):
+    def append(self, t: int, u: int, state_T: torch.Tensor, state_U: torch.Tensor):
+        """
+        Append the new states in the buffer.
+        """
         if t < 0 or u < 0:
             raise RuntimeError(
                 f"Invalid (t, u) is fed into buffer: ({t}, {u}).")
 
         if t == 0 and u == 0:
             self._last_t_u = [0, 0]
-            self._mem = state.new_zeros((state.size(0),)+self._kernel_size)
+            self._mem_T = state_T.new_zeros(
+                self._kernel_size[0], state_T.size(0))
+            self._mem_U = state_U.new_zeros(
+                self._kernel_size[1], state_U.size(0))
+            self._mem_T[-1] = state_T
+            self._mem_U[-1] = state_U
         elif t > self._last_t_u[0]:
             self._last_t_u[0] += 1
-            self._mem = torch.roll(self._mem, - 1, 1)
-            self._mem[:, -1, :] = 0.
+            self._mem_T = torch.roll(self._mem_T, - 1, 0)
+            self._mem_T[-1] = state_T
         elif u > self._last_t_u[1]:
             self._last_t_u[1] += 1
-            self._mem = torch.roll(self._mem, - 1, 2)
-            self._mem[:, :, -1] = 0.
+            self._mem_U = torch.roll(self._mem_U, -1, 0)
+            self._mem_U[-1] = state_U
         else:
             raise RuntimeError(
                 f"Illegal (t, u) is fed into buffer: ({t}, {u}).")
 
-        self._mem[:, -1, -1] = state
-
     @property
-    def mem(self) -> torch.Tensor:
-        return self._mem
+    def mem(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        return (self._mem_T, self._mem_U)
 
     def replica(self):
         newbuffer = ConvMemBuffer(self._kernel_size)
-        newbuffer._mem = self._mem
+        newbuffer._mem_T = self._mem_T
+        newbuffer._mem_U = self._mem_U
         newbuffer._last_t_u = self._last_t_u[:]
         return newbuffer
 

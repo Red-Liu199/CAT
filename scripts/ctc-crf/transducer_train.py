@@ -34,14 +34,6 @@ def main(args: argparse.Namespace):
         coreutils.highlight_msg("CPU only training is unsupported")
         return None
 
-    ckptpath = os.path.join(args.dir, 'ckpt')
-    os.makedirs(ckptpath, exist_ok=True)
-    setattr(args, 'iscrf', False)
-    setattr(args, 'ckptpath', ckptpath)
-    if os.listdir(args.ckptpath) != [] and not args.debug and args.resume is None:
-        raise FileExistsError(
-            f"{args.ckptpath} is not empty! Refuse to run the experiment.")
-
     ngpus_per_node = torch.cuda.device_count()
     args.world_size = ngpus_per_node * args.world_size
     print(f"Global number of GPUs: {args.world_size}")
@@ -137,9 +129,8 @@ class Transducer(nn.Module):
 
         ########## DEBUG CODE ###########
         # import matplotlib.pyplot as plt
-        # harvest = torch.sum(torch.exp(joint_out[0, :, :, 1:].cpu().detach()), dim=-1).transpose(0,1).numpy()
+        # harvest = torch.sum(torch.exp(joint_out[0, :o_lens[0], :, 1:].cpu().detach()), dim=-1).transpose(0,1).numpy()
         # print(harvest.shape)
-        # print(harvest)
         # fig, ax = plt.subplots()
         # im = ax.imshow(harvest)
         # plt.xlabel('T')
@@ -150,8 +141,8 @@ class Transducer(nn.Module):
         # exit(1)
         #################################
 
-        loss = RNNTLoss(joint_out, targets.to(dtype=torch.int32), o_lens.to(
-            dtype=torch.int32), target_lengths.to(dtype=torch.int32), reduction='mean', gather=True)
+        loss = RNNTLoss(joint_out, targets.to(dtype=torch.int32), o_lens.to(device=joint_out.device,
+                                                                            dtype=torch.int32), target_lengths.to(device=joint_out.device, dtype=torch.int32), reduction='mean', gather=True)
 
         return loss
 
@@ -326,10 +317,11 @@ class ConvJointNet(nn.Module):
         self.conv = CausalConv2d(K, num_classes, kernel_size, islast=True)
 
     def forward(self, encoder_output: torch.FloatTensor, decoder_output: torch.FloatTensor, buffers: Sequence[ConvMemBuffer] = None, t: int = -1, u: int = -1) -> Tuple[torch.Tensor, Union[Sequence[ConvMemBuffer], None]]:
-        encoder_output = self.fc_enc(encoder_output)
-        decoder_output = self.fc_dec(decoder_output)
 
         if encoder_output.dim() == 3:
+            encoder_output = self.fc_enc(encoder_output)
+            decoder_output = self.fc_dec(decoder_output)
+
             # training, expand the outputs
 
             # (N, T_max, K) -> (N, K, T_max)
@@ -347,25 +339,31 @@ class ConvJointNet(nn.Module):
             conv_x = self.conv(padded_x).permute(
                 0, 2, 3, 1).contiguous()  # type: torch.Tensor
 
-            ########## DEBUG CODE ###########
-            # print(conv_x.device)
-            # print(expanded_x.size())
-            # print(padded_x.size())
-            # print(conv_x.size())
-            # exit(1)
-            #################################
-
             return conv_x.log_softmax(dim=-1), None
 
         else:
             # decoding
             buffers = [x.replica() for x in buffers]
-            # (K,)
+            buffers[0].append(t, u, encoder_output, decoder_output)
+            encoder_output, decoder_output = buffers[0].mem
+
+            encoder_output = self.fc_enc(encoder_output)
+            decoder_output = self.fc_dec(decoder_output)
+
+            # (S_t, K) -> (K, S_t)
+            encoder_output = encoder_output.transpose(0, 1).contiguous()
+            # (S_u, K) -> (K, S_u)
+            decoder_output = decoder_output.transpose(0, 1).contiguous()
+            # (K, S_t) -> (K, S_t, 1)
+            encoder_output = encoder_output.unsqueeze(2)
+            # (K, S_u) -> (K, 1, S_u)
+            decoder_output = decoder_output.unsqueeze(1)
+
+            # (K, S_t, S_u)
             expanded_x = self.act(encoder_output + decoder_output)
-            buffers[0].append(t, u, encoder_output+decoder_output)
 
             # (K, S_t, S_u) -> (1, K, S_t, S_u) -> (1, V, 1, 1)
-            conv_x = self.conv(buffers[0].mem.unsqueeze(0))
+            conv_x = self.conv(expanded_x.unsqueeze(0))
 
             return conv_x.view(-1).log_softmax(dim=-1), buffers
 
@@ -422,11 +420,12 @@ def build_model(args, configuration: dict, dist: bool = True) -> Union[nn.Module
             del _model.classifier
             init_sum = sum(param.data.sum()
                            for param in _model.parameters())
-            _model.load_state_dict(_load_and_immigrate(
-                config['pretrained'], prefix, ''), strict=False)
+            state_dict = _load_and_immigrate(
+                config['pretrained'], prefix, '')
+            _model.load_state_dict(state_dict, strict=False)
             if sum(param.data.sum()for param in _model.parameters()) == init_sum:
                 coreutils.highlight_msg(
-                    "It seems decoder pretrained model is not properly loaded.")
+                    "WARNING: It seems decoder pretrained model is not properly loaded.")
 
         if module in ['encoder', 'decoder']:
             # FIXME: this is a hack, since we just feed the hidden output into joint network
@@ -435,12 +434,27 @@ def build_model(args, configuration: dict, dist: bool = True) -> Union[nn.Module
         # NOTE (Huahuan): In a strict sense, we should avoid invoke model.train() if we want to freeze the model
         #                 ...for which would enable the operations like dropout during training.
         if 'freeze' in config and config['freeze']:
-            for param in _model.parameters():
-                if param.requires_grad:
+            if 'pretrained' not in config:
+                raise RuntimeError(
+                    "freeze=True while 'pretrained' is empty is not allowed. In {} init".format(module))
+
+            for name, param in _model.named_parameters():
+                # NOTE: we only freeze those loaded parameters
+                if name in state_dict and param.requires_grad:
                     param.requires_grad = False
+
             setattr(_model, 'freeze', True)
         else:
             setattr(_model, 'freeze', False)
+
+        if args.rank == 0:
+            if 'pretrained' not in config:
+                _path = ''
+            else:
+                _path = config['pretrained']
+            print("{}: freeze={} | pretrained at {}".format(
+                module, _model.freeze, _path))
+            del _path
         return _model
 
     assert 'encoder' in configuration
@@ -471,66 +485,27 @@ def build_model(args, configuration: dict, dist: bool = True) -> Union[nn.Module
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="recognition argument")
-
-    parser.add_argument('--batch_size', default=256, type=int, metavar='N',
-                        help='mini-batch size (default: 256), this is the total '
-                        'batch size of all GPUs on the current node when '
-                        'using Distributed Data Parallel')
-
-    parser.add_argument("--seed", type=int, default=0,
-                        help="Manual seed.")
-    parser.add_argument("--grad-accum-fold", type=int, default=1,
-                        help="Utilize gradient accumulation for K times. Default: K=1")
-
-    parser.add_argument("--resume", type=str, default=None,
-                        help="Path to location of checkpoint.")
-
-    parser.add_argument("--decode", action="store_true",
-                        help="Configure to debug settings, would overwrite most of the options.")
-
-    parser.add_argument("--debug", action="store_true",
-                        help="Configure to debug settings, would overwrite most of the options.")
+    parser = coreutils.BasicDDPParser()
     parser.add_argument("--h5py", action="store_true",
                         help="Load data with H5py, defaultly use pickle (recommended).")
 
-    parser.add_argument("--config", type=str, default=None, metavar='PATH',
-                        help="Path to configuration file of training procedure.")
-
-    parser.add_argument("--data", type=str, default=None,
-                        help="Location of training/testing data.")
-    parser.add_argument("--trset", type=str, default=None,
-                        help="Location of training data. Default: <data>/[pickle|hdf5]/tr.[pickle|hdf5]")
-    parser.add_argument("--devset", type=str, default=None,
-                        help="Location of dev data. Default: <data>/[pickle|hdf5]/cv.[pickle|hdf5]")
-    parser.add_argument("--dir", type=str, default=None, metavar='PATH',
-                        help="Directory to save the log and model files.")
-
-    parser.add_argument('-p', '--print-freq', default=10, type=int,
-                        metavar='N', help='print frequency (default: 10)')
-
-    parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
-                        help='number of data loading workers (default: 4)')
-    parser.add_argument('--rank', default=-1, type=int,
-                        help='node rank for distributed training')
-    parser.add_argument('--dist-url', default='tcp://127.0.0.1:13943', type=str,
-                        help='url used to set up distributed training')
-    parser.add_argument('--dist-backend', default='nccl', type=str,
-                        help='distributed backend')
-    parser.add_argument('--world-size', default=-1, type=int,
-                        help='number of nodes for distributed training')
-    parser.add_argument('--gpu', default=None, type=int,
-                        help='GPU id to use.')
-
     args = parser.parse_args()
 
-    SEED = args.seed
-    torch.manual_seed(SEED)
-    torch.cuda.manual_seed_all(SEED)
-    np.random.seed(SEED)
-    torch.backends.cudnn.deterministic = True
+    coreutils.SetRandomSeed(args.seed)
+    # FIXME: rm this dependencies
+    setattr(args, 'iscrf', False)
 
-    if args.debug:
+    if not args.debug:
+        ckptpath = os.path.join(args.dir, 'ckpt')
+        os.makedirs(ckptpath, exist_ok=True)
+    else:
         coreutils.highlight_msg("Debugging")
+        # This is a hack, we won't read/write anything in debug mode.
+        ckptpath = '/'
+
+    setattr(args, 'ckptpath', ckptpath)
+    if os.listdir(ckptpath) != [] and not args.debug and args.resume is None:
+        raise FileExistsError(
+            f"{args.ckptpath} is not empty! Refuse to run the experiment.")
 
     main(args)

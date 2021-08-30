@@ -41,6 +41,7 @@ def SetupOptim(type_optim: str, paramlist: Iterable[torch.nn.parameter.Parameter
     if not use_zero:
         return getattr(torch.optim, type_optim)(paramlist, **kwargs)
     else:
+        raise NotImplementedError
         print("Using zero reduncdancy optimizer...")
         # FIXME: This is still a experimental function in torch 1.9.0
         zerooptimizer = ZeroRedundancyOptimizer(
@@ -87,7 +88,8 @@ class Scheduler(object):
             if name not in ckpt:
                 continue
             if name == "optimizer":
-                self.optimizer.load_state_dict(ckpt[name])
+                # self.optimizer.load_state_dict(ckpt[name])
+                pass
             else:
                 setattr(self, name, ckpt[name])
 

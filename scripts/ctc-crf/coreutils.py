@@ -11,6 +11,7 @@ import json
 import math
 import shutil
 import scheduler
+import numpy as np
 from collections import OrderedDict
 from monitor import plot_monitor
 from _specaug import SpecAug
@@ -476,3 +477,57 @@ def test(testloader, args: argparse.Namespace, manager: Manager) -> float:
         [losses_real.avg, time.time() - beg], loc='log_eval')
 
     return losses_real.avg
+
+
+def BasicDDPParser(istraining: bool = True, prog: str = '') -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog=prog)
+    if istraining:
+        parser.add_argument('-p', '--print-freq', default=10, type=int,
+                            metavar='N', help='print frequency (default: 10)')
+        parser.add_argument('--batch_size', default=256, type=int, metavar='N',
+                            help='mini-batch size (default: 256), this is the total '
+                            'batch size of all GPUs on the current node when '
+                            'using Distributed Data Parallel')
+        parser.add_argument("--seed", type=int, default=0,
+                            help="Manual seed.")
+        parser.add_argument("--grad-accum-fold", type=int, default=1,
+                            help="Utilize gradient accumulation for K times. Default: K=1")
+
+        parser.add_argument("--debug", action="store_true",
+                            help="Configure to debug settings, would overwrite most of the options.")
+
+        parser.add_argument("--data", type=str, default=None,
+                            help="Location of training/testing data.")
+        parser.add_argument("--trset", type=str, default=None,
+                            help="Location of training data. Default: <data>/[pickle|hdf5]/tr.[pickle|hdf5]")
+        parser.add_argument("--devset", type=str, default=None,
+                            help="Location of dev data. Default: <data>/[pickle|hdf5]/cv.[pickle|hdf5]")
+        parser.add_argument("--dir", type=str, default=None, metavar='PATH',
+                            help="Directory to save the log and model files.")
+
+    parser.add_argument("--config", type=str, default=None, metavar='PATH',
+                        help="Path to configuration file of backbone.")
+    parser.add_argument("--resume", type=str, default=None,
+                        help="Path to location of checkpoint.")
+
+    parser.add_argument('-j', '--workers', default=1, type=int, metavar='N',
+                        help='number of data loading workers (default: 1)')
+    parser.add_argument('--rank', default=0, type=int,
+                        help='node rank for distributed training')
+    parser.add_argument('--dist-url', default='tcp://127.0.0.1:12947', type=str,
+                        help='url used to set up distributed training')
+    parser.add_argument('--dist-backend', default='nccl', type=str,
+                        help='distributed backend')
+    parser.add_argument('--world-size', default=1, type=int,
+                        help='number of nodes for distributed training')
+    parser.add_argument('--gpu', default=None, type=int,
+                        help='GPU id to use.')
+
+    return parser
+
+
+def SetRandomSeed(seed: int = 0):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    torch.backends.cudnn.deterministic = True

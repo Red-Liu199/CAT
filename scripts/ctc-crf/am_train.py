@@ -33,13 +33,6 @@ def main(args):
         coreutils.highlight_msg("CPU only training is unsupported")
         return None
 
-    ckptpath = os.path.join(args.dir, 'ckpt')
-    os.makedirs(ckptpath, exist_ok=True)
-    setattr(args, 'ckptpath', ckptpath)
-    if os.listdir(args.ckptpath) != [] and not args.debug and args.resume is None:
-        raise FileExistsError(
-            f"{args.ckptpath} is not empty! Refuse to run the experiment.")
-
     ngpus_per_node = torch.cuda.device_count()
     args.world_size = ngpus_per_node * args.world_size
     print(f"Global number of GPUs: {args.world_size}")
@@ -192,63 +185,25 @@ def build_model(args, configuration, train=True) -> nn.Module:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="recognition argument")
-
-    parser.add_argument('--batch_size', default=256, type=int, metavar='N',
-                        help='mini-batch size (default: 256), this is the total '
-                        'batch size of all GPUs on the current node when '
-                        'using Distributed Data Parallel')
-
-    parser.add_argument("--seed", type=int, default=0,
-                        help="Manual seed.")
-
-    parser.add_argument("--resume", type=str, default=None,
-                        help="Path to location of checkpoint.")
-
-    parser.add_argument("--debug", action="store_true",
-                        help="Configure to debug settings, would overwrite most of the options.")
+    parser = coreutils.BasicDDPParser()
     parser.add_argument("--h5py", action="store_true",
                         help="Load data with H5py, defaultly use pickle (recommended).")
 
-    parser.add_argument("--config", type=str, default=None, metavar='PATH',
-                        help="Path to configuration file of training procedure.")
-
-    parser.add_argument("--data", type=str, default=None,
-                        help="Location of training/testing data.")
-    parser.add_argument("--trset", type=str, default=None,
-                        help="Location of training data. Default: <data>/[pickle|hdf5]/tr.[pickle|hdf5]")
-    parser.add_argument("--devset", type=str, default=None,
-                        help="Location of dev data. Default: <data>/[pickle|hdf5]/cv.[pickle|hdf5]")
-    parser.add_argument("--dir", type=str, default=None, metavar='PATH',
-                        help="Directory to save the log and model files.")
-    parser.add_argument("--grad-accum-fold", type=int, default=1,
-                        help="Utilize gradient accumulation for K times. Default: K=1")
-
-    parser.add_argument('-p', '--print-freq', default=10, type=int,
-                        metavar='N', help='print frequency (default: 10)')
-
-    parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
-                        help='number of data loading workers (default: 4)')
-    parser.add_argument('--rank', default=-1, type=int,
-                        help='node rank for distributed training')
-    parser.add_argument('--dist-url', default='tcp://127.0.0.1:13943', type=str,
-                        help='url used to set up distributed training')
-    parser.add_argument('--dist-backend', default='nccl', type=str,
-                        help='distributed backend')
-    parser.add_argument('--world-size', default=-1, type=int,
-                        help='number of nodes for distributed training')
-    parser.add_argument('--gpu', default=None, type=int,
-                        help='GPU id to use.')
-
     args = parser.parse_args()
 
-    SEED = args.seed
-    torch.manual_seed(SEED)
-    torch.cuda.manual_seed_all(SEED)
-    np.random.seed(SEED)
-    torch.backends.cudnn.deterministic = True
+    coreutils.SetRandomSeed(args.seed)
 
-    if args.debug:
+    if not args.debug:
+        ckptpath = os.path.join(args.dir, 'ckpt')
+        os.makedirs(ckptpath, exist_ok=True)
+    else:
         coreutils.highlight_msg("Debugging")
+        # This is a hack, we won't read/write anything in debug mode.
+        ckptpath = '/'
+
+    setattr(args, 'ckptpath', ckptpath)
+    if os.listdir(ckptpath) != [] and not args.debug and args.resume is None:
+        raise FileExistsError(
+            f"{args.ckptpath} is not empty! Refuse to run the experiment.")
 
     main(args)

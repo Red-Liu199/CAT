@@ -213,7 +213,7 @@ class ConformerNet(nn.Module):
             cell = nnlayers.ConformerCell(
                 hdim, res_factor, d_head, num_heads, kernel_size, multiplier, dropout)
             self.cells.append(cell)
-            # Note that this is somewhat hard-code style
+            # FIXME: Note that this is somewhat hard-code style
             cell.mhsam.mha.pe = pe
         self.classifier = nn.Linear(hdim, num_classes)
 
@@ -227,6 +227,35 @@ class ConformerNet(nn.Module):
 
         return logits, ls
 
+
+class ConformerLSTM(ConformerNet):
+    def __init__(
+            self,
+            num_cells: int,
+            idim: int,
+            hdim: int,
+            num_classes: int,
+            hdim_lstm: int,
+            num_lstm_layers: int,
+            dropout_lstm: float,
+            conv_multiplier: int = 144,
+            dropout_in: float = 0.2,
+            res_factor: float = 0.5,
+            d_head: int = 36,
+            num_heads: int = 4,
+            kernel_size: int = 32,
+            multiplier: int = 1,
+            dropout: float = 0.1,
+            delta_feats: bool = False):
+        super().__init__(num_cells, idim, hdim, num_classes, conv_multiplier=conv_multiplier, dropout_in=dropout_in, res_factor=res_factor,
+                         d_head=d_head, num_heads=num_heads, kernel_size=kernel_size, multiplier=multiplier, dropout=dropout, delta_feats=delta_feats)
+
+        self.lstm = nnlayers._LSTM(
+            idim=hdim, hdim=hdim_lstm, n_layers=num_lstm_layers, dropout=dropout_lstm)
+
+    def forward(self, x: torch.Tensor, lens: torch.Tensor):
+        conv_x, conv_ls = super().forward(x, lens)
+        return self.lstm(conv_x, conv_ls)
 
 # TODO: (Huahuan) I removed all chunk-related modules.
 #       cc @aky15 you may need to add it in v2 standard

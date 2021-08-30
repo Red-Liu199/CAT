@@ -119,10 +119,10 @@ def decode(args, model: Transducer, testloader, device, local_writer):
         key, x, x_lens = batch
         x = x.to(device, non_blocking=True)
 
-        # pred = model.decode(x, x_lens, mode=args.mode,
-        #                     beam_size=args.beam_size)
-        pred = model.decode_conv(
-            x, x_lens, beam_size=args.beam_size, kernel_size=(3, 3))
+        pred = model.decode(x, x_lens, mode=args.mode,
+                            beam_size=args.beam_size)
+        # pred = model.decode_conv(
+        # x, x_lens, beam_size=args.beam_size, kernel_size=(3, 3))
 
         seq = sp.decode(pred.data.cpu().tolist())
         results.append((key, seq))
@@ -150,32 +150,16 @@ def load_checkpoint(model: Transducer, path_ckpt, loc='cpu') -> Transducer:
 
 if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser(description="Logit calculation")
+    parser = coreutils.BasicDDPParser(istraining=False)
+
     parser.add_argument("--input_scp", type=str)
     parser.add_argument("--output_dir", type=str)
-    parser.add_argument("--config", type=str, default=None, metavar='PATH',
-                        help="Path to configuration file of backbone.")
     parser.add_argument("--mode", type=str,
                         choices=['greedy', 'beam'], default='beam')
     parser.add_argument("--beam_size", type=int, default=3)
     parser.add_argument("--spmodel", type=str, default='',
                         help="SPM model location.")
     parser.add_argument("--cpu", action='store_true', default=False)
-    parser.add_argument("--resume", type=str, default=None,
-                        help="Path to location of checkpoint.")
-
-    parser.add_argument('-j', '--workers', default=1, type=int, metavar='N',
-                        help='number of data loading workers (default: 1)')
-    parser.add_argument('--rank', default=0, type=int,
-                        help='node rank for distributed training')
-    parser.add_argument('--dist-url', default='tcp://127.0.0.1:12947', type=str,
-                        help='url used to set up distributed training')
-    parser.add_argument('--dist-backend', default='nccl', type=str,
-                        help='distributed backend')
-    parser.add_argument('--world-size', default=1, type=int,
-                        help='number of nodes for distributed training')
-    parser.add_argument('--gpu', default=None, type=int,
-                        help='GPU id to use.')
 
     args = parser.parse_args()
 
