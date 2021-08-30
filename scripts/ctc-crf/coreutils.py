@@ -343,6 +343,14 @@ def highlight_msg(msg: Union[Sequence[str], str]):
 
 
 def train(trainloader, epoch: int, args: argparse.Namespace, manager: Manager):
+    @torch.no_grad()
+    def _cal_real_loss(loss, path_weight):
+        if args.iscrf:
+            partial_loss = loss.cpu()
+            weight = torch.mean(path_weights)
+            return partial_loss - weight
+        else:
+            return loss.cpu()
 
     scheduler = manager.scheduler
 
@@ -375,20 +383,12 @@ def train(trainloader, epoch: int, args: argparse.Namespace, manager: Manager):
 
         data_time.update(time.time() - end)
 
-        loss = model(logits, labels, input_lengths, label_lengths)
-
-        with torch.no_grad():
-            if args.iscrf:
-                partial_loss = loss.cpu()
-                weight = torch.mean(path_weights)
-                real_loss = partial_loss - weight
-            else:
-                real_loss = loss.cpu()
-
-        loss.backward()
-
         # update every fold times and won't drop the last batch
         if fold == 1 or (i+1) % fold == 0 or (i+1) == len(trainloader):
+            loss = model(logits, labels, input_lengths, label_lengths)
+            loss.backward()
+            real_loss = _cal_real_loss(loss, path_weights)
+
             # for Adam optimizer, even though fold > 1, it's no need to normalize grad
             # if using SGD, let grad = grad_accum / fold as following or use a new_lr = init_lr / fold
             # if fold > 1:
@@ -419,7 +419,10 @@ def train(trainloader, epoch: int, args: argparse.Namespace, manager: Manager):
                 dist.barrier()
                 break
         else:
-            continue
+            # gradient accumulation w/o sync
+            with model.no_sync():
+                loss = model(logits, labels, input_lengths, label_lengths)
+                loss.backward()
 
 
 @torch.no_grad()

@@ -41,6 +41,7 @@ def main(args: argparse.Namespace):
 
 
 def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
+    coreutils.SetRandomSeed(args.seed)
     args.gpu = gpu
 
     args.rank = args.rank * ngpus_per_node + gpu
@@ -491,7 +492,6 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    coreutils.SetRandomSeed(args.seed)
     # FIXME: rm this dependencies
     setattr(args, 'iscrf', False)
 

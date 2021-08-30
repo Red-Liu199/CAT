@@ -11,7 +11,6 @@ and is more non-hard-coding style.
 import coreutils
 import os
 import argparse
-import numpy as np
 import model as model_zoo
 import dataset as DataSet
 from collections import OrderedDict
@@ -40,6 +39,7 @@ def main(args):
 
 
 def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
+    coreutils.SetRandomSeed(args.seed)
     args.gpu = gpu
 
     args.rank = args.rank * ngpus_per_node + gpu
@@ -190,8 +190,6 @@ if __name__ == "__main__":
                         help="Load data with H5py, defaultly use pickle (recommended).")
 
     args = parser.parse_args()
-
-    coreutils.SetRandomSeed(args.seed)
 
     if not args.debug:
         ckptpath = os.path.join(args.dir, 'ckpt')
