@@ -10,7 +10,7 @@ import coreutils
 import argparse
 import sentencepiece as spm
 from tqdm import tqdm
-from transducer_train import build_model, Transducer
+from transducer_train import build_model, Transducer, ConvJointNet
 from dataset import ScpDataset, TestPadCollate
 from collections import OrderedDict
 
@@ -119,10 +119,13 @@ def decode(args, model: Transducer, testloader, device, local_writer):
         key, x, x_lens = batch
         x = x.to(device, non_blocking=True)
 
-        pred = model.decode(x, x_lens, mode=args.mode,
-                            beam_size=args.beam_size)
-        # pred = model.decode_conv(
-        # x, x_lens, beam_size=args.beam_size, kernel_size=(3, 3))
+        if isinstance(model.joint, ConvJointNet):
+            pred = model.decode_conv(
+                x, x_lens, beam_size=args.beam_size, kernel_size=(3, 3))
+        else:
+
+            pred = model.decode(x, x_lens, mode=args.mode,
+                                beam_size=args.beam_size)
 
         seq = sp.decode(pred.data.cpu().tolist())
         results.append((key, seq))

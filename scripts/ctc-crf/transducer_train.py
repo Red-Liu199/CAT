@@ -14,7 +14,6 @@ import argparse
 import numpy as np
 import model as model_zoo
 import dataset as DataSet
-from _specaug import SpecAug
 from lm_train import LSTMPredictNet
 from collections import OrderedDict
 from typing import Union, Tuple, Sequence, Iterable

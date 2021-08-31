@@ -131,10 +131,10 @@ class AMTrainer(nn.Module):
         input_lengths = input_lengths.cpu()
         label_lengths = label_lengths.cpu()
 
-        netout, lens_o = self.infer(logits, input_lengths)
+        netout, lens_o = self.am(logits, input_lengths)
         netout = torch.log_softmax(netout, dim=-1)
 
-        loss = self.loss_fn(netout, labels, lens_o.to(
+        loss = self.criterion(netout, labels, lens_o.to(
             torch.int32).cpu(), label_lengths)
 
         return loss

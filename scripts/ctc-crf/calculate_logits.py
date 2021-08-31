@@ -165,7 +165,7 @@ def load_checkpoint(model, path_ckpt, loc='cpu'):
 
     checkpoint = torch.load(path_ckpt, map_location=loc)
     state_dict = OrderedDict()
-    if 'module.' == next(iter(checkpoint['model'].keys()))[:7]:
+    if 'module.' != next(iter(checkpoint['model'].keys()))[:7]:
         # old version
         if isinstance(model, torch.nn.parallel.DistributedDataParallel):
             for k, v in checkpoint['model'].items():

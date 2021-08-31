@@ -56,12 +56,24 @@ def plot_monitor(log_path: str = None, train_log: str = 'log_train.csv', dev_log
         accum_time[i] += accum_time[i-1]
         if (i + 1) % batch_per_epoch == 0:
             accum_time[i] += df_eval['time'].values[(i+1)//batch_per_epoch-1]
+    del batch_per_epoch
     accum_time = [x/3600 for x in accum_time]
     ax.plot(accum_time)
     props = dict(boxstyle='round', facecolor='wheat', alpha=0.8)
     speed = accum_time[-1]/len(df_eval)
-    ax.text(0.05, 0.95, "{:.2f}h/epoch".format(speed), transform=ax.transAxes,
+    if speed < 1.:
+        speed = speed * 60
+        if speed < 1.:
+            speed = speed * 60
+            timestr = "{:.0f}sec/epoch".format(speed)
+        else:
+            timestr = "{:.1f}min/epoch".format(speed)
+    else:
+        timestr = "{:.2f}h/epoch".format(speed)
+    ax.text(0.05, 0.95, timestr, transform=ax.transAxes,
             fontsize=8, verticalalignment='top', bbox=props)
+    del timestr
+    del speed
 
     ax.ticklabel_format(axis="x", style="sci", scilimits=(0, 0))
     ax.grid(ls='--')

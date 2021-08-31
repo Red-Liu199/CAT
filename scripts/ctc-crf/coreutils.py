@@ -21,6 +21,8 @@ import torch
 import torch.nn as nn
 import torch.distributed as dist
 from torch.nn.utils.rnn import pad_sequence
+if torch.__version__ >= '1.8.0':
+    from torch.distributed.optim import ZeroRedundancyOptimizer
 
 
 class Manager(object):
@@ -89,6 +91,10 @@ class Manager(object):
                 metrics = metrics[0]
             state, info = self.scheduler.step(epoch, metrics)
 
+            if torch.__version__ > '1.8.0' and isinstance(self.scheduler.optimizer, ZeroRedundancyOptimizer):
+                self.scheduler.optimizer.consolidate_state_dict(
+                    recipient_rank=0)
+
             if args.gpu == 0:
                 print(info)
 
@@ -110,7 +116,6 @@ class Manager(object):
                         f"{args.ckptpath}/checkpoint.pt", f"{args.ckptpath}/bestckpt.pt")
             else:
                 raise ValueError(f"Unknown state: {state}.")
-            torch.cuda.empty_cache()
 
     def save(self, name: str, PATH: str = '') -> str:
         """Save checkpoint.

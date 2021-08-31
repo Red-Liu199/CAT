@@ -12,7 +12,8 @@ import numpy as np
 from collections import OrderedDict
 from typing import Tuple, Iterable, Union
 
-from torch.distributed.optim import ZeroRedundancyOptimizer
+if torch.__version__ >= '1.8.0':
+    from torch.distributed.optim import ZeroRedundancyOptimizer
 
 
 def SetupOptim(type_optim: str, paramlist: Iterable[torch.nn.parameter.Parameter], use_zero: bool = False, **kwargs) -> Union[torch.optim.Optimizer, ZeroRedundancyOptimizer]:
@@ -41,7 +42,10 @@ def SetupOptim(type_optim: str, paramlist: Iterable[torch.nn.parameter.Parameter
     if not use_zero:
         return getattr(torch.optim, type_optim)(paramlist, **kwargs)
     else:
-        raise NotImplementedError
+        # raise NotImplementedError
+        if torch.__version__ < '1.8.0':
+            raise NotImplementedError
+
         print("Using zero reduncdancy optimizer...")
         # FIXME: This is still a experimental function in torch 1.9.0
         zerooptimizer = ZeroRedundancyOptimizer(
@@ -53,7 +57,7 @@ class Scheduler(object):
     def __init__(self, optimizer_configs: dict, paramlist: Iterable[torch.nn.parameter.Parameter], reverse_metric_direc=False):
         super().__init__()
         self.optimizer = SetupOptim(
-            optimizer_configs['type_optim'], paramlist, **optimizer_configs['kwargs'])
+            optimizer_configs['type_optim'], paramlist, ('use_zero' in optimizer_configs) and optimizer_configs['use_zero'], **optimizer_configs['kwargs'])
         self.epoch_cur = 0
         self.best_metric = None
         self._reverse_ = reverse_metric_direc
@@ -72,11 +76,11 @@ class Scheduler(object):
 
     def state_dict(self):
         output = OrderedDict()
-        for name, value in vars(self).items():
+        for name, attr in vars(self).items():
             if name == 'optimizer':
-                output['optimizer'] = value.state_dict()
+                output['optimizer'] = attr.state_dict()
             else:
-                output[name] = value
+                output[name] = attr
         return output
 
     def load_state_dict(self, ckpt: OrderedDict, optim_only: bool = False):

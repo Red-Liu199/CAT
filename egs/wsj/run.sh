@@ -148,7 +148,7 @@ if [ $stage -le 6 ] && [ $stop_stage -ge 6 ]; then
 
   # uncomment the following line if you want to use specified GPUs
   CUDA_VISIBLE_DEVICES="8,7,6,5"                    \
-  python3 ctc-crf/train.py --seed=0             \
+  python3 ctc-crf/am_train.py --seed=0          \
     --world-size 1 --rank $NODE                 \
     --batch_size=128                            \
     --dir=$dir                                  \
@@ -169,7 +169,7 @@ if [ $stage -le 7 ] && [ $stop_stage -ge 7 ]; then
     ark_dir=$decode_dir/logits/$set
     mkdir -p $ark_dir
     python3 ctc-crf/calculate_logits.py             \
-      --resume=$dir/ckpt/infer.pt                   \
+      --resume=$dir/ckpt/checkpoint.pt              \
       --config=$dir/config.json                     \
       --nj=$nj                                      \
       --input_scp=data/all_ark/$set.scp             \
