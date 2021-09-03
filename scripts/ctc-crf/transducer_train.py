@@ -16,7 +16,7 @@ import model as model_zoo
 import dataset as DataSet
 from lm_train import LSTMPredictNet
 from collections import OrderedDict
-from typing import Union, Tuple, Sequence, Iterable
+from typing import Union, Tuple, Sequence, Iterable, Literal
 from warp_rnnt import rnnt_loss as RNNTLoss
 from beam_search_base import BeamSearchRNNTransducer, BeamSearchConvTransducer, ConvMemBuffer
 
@@ -198,30 +198,29 @@ class JointNet(nn.Module):
         outputs (torch.FloatTensor): outputs of joint `encoder_output` and `decoder_output`. `FloatTensor` of size ``(batch, time_steps, label_length, dimensionA + dimensionB)``
     """
 
-    def __init__(self, odim_encoder: int, odim_decoder: int, num_classes: int, HAT: bool = False):
+    def __init__(self, odim_encoder: int, odim_decoder: int, num_classes: int, HAT: bool = False, act: Union[Literal['tanh'], Literal['relu']] = 'tanh'):
         super().__init__()
         in_features = odim_encoder+odim_decoder
         self.fc_enc = nn.Linear(odim_encoder, in_features)
         self.fc_dec = nn.Linear(odim_decoder, in_features)
         self._isHAT = HAT
+        if act == 'tanh':
+            act_layer = nn.Tanh()
+        elif act == 'relu':
+            act_layer = nn.ReLU()
+        else:
+            raise NotImplementedError(f"Unknown activation layer type: {act}")
+
+        self.fc = nn.Sequential(
+            act_layer,
+            nn.Linear(in_features, num_classes)
+        )
         if HAT:
             """
             Implementation of Hybrid Autoregressive Transducer (HAT)
             https://arxiv.org/abs/2003.07705
             """
-            self.fc = nn.Sequential(
-                nn.Tanh(),
-                nn.Linear(in_features, num_classes-1)
-            )
-            self.distr_blk = nn.Sequential(
-                nn.Linear(in_features, 1),
-                nn.Sigmoid()
-            )
-        else:
-            self.fc = nn.Sequential(
-                nn.Tanh(),
-                nn.Linear(in_features, num_classes)
-            )
+            self.distr_blk = nn.Sigmoid()
 
     def forward(self, encoder_output: torch.FloatTensor, decoder_output: torch.FloatTensor) -> torch.FloatTensor:
         assert (encoder_output.dim() == 3 and decoder_output.dim() == 3) or (
@@ -246,10 +245,10 @@ class JointNet(nn.Module):
         if self._isHAT:
             conbined_input = encoder_output + decoder_output
 
-            prob_blk = self.distr_blk(conbined_input)
             vocab_logits = self.fc(conbined_input)
+            prob_blk = self.distr_blk(vocab_logits[:, :, :, :1])
             vocab_log_probs = torch.log(
-                1-prob_blk)+torch.log_softmax(vocab_logits, dim=-1)
+                1-prob_blk)+torch.log_softmax(vocab_logits[:, :, :, 1:], dim=-1)
             outputs = torch.cat([torch.log(prob_blk), vocab_log_probs], dim=-1)
         else:
             outputs = self.fc(
@@ -496,7 +495,11 @@ if __name__ == "__main__":
 
     if not args.debug:
         ckptpath = os.path.join(args.dir, 'ckpt')
-        os.makedirs(ckptpath, exist_ok=True)
+        if os.path.isdir(args.dir):
+            os.makedirs(ckptpath, exist_ok=True)
+        else:
+            raise FileNotFoundError(
+                f"--dir={args.dir} is not a valid directory.")
     else:
         coreutils.highlight_msg("Debugging")
         # This is a hack, we won't read/write anything in debug mode.

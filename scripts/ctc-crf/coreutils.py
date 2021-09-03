@@ -390,16 +390,13 @@ def train(trainloader, epoch: int, args: argparse.Namespace, manager: Manager):
 
         # update every fold times and won't drop the last batch
         if fold == 1 or (i+1) % fold == 0 or (i+1) == len(trainloader):
-            loss = model(logits, labels, input_lengths, label_lengths)
+            loss = model(logits, labels, input_lengths, label_lengths)/fold
             loss.backward()
             real_loss = _cal_real_loss(loss, path_weights)
 
             # for Adam optimizer, even though fold > 1, it's no need to normalize grad
-            # if using SGD, let grad = grad_accum / fold as following or use a new_lr = init_lr / fold
-            # if fold > 1:
-            #     for param in model.parameters():
-            #         if param.requires_grad:
-            #             param.grad.data /= fold
+            # if using SGD, let grad = grad_accum / fold or use a new_lr = init_lr / fold
+
             optimizer.step()
             optimizer.zero_grad()
             scheduler.update_lr(pre_steps + (i + 1)/fold)
@@ -426,7 +423,7 @@ def train(trainloader, epoch: int, args: argparse.Namespace, manager: Manager):
         else:
             # gradient accumulation w/o sync
             with model.no_sync():
-                loss = model(logits, labels, input_lengths, label_lengths)
+                loss = model(logits, labels, input_lengths, label_lengths)/fold
                 loss.backward()
 
 

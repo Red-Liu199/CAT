@@ -21,6 +21,7 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 
 def main(args: argparse.Namespace):
@@ -83,28 +84,32 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         coreutils.gen_readme(args.dir+'/readme.md',
                              model=manager.model, gpu_info=gpu_info)
 
+    if args.evaluate:
+        manager.model.eval()
+
+        ppl = 0.
+        for minibatch in testloader:
+            logits, input_lengths, labels, label_lengths, _ = minibatch
+            logits, labels, input_lengths, label_lengths = logits.cuda(
+                args.gpu, non_blocking=True), labels, input_lengths, label_lengths
+
+            ppl_i = manager.model.module.test(logits, labels, input_lengths)
+            dist.all_reduce(ppl_i)
+            ppl += ppl_i
+
+        if args.rank == 0:
+            print("PPL for {} sentences: {:.2f}".format(
+                len(test_set), ppl/len(test_set)))
+        return
+
     # training
     manager.run(train_sampler, trainloader, testloader, args)
-
-    ppl = 0.
-    for minibatch in testloader:
-        logits, input_lengths, labels, label_lengths, path_weights = minibatch
-        logits, labels, input_lengths, label_lengths = logits.cuda(
-            args.gpu, non_blocking=True), labels, input_lengths, label_lengths
-
-        ppl_i = manager.model.module.test(logits, labels, input_lengths)
-        dist.all_reduce(ppl_i)
-        ppl += ppl_i
-
-    if args.rank == 0:
-        print("PPL for {} sentences: {:.2f}".format(
-            len(test_set), ppl/len(test_set)))
 
 
 class LMTrainer(nn.Module):
     def __init__(self, lm: nn.Module = None):
         super().__init__()
-        self.lm = lm    # type:nn.Module
+        self.lm = lm    # type: LSTMPredictNet
         self.criterion = nn.CrossEntropyLoss()
 
     @torch.no_grad()
@@ -184,19 +189,22 @@ class LSTMPredictNet(nn.Module):
 
         self.classifier = nn.Linear(odim, num_classes)
 
-    def forward(self, input: torch.LongTensor, hidden: torch.FloatTensor = None) -> Tuple[torch.FloatTensor, Union[torch.FloatTensor, None]]:
+    def forward(self, inputs: torch.LongTensor, hidden: torch.FloatTensor = None, input_lengths: torch.LongTensor = None) -> Tuple[torch.FloatTensor, Union[torch.FloatTensor, None]]:
 
-        embedded = self.embedding(input)
+        embedded = self.embedding(inputs)
         self.rnn.flatten_parameters()
         '''
         since the batch is sorted by time_steps length rather the target length
         ...so here we don't use the pack_padded_sequence()
         '''
-        # packed_input = pack_padded_sequence(
-        #     embedded, input_lengths.to("cpu"), batch_first=True)
-        # packed_output, hidden_o = self.rnn(packed_input, hidden)
-        # rnn_out, olens = pad_packed_sequence(packed_output, batch_first=True)
-        rnn_out, hidden_o = self.rnn(embedded, hidden)
+        if input_lengths is not None:
+            packed_input = pack_padded_sequence(
+                embedded, input_lengths.to("cpu"), batch_first=True)
+            packed_output, hidden_o = self.rnn(packed_input, hidden)
+            rnn_out, olens = pad_packed_sequence(
+                packed_output, batch_first=True)
+        else:
+            rnn_out, hidden_o = self.rnn(embedded, hidden)
 
         out = self.classifier(rnn_out)
 
@@ -228,6 +236,7 @@ def build_model(args, configuration, dist=True) -> nn.Module:
 
 if __name__ == "__main__":
     parser = coreutils.BasicDDPParser()
+    parser.add_argument("--evaluate", action="store_true", default=False)
 
     args = parser.parse_args()
 

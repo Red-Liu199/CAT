@@ -50,12 +50,13 @@ if [ $stage -le 1 ] && [ $stop_stage -ge 1 ]; then
     for set in dev tr; do
         processing_text=$text_dir/data/$set.tmp
         # encode text to token ids
-        cat $processing_text | python3 local/spm_encode.py --model=$spmdata/spm.model > $text_dir/data/${set}_id.tmp
+        cat $processing_text | python3 local/spm_encode.py --model=$spmdata/spm.model > $text_dir/data/${set}.id
+        rm $set.tmp
     done
     echo "Convert to token id done."
 
     # Get lexicon
-    awk 'NF' $text_dir/data/tr_id.tmp | tr ' ' '\n' | awk '{ cnts[$0] += 1 } END { for (v in cnts) print v }'   \
+    awk 'NF' $text_dir/data/tr.id | tr ' ' '\n' | awk '{ cnts[$0] += 1 } END { for (v in cnts) print v }'   \
         | sort -g > $text_dir/uniq_id.tmp
     cat $text_dir/uniq_id.tmp | python3 local/get_tokenid.py --model=$spmdata/spm.model > $text_dir/tokens.tmp
     paste -d ' ' $text_dir/uniq_id.tmp $text_dir/tokens.tmp > $text_dir/tokens.txt
@@ -70,8 +71,12 @@ fi
 
 
 if [ $stage -le 2 ] && [ $stop_stage -ge 2 ]; then
-    python3 local/transText2Bin.py $text_dir/data/dev_id.tmp $text_dir/data/dev.pkl || exit 1
-    python3 local/transText2Bin.py $text_dir/data/tr_id.tmp $text_dir/data/tr.pkl || exit 1
+    if [ ! -f $text_dir/data/dev.pkl ]; then
+        python3 local/transText2Bin.py --concat=256 $text_dir/data/dev.id $text_dir/data/dev.pkl || exit 1
+    fi
+    if [ ! -f $text_dir/data/tr.pkl ]; then
+        python3 local/transText2Bin.py --nj $(nproc) --concat=256 $text_dir/data/tr.id $text_dir/data/tr.pkl || exit 1
+    fi
 fi
 
 
@@ -84,15 +89,15 @@ if [ $stage -le 3 ] && [ $stop_stage -ge 3 ]; then
         exit 1
     fi
 
-    # CUDA_VISIBLE_DEVICES="8,7,6,5"  \
+    CUDA_VISIBLE_DEVICES="8,7,6,5,4"  \
     python3 ctc-crf/lm_train.py --seed=0        \
         --world-size 1 --rank 0 -j 1            \
-        --batch_size=1152                       \
+        --batch_size=1280                       \
         --dir=$dir                              \
         --config=$dir/config.json               \
         --data=data/                            \
-        --trset=data/spm/data/tr.pkl            \
-        --devset=data/spm/data/dev.pkl          \
+        --trset=$text_dir/data/tr.pkl           \
+        --devset=$text_dir/data/dev.pkl         \
         --grad-accum-fold=1                     \
         || exit 1
 fi
