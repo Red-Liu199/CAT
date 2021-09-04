@@ -1,0 +1,3 @@
+[submodule "src/warp-rnnt"]
+	path = src/warp-rnnt
+	url = git@github.com:maxwellzh/warp-rnnt.git

@@ -16,7 +16,7 @@ import model as model_zoo
 import dataset as DataSet
 from lm_train import LSTMPredictNet
 from collections import OrderedDict
-from typing import Union, Tuple, Sequence, Iterable, Literal
+from typing import Union, Tuple, Sequence, Iterable, Literal, List
 from warp_rnnt import rnnt_loss as RNNTLoss
 from beam_search_base import BeamSearchRNNTransducer, BeamSearchConvTransducer, ConvMemBuffer
 
@@ -26,6 +26,7 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
+from gather_sum._C import gather_sum
 
 
 def main(args: argparse.Namespace):
@@ -108,12 +109,74 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
     manager.run(train_sampler, trainloader, testloader, args)
 
 
+class PackedSequence():
+    def __init__(self, xs: Union[Sequence[torch.Tensor], torch.Tensor] = None, xn: torch.LongTensor = None) -> None:
+        if xs is None:
+            return
+
+        if xn is not None:
+            assert isinstance(xs, torch.Tensor)
+            if xs.dim() == 3:
+                V = xs.size(-1)
+            elif xs.dim() == 2:
+                V = 1
+            else:
+                raise NotImplementedError
+
+            self._data = torch.cat([xs[i, :xn[i]].view(-1, V)
+                                   for i in range(xn.size(0))], dim=0)
+            self._lens = xn[:]
+        else:
+            assert all(x.size()[1:] == xs[0].size()[1:] for x in xs)
+
+            _lens = [x.size(0) for x in xs]
+            self._data = xs[0].new_empty(
+                ((sum(_lens),)+xs[0].size()[1:]))
+            pref = 0
+            for x, l in zip(xs, _lens):
+                self._data[pref:pref+l] = x
+                pref += l
+            self._lens = torch.LongTensor(_lens)
+
+    @property
+    def data(self) -> torch.Tensor:
+        return self._data
+
+    @property
+    def batch_sizes(self) -> torch.LongTensor:
+        return self._lens
+
+    def to(self, device):
+        newpack = PackedSequence()
+        newpack._data = self._data.to(device)
+        newpack._lens = self._lens.to(device)
+        return newpack
+
+    def set(self, data: torch.Tensor):
+        assert data.size(0) == self._data.size(0)
+        self._data = data
+        return self
+
+    def unpack(self) -> Tuple[List[torch.Tensor], torch.LongTensor]:
+        out = []
+
+        pref = 0
+        for l in self._lens:
+            out.append(self._data[pref:pref+l])
+            pref += l
+        return out, self._lens
+
+    def __add__(self, _y) -> torch.Tensor:
+        return gather_sum(self._data, _y._data, self._lens.to(dtype=torch.int, device=self._data.device), _y._lens.to(dtype=torch.int, device=self._data.device))
+
+
 class Transducer(nn.Module):
-    def __init__(self, encoder: nn.Module = None, decoder: nn.Module = None, jointnet: nn.Module = None):
+    def __init__(self, encoder: nn.Module = None, decoder: nn.Module = None, jointnet: nn.Module = None, compact=True):
         super().__init__()
         self.encoder = encoder
         self.decoder = decoder
         self.joint = jointnet
+        self._compact = compact
 
     def forward(self, inputs: torch.FloatTensor, targets: torch.LongTensor, input_lengths: torch.LongTensor, target_lengths: torch.LongTensor) -> torch.FloatTensor:
 
@@ -121,11 +184,20 @@ class Transducer(nn.Module):
         padded_targets = torch.cat(
             [targets.new_zeros((targets.size(0), 1)), targets], dim=-1)
         output_decoder, _ = self.decoder(padded_targets)
-
-        joint_out = self.joint(output_encoder, output_decoder)
+        if self._compact:
+            packed_enc = PackedSequence(output_encoder, o_lens)
+            packed_dec = PackedSequence(output_decoder, target_lengths+1)
+            joint_out = self.joint(packed_enc, packed_dec)
+            targets = PackedSequence(targets, target_lengths).data
+        else:
+            joint_out = self.joint(output_encoder, output_decoder)
 
         if isinstance(joint_out, tuple):
             joint_out = joint_out[0]
+
+        loss = RNNTLoss(joint_out, targets.to(dtype=torch.int32), o_lens.to(device=joint_out.device,
+                        dtype=torch.int32), target_lengths.to(device=joint_out.device, dtype=torch.int32),
+                        reduction='mean', gather=True, compact=self._compact)
 
         ########## DEBUG CODE ###########
         # import matplotlib.pyplot as plt
@@ -140,9 +212,6 @@ class Transducer(nn.Module):
         # plt.close()
         # exit(1)
         #################################
-
-        loss = RNNTLoss(joint_out, targets.to(dtype=torch.int32), o_lens.to(device=joint_out.device,
-                                                                            dtype=torch.int32), target_lengths.to(device=joint_out.device, dtype=torch.int32), reduction='mean', gather=True)
 
         return loss
 
@@ -222,7 +291,24 @@ class JointNet(nn.Module):
             """
             self.distr_blk = nn.Sigmoid()
 
-    def forward(self, encoder_output: torch.FloatTensor, decoder_output: torch.FloatTensor) -> torch.FloatTensor:
+    def forward(self, encoder_output: Union[torch.Tensor, PackedSequence], decoder_output: Union[torch.Tensor, PackedSequence]) -> torch.FloatTensor:
+
+        if isinstance(encoder_output, PackedSequence) and isinstance(decoder_output, PackedSequence):
+            # compact memory mode, gather the tensors without padding
+            packed_encoder_output = encoder_output.set(
+                self.fc_enc(encoder_output.data))    # type:torch.Tensor
+            packed_decoder_output = decoder_output.set(
+                self.fc_dec(decoder_output.data))
+
+            # shape: (\sum_{Ti(Ui+1)}, V)
+            expanded_out = packed_encoder_output + packed_decoder_output
+            outputs = self.fc(expanded_out).log_softmax(dim=-1)
+            return outputs
+
+        if not isinstance(encoder_output, torch.Tensor) or not isinstance(decoder_output, torch.Tensor):
+            raise NotImplementedError(
+                "Output of encoder and decoder being fed into jointnet should be of same type. Expect (Tensor, Tensor) or (PackedSequence, PackedSequence), instead ({}, {})".format(type(encoder_output), type(decoder_output)))
+
         assert (encoder_output.dim() == 3 and decoder_output.dim() == 3) or (
             encoder_output.dim() == 1 and decoder_output.dim() == 1)
 
