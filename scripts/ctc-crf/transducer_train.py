@@ -26,7 +26,7 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
-from gather_sum._C import gather_sum
+from gather_sum import gathersum
 
 
 def main(args: argparse.Namespace):
@@ -167,7 +167,7 @@ class PackedSequence():
         return out, self._lens
 
     def __add__(self, _y) -> torch.Tensor:
-        return gather_sum(self._data, _y._data, self._lens.to(dtype=torch.int, device=self._data.device), _y._lens.to(dtype=torch.int, device=self._data.device))
+        return gathersum(self._data, _y._data, self._lens, _y._lens)
 
 
 class Transducer(nn.Module):

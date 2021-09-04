@@ -32,40 +32,40 @@
 #define None torch::indexing::None
 #define Slice torch::indexing::Slice
 
-at::Tensor gather_sum(
-    const at::Tensor &xs, const at::Tensor &ys,
-    const at::Tensor &xn, const at::Tensor &yn)
+torch::Tensor gather_sum_forward(
+    const torch::Tensor &xs, const torch::Tensor &ys,
+    const torch::Tensor &lx, const torch::Tensor &ly)
 {
     // Check contiguous
     CHECK_CONTIGUOUS(xs);
     CHECK_CONTIGUOUS(ys);
-    CHECK_CONTIGUOUS(xn);
-    CHECK_CONTIGUOUS(yn);
+    CHECK_CONTIGUOUS(lx);
+    CHECK_CONTIGUOUS(ly);
     // Check types
     CHECK_FLOAT(xs);
     CHECK_FLOAT(ys);
-    CHECK_INT(xn);
-    CHECK_INT(yn);
+    CHECK_INT(lx);
+    CHECK_INT(ly);
     // Check device
     CHECK_CUDA(xs);
     CHECK_CUDA(ys);
-    CHECK_CUDA(xn);
-    CHECK_CUDA(yn);
+    CHECK_CUDA(lx);
+    CHECK_CUDA(ly);
     // Check number of dimensions and elements
     TORCH_CHECK(xs.dim() == 2, "xs must have 2 dimensions")
     TORCH_CHECK(ys.dim() == 2, "ys must have 2 dimensions")
-    TORCH_CHECK(xn.size(0) == yn.size(0), "xn and yn shape must be equal (N,)")
-    TORCH_CHECK(xs.size(0) == xn.sum().item<int64_t>(), "xs shape must be equal to (sum(xn), )")
-    TORCH_CHECK(ys.size(0) == yn.sum().item<int64_t>(), "ys shape must be equal to (sum(yn), )")
+    TORCH_CHECK(lx.size(0) == ly.size(0), "lx and ly shape must be equal (N,)")
+    TORCH_CHECK(xs.size(0) == lx.sum().item<int64_t>(), "xs shape must be equal to (sum(lx), )")
+    TORCH_CHECK(ys.size(0) == ly.sum().item<int64_t>(), "ys shape must be equal to (sum(ly), )")
 
-    const auto N = xn.size(0);
-    const auto T = xn.max().item<int64_t>(); // max of {T_i}
-    const auto U = yn.max().item<int64_t>(); // max of {U_i}
+    const auto N = lx.size(0);
+    const auto T = lx.max().item<int64_t>(); // max of {T_i}
+    const auto U = ly.max().item<int64_t>(); // max of {U_i}
     const auto V = xs.size(1);
 
-    auto memPref = (xn * yn).cumsum(0, at::ScalarType::Int);
-    auto labelPref = yn.cumsum(0, at::ScalarType::Int);
-    auto framePref = xn.cumsum(0, at::ScalarType::Int);
+    auto memPref = (lx * ly).cumsum(0, at::ScalarType::Int);
+    auto labelPref = ly.cumsum(0, at::ScalarType::Int);
+    auto framePref = lx.cumsum(0, at::ScalarType::Int);
 
     int64_t STU = memPref[-1].item<int64_t>();
 
@@ -82,18 +82,15 @@ at::Tensor gather_sum(
     labelPref[0] = 0;
     framePref[0] = 0;
 
-    auto stream = at::cuda::getCurrentCUDAStream(xs.device().index());
-
+    auto stream = c10::cuda::getCurrentCUDAStream(xs.device().index());
     rnntStatus_t status;
 
-    at::TensorOptions gather_xs_opts(xs.device());
-    gather_xs_opts = gather_xs_opts.dtype(at::ScalarType::Float);
+    auto device = xs.device();
 
-    auto gather_xs_shape = {STU, V}; // (\sum_{T_i*(U_i+1)}, 2)
-    at::Tensor gather_xs = at::empty(gather_xs_shape, gather_xs_opts);
+    torch::Tensor gather_xs = torch::empty({STU, V}, torch::dtype(torch::kFloat32).device(device));
 
     status = run_gather_sum(stream, xs.data_ptr<float>(), ys.data_ptr<float>(),
-                            (unsigned int *)xn.data_ptr<int>(), (unsigned int *)yn.data_ptr<int>(),
+                            (unsigned int *)lx.data_ptr<int>(), (unsigned int *)ly.data_ptr<int>(),
                             gather_xs.data_ptr<float>(), (unsigned int *)memPref.data_ptr<int>(),
                             (unsigned int *)framePref.data_ptr<int>(), (unsigned int *)labelPref.data_ptr<int>(),
                             N, T, U, V);
@@ -103,14 +100,76 @@ at::Tensor gather_sum(
     return gather_xs;
 }
 
+std::tuple<torch::Tensor, torch::Tensor> gather_sum_backward(
+    const torch::Tensor &grad_sum,
+    const torch::Tensor &lx, const torch::Tensor &ly)
+{
+    // Check contiguous
+    CHECK_CONTIGUOUS(grad_sum);
+    CHECK_CONTIGUOUS(lx);
+    CHECK_CONTIGUOUS(ly);
+    // Check types
+    CHECK_FLOAT(grad_sum);
+    CHECK_INT(lx);
+    CHECK_INT(ly);
+    // Check device
+    CHECK_CUDA(grad_sum);
+    CHECK_CUDA(lx);
+    CHECK_CUDA(ly);
+    // Check number of dimensions and elements
+    TORCH_CHECK(grad_sum.dim() == 2, "xs must have 2 dimensions")
+    TORCH_CHECK(lx.size(0) == ly.size(0), "lx and ly shape must be equal (N,)")
+
+    const auto N = lx.size(0);
+    const int lx_max = lx.max().item<int>(); // max of {T_i}
+    const int ly_max = ly.max().item<int>(); // max of {U_i}
+    const int V = grad_sum.size(1);
+
+    auto device = grad_sum.device();
+    auto stream = c10::cuda::getCurrentCUDAStream(device.index());
+
+    rnntStatus_t status;
+
+    auto sumPref = (lx * ly).cumsum(0, at::ScalarType::Int);
+    auto ycumsum = ly.cumsum(0, at::ScalarType::Int);
+    auto xcumsum = lx.cumsum(0, at::ScalarType::Int);
+    TORCH_CHECK(sumPref[-1].item<int>() == grad_sum.size(0), "grad_sum must be equal to (lx0ly0+lx1ly1+..., V)");
+
+    // set begin of memory location of each sequence
+    {
+        auto cumsumsumPref = sumPref.index({Slice(0, -1, None)}) * V;
+        sumPref.index_put_({Slice(1, None, None)}, cumsumsumPref);
+    }
+    sumPref[0] = 0;
+
+    torch::Tensor grad_x = torch::empty({lx.sum(0).item<int>(), V}, torch::dtype(torch::kFloat32).device(device));
+    torch::Tensor grad_y = torch::empty({ly.sum(0).item<int>(), V}, torch::dtype(torch::kFloat32).device(device));
+
+    status = run_scatter_grad(stream, grad_sum.data_ptr<float>(), grad_x.data_ptr<float>(), grad_y.data_ptr<float>(),
+                              (unsigned int *)lx.data_ptr<int>(), (unsigned int *)ly.data_ptr<int>(),
+                              (unsigned int *)sumPref.data_ptr<int>(), (unsigned int *)xcumsum.data_ptr<int>(), (unsigned int *)ycumsum.data_ptr<int>(),
+                              V, lx_max, ly_max, N);
+    TORCH_CHECK(status == GATHER_STATUS_SUCCESS, "scatter grad status " + std::to_string(status));
+
+    return std::make_tuple(grad_x, grad_y);
+}
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
     m.def(
-        "gather_sum",
-        &gather_sum,
+        "gather_sum_forward",
+        &gather_sum_forward,
         "CUDA based gather sum.",
         pybind11::arg("xs"),
         pybind11::arg("ys"),
-        pybind11::arg("xn"),
-        pybind11::arg("yn"));
+        pybind11::arg("lx"),
+        pybind11::arg("ly"));
+
+    m.def(
+        "gather_sum_backward",
+        &gather_sum_backward,
+        "CUDA based gather sum backward",
+        pybind11::arg("grad_sum"),
+        pybind11::arg("lx"),
+        pybind11::arg("ly"));
 }
