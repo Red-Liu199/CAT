@@ -246,9 +246,9 @@ class JointNet(nn.Module):
             conbined_input = encoder_output + decoder_output
 
             vocab_logits = self.fc(conbined_input)
-            prob_blk = self.distr_blk(vocab_logits[:, :, :, :1])
+            prob_blk = self.distr_blk(vocab_logits[..., :1])
             vocab_log_probs = torch.log(
-                1-prob_blk)+torch.log_softmax(vocab_logits[:, :, :, 1:], dim=-1)
+                1-prob_blk)+torch.log_softmax(vocab_logits[..., 1:], dim=-1)
             outputs = torch.cat([torch.log(prob_blk), vocab_log_probs], dim=-1)
         else:
             outputs = self.fc(

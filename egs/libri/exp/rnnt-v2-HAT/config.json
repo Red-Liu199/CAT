@@ -30,13 +30,15 @@
             "odim_encoder": 128,
             "odim_decoder": 512,
             "num_classes": 1024,
-            "HAT": true
+            "HAT": true,
+            "act": "tanh"
         }
     },
     "scheduler": {
         "type": "SchedulerTransformerEarlyStop",
         "optimizer": {
             "type_optim": "Adam",
+            "use_zero": true,
             "kwargs": {
                 "lr": 3e-4,
                 "betas": [
