@@ -17,7 +17,8 @@ class _GatherSum(torch.autograd.Function):
     def backward(ctx, grad_sum):
 
         lx, ly = ctx.saved_tensors
-        grad_x, grad_y = core.gather_sum_backward(grad_sum, lx, ly)
+        grad_x, grad_y = core.gather_sum_backward(
+            grad_sum.contiguous(), lx, ly)
         return grad_x, grad_y, None, None
 
 

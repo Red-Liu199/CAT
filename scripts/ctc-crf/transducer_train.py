@@ -171,7 +171,7 @@ class PackedSequence():
 
 
 class Transducer(nn.Module):
-    def __init__(self, encoder: nn.Module = None, decoder: nn.Module = None, jointnet: nn.Module = None, compact=True):
+    def __init__(self, encoder: nn.Module = None, decoder: nn.Module = None, jointnet: nn.Module = None, compact=False):
         super().__init__()
         self.encoder = encoder
         self.decoder = decoder

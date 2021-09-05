@@ -142,6 +142,10 @@ std::tuple<torch::Tensor, torch::Tensor> gather_sum_backward(
     }
     sumPref[0] = 0;
 
+    /**
+     * Here we use torch::empty instead of torch::zeros, since we initialize the value to 0.0f in cuda kernel
+     * ... and it is faster.
+     */
     torch::Tensor grad_x = torch::empty({lx.sum(0).item<int>(), V}, torch::dtype(torch::kFloat32).device(device));
     torch::Tensor grad_y = torch::empty({ly.sum(0).item<int>(), V}, torch::dtype(torch::kFloat32).device(device));
 

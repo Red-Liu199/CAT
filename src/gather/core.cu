@@ -55,37 +55,49 @@ rnntStatus_t run_gather_sum(cudaStream_t stream, const float *xs, const float *y
 __global__ void kernel_fill_grad_x(const float *grad_sum, const unsigned int *ly,
                                    float *grad_x, const unsigned int *memPref,
                                    const unsigned int *xCumSum, unsigned int V)
-{ // (Tm, V, N)
-    unsigned int xi = blockIdx.x * W + threadIdx.x;
+{
     unsigned int v = blockIdx.y * H + threadIdx.y;
-    unsigned int n = blockIdx.z;
-
-    if (xi >= xCumSum[n] || (n > 0 && xi < xCumSum[n - 1]) || v >= V)
+    if (v >= V)
         return;
 
-    const float *ptr_grad_sum = grad_sum + memPref[n] + v;
-    float *ptr_x = grad_x + xi * V + v;
+    unsigned int xi = blockIdx.x * W + threadIdx.x;
+    unsigned int n = blockIdx.z;
+    unsigned int xPref = 0;
+    if (n > 0)
+    {
+        xPref = xCumSum[n - 1];
+        if (xi >= xCumSum[n] - xPref)
+            return;
+    }
+    else if (xi >= xCumSum[0])
+    {
+        return;
+    }
+    // printf("(n, xi, v)=(%d, %d, %d)\n", n, xi, v);
+    const float *ptr_grad_sum = grad_sum + memPref[n] + xi * ly[n] * V + v;
+    float *ptr_x = grad_x + (xPref + xi) * V + v;
+    *ptr_x = 0.0f;
+
+    /**
+     * native summation, might cause higher numerical error
+     */
+    // for (int i = 0; i < ly[n]; i++, ptr_grad_sum++)
+    // {
+    //     *ptr_x += *ptr_grad_sum;
+    // }
+
+    /**
+     * below is the Kahan summation: https://en.wikipedia.org/wiki/Kahan_summation_algorithm
+     * in my testing, two algorithm run in close speed, while Kahan algorithm has better presicion.
+     */
+    float c = 0.0f;
+    float _y, _t;
     for (int i = 0; i < ly[n]; i++, ptr_grad_sum++)
     {
-        *ptr_x += *ptr_grad_sum;
-    }
-}
-__global__ void kernel_fill_grad_y(const float *grad_sum, const unsigned int *lx,
-                                   float *grad_y, const unsigned int *memPref,
-                                   const unsigned int *yCumSum, unsigned int V)
-{ // (Um, V, N)
-    unsigned int xi = blockIdx.x * W + threadIdx.x;
-    unsigned int v = blockIdx.y * H + threadIdx.y;
-    unsigned int n = blockIdx.z;
-
-    if (xi >= yCumSum[n] || (n > 0 && xi < yCumSum[n - 1]) || v >= V)
-        return;
-
-    const float *ptr_grad_sum = grad_sum + memPref[n] + v;
-    float *ptr_y = grad_y + xi * V + v;
-    for (int i = 0; i < lx[n]; i++, ptr_grad_sum++)
-    {
-        *ptr_y += *ptr_grad_sum;
+        _y = *ptr_grad_sum - c;
+        _t = *ptr_x + _y;
+        c = (_t - *ptr_x) - _y;
+        *ptr_x = _t;
     }
 }
 
@@ -103,7 +115,7 @@ rnntStatus_t run_scatter_grad(cudaStream_t stream, const float *grad_sum, float 
 
     dim3 threads2(W, H);
     dim3 blocks2((ly_max + W - 1) / W, (V + H - 1) / H, N);
-    kernel_fill_grad_y<<<blocks2, threads2, 0, stream>>>(grad_sum, lx, grad_y, sumPref, yCumSum, V);
+    kernel_fill_grad_x<<<blocks2, threads2, 0, stream>>>(grad_sum, lx, grad_y, sumPref, yCumSum, V);
     if (cudaGetLastError() != cudaSuccess)
         return GATHER_STATUS_FAILED;
 

@@ -391,6 +391,10 @@ def train(trainloader, epoch: int, args: argparse.Namespace, manager: Manager):
         # update every fold times and won't drop the last batch
         if fold == 1 or (i+1) % fold == 0 or (i+1) == len(trainloader):
             loss = model(logits, labels, input_lengths, label_lengths)/fold
+            if torch.isnan(loss):
+                raise RuntimeError(
+                    "'nan' occurs in training, break.")
+
             loss.backward()
             real_loss = _cal_real_loss(loss, path_weights)
 
