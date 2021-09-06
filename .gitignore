@@ -2,6 +2,9 @@ egs/**/data/
 egs/**/exp/
 egs/**/fbank/
 .vscode/
+*.png
+*.jpg
+*.pt
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -125,7 +125,7 @@ class PackedSequence():
 
             self._data = torch.cat([xs[i, :xn[i]].view(-1, V)
                                    for i in range(xn.size(0))], dim=0)
-            self._lens = xn[:]
+            self._lens = xn
         else:
             assert all(x.size()[1:] == xs[0].size()[1:] for x in xs)
 

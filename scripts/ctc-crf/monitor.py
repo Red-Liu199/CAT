@@ -90,7 +90,7 @@ def plot_monitor(log_path: str = None, train_log: str = 'log_train.csv', dev_log
     if sim_lrs[-1] < len(lrs) - 1:
         sim_lrs.append(len(lrs)-1)
 
-    if len(sim_lrs) > 1000 or len(sim_lrs) == 1:
+    if len(sim_lrs) > 50 or len(sim_lrs) == 1:
         ax.semilogy(lrs)
     else:
         ax.set_yscale('log')
