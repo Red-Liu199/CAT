@@ -26,7 +26,7 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
-from gather_sum import gathersum
+from gather import gathersum, gathercat
 
 
 def main(args: argparse.Namespace):
@@ -102,8 +102,9 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         print("  Model size:{:.2f}M".format(
             coreutils.count_parameters(manager.model)/1e6))
 
-        coreutils.gen_readme(args.dir+'/readme.md',
-                             model=manager.model, gpu_info=gpu_info)
+        if not args.debug:
+            coreutils.gen_readme(args.dir+'/readme.md',
+                                 model=manager.model, gpu_info=gpu_info)
 
     # training
     manager.run(train_sampler, trainloader, testloader, args)
@@ -119,14 +120,23 @@ class PackedSequence():
             if xs.dim() == 3:
                 V = xs.size(-1)
             elif xs.dim() == 2:
+                xs = xs.unsqueeze(2)
                 V = 1
             else:
                 raise NotImplementedError
 
-            self._data = torch.cat([xs[i, :xn[i]].view(-1, V)
-                                   for i in range(xn.size(0))], dim=0)
+            if xs.dtype != torch.float:
+                # this might be slow
+                self._data = torch.cat([xs[i, :xn[i]].view(-1, V)
+                                       for i in range(xn.size(0))], dim=0)
+            else:
+                if not xs.is_contiguous():
+                    xs = xs.contiguous()
+
+                self._data = gathercat(xs, xn)
             self._lens = xn
         else:
+            # identical to torch.nn.utils.rnn.pad_sequence
             assert all(x.size()[1:] == xs[0].size()[1:] for x in xs)
 
             _lens = [x.size(0) for x in xs]
@@ -171,7 +181,7 @@ class PackedSequence():
 
 
 class Transducer(nn.Module):
-    def __init__(self, encoder: nn.Module = None, decoder: nn.Module = None, jointnet: nn.Module = None, compact=False):
+    def __init__(self, encoder: nn.Module = None, decoder: nn.Module = None, jointnet: nn.Module = None, compact=True):
         super().__init__()
         self.encoder = encoder
         self.decoder = decoder

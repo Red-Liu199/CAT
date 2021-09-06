@@ -349,7 +349,7 @@ def highlight_msg(msg: Union[Sequence[str], str]):
 
 def train(trainloader, epoch: int, args: argparse.Namespace, manager: Manager):
     @torch.no_grad()
-    def _cal_real_loss(loss, path_weight):
+    def _cal_real_loss(loss, path_weights):
         if args.iscrf:
             partial_loss = loss.cpu()
             weight = torch.mean(path_weights)

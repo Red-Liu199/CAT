@@ -25,6 +25,14 @@ extern "C"
                                   unsigned int *sumPref, unsigned int *xCumSum, unsigned int *yCumSum,
                                   unsigned int V, unsigned int lx_max, unsigned int ly_max, unsigned int N);
 
+    rnntStatus_t run_gather_cat(cudaStream_t stream, const float *x_padded, const unsigned int *lx,
+                                float *x_gather, const unsigned int *memPref,
+                                unsigned int N, unsigned int T, unsigned int V);
+
+    rnntStatus_t run_pad_grad(cudaStream_t stream, const float *grad_gather, const unsigned int *lx,
+                              float *grad_padded, const unsigned int *memPref,
+                              unsigned int N, unsigned int T, unsigned int V);
+
 #ifdef __cplusplus
 }
 #endif

@@ -1,6 +1,6 @@
 
-from gather_sum._C import gather_sum_forward, gather_sum_backward
-from gather_sum import gathersum
+from gather._C import gather_sum_forward, gather_sum_backward
+from gather import gathersum
 import torch
 import time
 
@@ -45,9 +45,9 @@ def test(seed: int):
     torch.manual_seed(seed)
 
     N = torch.randint(1, 4, (1,)).item()
-    T = torch.randint(1, 128, (1,)).item()
-    U = torch.randint(1, 128, (1,)).item()
-    V = torch.randint(1, 4, (1,)).item()
+    T = torch.randint(2, 4, (1,)).item()
+    U = torch.randint(2, 4, (1,)).item()
+    V = torch.randint(1, 1024, (1,)).item()
     lx = torch.randint(T//2, T, (N, ), dtype=torch.int, device=0)
     xs = torch.randn((lx.sum(), V), dtype=torch.float, device=0)
     ly = torch.randint(U//2, U, (N, ), dtype=torch.int, device=0)
@@ -75,7 +75,7 @@ def test(seed: int):
     print("ly size: ", ly.size())
 
     xs.requires_grad = True
-    ys.requires_grad = False
+    ys.requires_grad = True
 
     def manual_sum(xs, ys, lx, ly):
         out = []
@@ -102,18 +102,32 @@ def test(seed: int):
         else:
             print("Forward correct.")
 
-        gather_x.sum().backward()
-        t_grad = xs.grad.data.detach()
+        weighted_w = torch.randn_like(gather_x)
+        (gather_x*weighted_w).sum().backward()
+        tx_grad = xs.grad.data.detach()
+        ty_grad = ys.grad.data.detach()
         xs.grad = None
-        manual.sum().backward()
-        m_grad = xs.grad.data.detach()
-        xs.grad = None
+        ys.grad = None
 
-        cmp = (t_grad == m_grad)
-        if not torch.all(cmp):
-            print(torch.sum(torch.abs(t_grad-m_grad)))
-            print(t_grad[torch.logical_not(cmp)])
-            print(m_grad[torch.logical_not(cmp)])
+        (manual*weighted_w).sum().backward()
+        mx_grad = xs.grad.data.detach()
+        my_grad = ys.grad.data.detach()
+        xs.grad = None
+        ys.grad = None
+
+        cmp = torch.all(tx_grad == mx_grad) and torch.all(ty_grad == my_grad)
+        if not cmp:
+            if not torch.all(tx_grad == mx_grad):
+                print("xs backward mismatch.")
+                print(torch.sum(torch.abs(tx_grad-mx_grad)))
+                print(tx_grad[torch.logical_not(cmp)])
+                print(mx_grad[torch.logical_not(cmp)])
+            else:
+                print("ys backward mismatch.")
+                print(torch.sum(torch.abs(ty_grad-my_grad)))
+                print(ty_grad[torch.logical_not(cmp)])
+                print(my_grad[torch.logical_not(cmp)])
+
         else:
             print("Backward correct.")
 
@@ -139,7 +153,8 @@ def test(seed: int):
             print("Maybe limit the (N, T, U, V) to smaller number and re-test.")
             exit(1)
 
-    test_autogradcheck()
+    # test_autogradcheck()
+    test_forward()
 
     print('')
 

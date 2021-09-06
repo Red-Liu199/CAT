@@ -26,8 +26,8 @@ requirements = get_requirements()
 long_description = get_long_description()
 
 setup(
-    name="gather_sum",
-    version="0.1.0",
+    name="gather",
+    version="0.2.0",
     description="PyTorch bindings for CUDA Gather sum",
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -38,7 +38,7 @@ setup(
     packages=find_packages(),
     ext_modules=[
         CUDAExtension(
-            name="gather_sum._C",
+            name="gather._C",
             sources=["core.cu", "binding.cpp"]
         )
     ],

@@ -1,8 +1,8 @@
 import torch
-import gather_sum._C as core
+import gather._C as core
 from pkg_resources import get_distribution
 
-__version__ = get_distribution('gather_sum').version
+__version__ = get_distribution('gather').version
 
 
 class _GatherSum(torch.autograd.Function):
@@ -22,6 +22,23 @@ class _GatherSum(torch.autograd.Function):
         return grad_x, grad_y, None, None
 
 
+class _GatherCat(torch.autograd.Function):
+
+    @staticmethod
+    def forward(ctx, xs, lx):
+        x_gather = core.gather_cat_forward(xs, lx)
+        ctx.save_for_backward(lx)
+        return x_gather
+
+    @staticmethod
+    def backward(ctx, grad_gather):
+
+        lx, = ctx.saved_tensors
+        grad_padded = core.gather_cat_backward(
+            grad_gather.contiguous(), lx)
+        return grad_padded, None
+
+
 def gathersum(xs: torch.Tensor, ys: torch.Tensor, lx: torch.Tensor, ly: torch.Tensor) -> torch.Tensor:
     """ Sum the two 'gathered' tensors xs and ys.
 
@@ -35,3 +52,17 @@ def gathersum(xs: torch.Tensor, ys: torch.Tensor, lx: torch.Tensor, ly: torch.Te
         gathered_sum (torch.FloatTensor): size (lx0ly0+lx1ly1+..., *)
     """
     return _GatherSum.apply(xs, ys, lx.to(device=xs.device, dtype=torch.int32), ly.to(device=xs.device, dtype=torch.int32))
+
+
+def gathercat(xs: torch.Tensor, lx: torch.Tensor) -> torch.Tensor:
+    """Cat the padded xs via lengths lx
+
+    Args:
+        xs (torch.FloatTensor): of size (N, T, V)
+        lx (torch.LongTensor): of size (N, ), whose elements are (lx0, lx1, ...)
+
+    Return:
+        x_gather (torch.FloatTensor): size (lx0+lx1+..., V)
+    """
+    assert xs.size(0) == lx.size(0)
+    return _GatherCat.apply(xs, lx.to(device=xs.device, dtype=torch.int32))

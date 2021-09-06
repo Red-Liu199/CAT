@@ -92,12 +92,48 @@ __global__ void kernel_fill_grad_x(const float *grad_sum, const unsigned int *ly
      */
     float c = 0.0f;
     float _y, _t;
-    for (int i = 0; i < ly[n]; i++, ptr_grad_sum++)
+    for (int i = 0; i < ly[n]; i++, ptr_grad_sum += V)
     {
         _y = *ptr_grad_sum - c;
         _t = *ptr_x + _y;
         c = (_t - *ptr_x) - _y;
         *ptr_x = _t;
+    }
+}
+
+__global__ void kernel_fill_grad_y(const float *grad_sum, const unsigned int *lx,
+                                   const unsigned int *ly, float *grad_y, const unsigned int *memPref,
+                                   const unsigned int *yCumSum, unsigned int V)
+{
+    unsigned int v = blockIdx.y * H + threadIdx.y;
+    if (v >= V)
+        return;
+
+    unsigned int yi = blockIdx.x * W + threadIdx.x;
+    unsigned int n = blockIdx.z;
+    unsigned int curN = ly[n];
+    if (yi >= curN)
+        return;
+
+    unsigned int yPref = yCumSum[n] - curN;
+    unsigned int _step = curN * V;
+
+    // printf("(n, xi, v)=(%d, %d, %d)\n", n, xi, v);
+    const float *ptr_grad_sum = grad_sum + memPref[n] + yi * V + v;
+    float *ptr_y = grad_y + (yPref + yi) * V + v;
+    *ptr_y = 0.0f;
+
+    /**
+     * refer to kernel_fill_grad_x() for details
+     */
+    float c = 0.0f;
+    float _y, _t;
+    for (int i = 0; i < lx[n]; i++, ptr_grad_sum += _step)
+    {
+        _y = *ptr_grad_sum - c;
+        _t = *ptr_y + _y;
+        c = (_t - *ptr_y) - _y;
+        *ptr_y = _t;
     }
 }
 
@@ -115,7 +151,69 @@ rnntStatus_t run_scatter_grad(cudaStream_t stream, const float *grad_sum, float 
 
     dim3 threads2(W, H);
     dim3 blocks2((ly_max + W - 1) / W, (V + H - 1) / H, N);
-    kernel_fill_grad_x<<<blocks2, threads2, 0, stream>>>(grad_sum, lx, grad_y, sumPref, yCumSum, V);
+    kernel_fill_grad_y<<<blocks2, threads2, 0, stream>>>(grad_sum, lx, ly, grad_y, sumPref, yCumSum, V);
+    if (cudaGetLastError() != cudaSuccess)
+        return GATHER_STATUS_FAILED;
+
+    return GATHER_STATUS_SUCCESS;
+}
+
+__global__ void kernel_cat(const float *x_padded, const unsigned int *lx,
+                           float *x_gather, const unsigned int *memPref,
+                           unsigned int T, unsigned int V)
+{
+    unsigned int t = blockIdx.x * W + threadIdx.x;
+    unsigned int n = blockIdx.z;
+    if (t >= lx[n])
+        return;
+
+    unsigned int v = blockIdx.y * H + threadIdx.y;
+    if (v >= V)
+        return;
+
+    x_gather[memPref[n] + t * V + v] = x_padded[n * T * V + t * V + v];
+}
+
+rnntStatus_t run_gather_cat(cudaStream_t stream, const float *x_padded, const unsigned int *lx,
+                            float *x_gather, const unsigned int *memPref,
+                            unsigned int N, unsigned int T, unsigned int V)
+{
+
+    dim3 threads(W, H);
+    dim3 blocks((T + W - 1) / W, (V + H - 1) / H, N);
+
+    kernel_cat<<<blocks, threads, 0, stream>>>(x_padded, lx, x_gather, memPref, T, V);
+    if (cudaGetLastError() != cudaSuccess)
+        return GATHER_STATUS_FAILED;
+
+    return GATHER_STATUS_SUCCESS;
+}
+
+__global__ void kernel_pad(const float *grad_gather, const unsigned int *lx,
+                           float *grad_padded, const unsigned int *memPref,
+                           unsigned int T, unsigned int V)
+{
+    unsigned int t = blockIdx.x * W + threadIdx.x;
+    unsigned int n = blockIdx.z;
+    if (t >= lx[n])
+        return;
+
+    unsigned int v = blockIdx.y * H + threadIdx.y;
+    if (v >= V)
+        return;
+
+    grad_padded[n * T * V + t * V + v] = grad_gather[memPref[n] + t * V + v];
+}
+
+rnntStatus_t run_pad_grad(cudaStream_t stream, const float *grad_gather, const unsigned int *lx,
+                          float *grad_padded, const unsigned int *memPref,
+                          unsigned int N, unsigned int T, unsigned int V)
+{
+
+    dim3 threads(W, H);
+    dim3 blocks((T + W - 1) / W, (V + H - 1) / H, N);
+
+    kernel_pad<<<blocks, threads, 0, stream>>>(grad_gather, lx, grad_padded, memPref, T, V);
     if (cudaGetLastError() != cudaSuccess)
         return GATHER_STATUS_FAILED;
 
