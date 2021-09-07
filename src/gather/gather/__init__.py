@@ -25,8 +25,9 @@ class _GatherSum(torch.autograd.Function):
 class _GatherCat(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, xs, lx):
+    def forward(ctx, xs: torch.FloatTensor, lx: torch.IntTensor):
         x_gather = core.gather_cat_forward(xs, lx)
+        ctx.nstride, ctx.tstride = xs.stride()[:-1]
         ctx.save_for_backward(lx)
         return x_gather
 
@@ -35,7 +36,7 @@ class _GatherCat(torch.autograd.Function):
 
         lx, = ctx.saved_tensors
         grad_padded = core.gather_cat_backward(
-            grad_gather.contiguous(), lx)
+            grad_gather.contiguous(), lx, ctx.nstride, ctx.tstride)
         return grad_padded, None
 
 

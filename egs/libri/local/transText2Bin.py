@@ -85,9 +85,9 @@ if __name__ == "__main__":
     else:
         num_lines = sum(1 for _ in open(args.intext, 'r'))
         interval = num_lines // num_threads
-        indices = list(range(0, num_lines, interval))
-        if indices[-1] != num_lines - 1:
-            indices[-1] = num_lines-1
+        indices = [interval * i for i in range(num_threads+1)]
+        if indices[-1] != num_lines:
+            indices[-1] = num_lines
 
         pool_args = [(args, i, indices[i], indices[i+1])
                      for i in range(num_threads)]

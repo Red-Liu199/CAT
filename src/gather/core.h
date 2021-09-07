@@ -27,10 +27,12 @@ extern "C"
 
     rnntStatus_t run_gather_cat(cudaStream_t stream, const float *x_padded, const unsigned int *lx,
                                 float *x_gather, const unsigned int *memPref,
+                                const unsigned int N_stride, const unsigned int T_stride,
                                 unsigned int N, unsigned int T, unsigned int V);
 
     rnntStatus_t run_pad_grad(cudaStream_t stream, const float *grad_gather, const unsigned int *lx,
                               float *grad_padded, const unsigned int *memPref,
+                              const unsigned int N_stride, const unsigned int T_stride,
                               unsigned int N, unsigned int T, unsigned int V);
 
 #ifdef __cplusplus

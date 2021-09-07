@@ -18,7 +18,7 @@ def test(seed: int):
     vis(f'Test process with seed={seed}', 60)
     torch.manual_seed(seed)
 
-    N = torch.randint(1, 20, (1,)).item()
+    N = torch.randint(1, 32, (1,)).item()
     T = torch.randint(2, 512, (1,)).item()
     V = torch.randint(1, 1024, (1,)).item()
     lx = torch.randint(T//2, T, (N, ), dtype=torch.int, device=0)
@@ -35,11 +35,11 @@ def test(seed: int):
 
     def test_forward():
         vis('Test forward/backward computation')
-        gather_x = gathercat(xs, lx)
 
         # manually cal
         manual = manual_cat(xs, lx)
-        print(manual.size())
+
+        gather_x = gathercat(xs, lx)
 
         if not torch.all(manual == gather_x):
             print("Forward mismatch")
@@ -78,13 +78,51 @@ def test(seed: int):
             print("Maybe limit the (N, T, V) to smaller number and re-test.")
             exit(1)
 
+    def test_contiguous(xs):
+        model = torch.nn.LSTM(xs.size(-1), xs.size(-1),
+                              num_layers=3).to(device=0)
+        model.flatten_parameters()
+
+        with torch.no_grad():
+            xs, _ = model(xs.transpose(0, 1))
+            xs = xs.transpose(0, 1)
+        xs.requires_grad = True
+        gather_x = gathercat(xs, lx)
+        print("Wow! It works with non contiguous layout!")
+
+    def test_performance():
+        with torch.no_grad():
+            gather_x = gathercat(xs, lx)
+            weighted = torch.randn_like(gather_x)
+
+        cnt = 500
+
+        t_beg = time.time()
+        for _ in range(cnt):
+            gather_x = manual_cat(xs, lx)
+            (weighted*gather_x).mean().backward()
+            xs.grad = None
+        print("Torch cat runs {} times, {:.4f} ms on average".format(
+            cnt, (time.time()-t_beg)/cnt*1000))
+
+        t_beg = time.time()
+        for _ in range(cnt):
+            gather_x = gathercat(xs, lx)
+            (weighted*gather_x).mean().backward()
+            xs.grad = None
+
+        print("Gather cat runs {} times, {:.4f} ms on average".format(
+            cnt, (time.time()-t_beg)/cnt*1000))
+
     test_forward()
     # test_autogradcheck()
+    # test_contiguous(xs)
+    # test_performance()
 
     print('')
 
 
 if __name__ == "__main__":
 
-    for i in range(5):
+    for i in range(10):
         test(i)

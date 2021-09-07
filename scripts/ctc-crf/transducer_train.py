@@ -130,9 +130,6 @@ class PackedSequence():
                 self._data = torch.cat([xs[i, :xn[i]].view(-1, V)
                                        for i in range(xn.size(0))], dim=0)
             else:
-                if not xs.is_contiguous():
-                    xs = xs.contiguous()
-
                 self._data = gathercat(xs, xn)
             self._lens = xn
         else:
@@ -186,7 +183,7 @@ class Transducer(nn.Module):
         self.encoder = encoder
         self.decoder = decoder
         self.joint = jointnet
-        self._compact = compact
+        self._compact = compact and isinstance(jointnet, JointNet)
 
     def forward(self, inputs: torch.FloatTensor, targets: torch.LongTensor, input_lengths: torch.LongTensor, target_lengths: torch.LongTensor) -> torch.FloatTensor:
 
@@ -464,7 +461,7 @@ class ConvJointNet(nn.Module):
 
 
 @torch.no_grad()
-def build_model(args, configuration: dict, dist: bool = True) -> Union[nn.Module, nn.parallel.DistributedDataParallel]:
+def build_model(args, configuration: dict, dist: bool = True, verbose: bool = True) -> Union[nn.Module, nn.parallel.DistributedDataParallel]:
     def _load_and_immigrate(orin_dict_path: str, str_src: str, str_dst: str) -> OrderedDict:
         if not os.path.isfile(orin_dict_path):
             raise FileNotFoundError(f"{orin_dict_path} is not a valid file.")
@@ -542,7 +539,7 @@ def build_model(args, configuration: dict, dist: bool = True) -> Union[nn.Module
         else:
             setattr(_model, 'freeze', False)
 
-        if args.rank == 0:
+        if args.rank == 0 and verbose:
             if 'pretrained' not in config:
                 _path = ''
             else:

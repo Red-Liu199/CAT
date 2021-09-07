@@ -160,7 +160,7 @@ std::tuple<torch::Tensor, torch::Tensor> gather_sum_backward(
 torch::Tensor gather_cat_forward(
     const torch::Tensor &x_padded, const torch::Tensor &lx)
 {
-    CHECK_CONTIGUOUS(x_padded);
+    // CHECK_CONTIGUOUS(x_padded);      // contiguous is no longer required
     CHECK_CONTIGUOUS(lx);
     // Check types
     CHECK_FLOAT(x_padded);
@@ -170,6 +170,7 @@ torch::Tensor gather_cat_forward(
     CHECK_CUDA(lx);
     // Check number of dimensions and elements
     TORCH_CHECK(x_padded.dim() == 3, "x_padded must have 3 dimensions (N, T, V)")
+    TORCH_CHECK(x_padded.stride(2) == 1, "x_padded must has stride=1 in last dim")
     TORCH_CHECK(x_padded.size(0) == lx.size(0), "lx and x_padded in dim 0 must be equal to N")
 
     const auto N = x_padded.size(0);
@@ -195,7 +196,8 @@ torch::Tensor gather_cat_forward(
     torch::Tensor x_gather = torch::empty({NT, V}, torch::dtype(torch::kFloat32).device(device));
 
     status = run_gather_cat(stream, x_padded.data_ptr<float>(), (unsigned int *)lx.data_ptr<int>(),
-                            x_gather.data_ptr<float>(), (unsigned int *)memPref.data_ptr<int>(), N, T, V);
+                            x_gather.data_ptr<float>(), (unsigned int *)memPref.data_ptr<int>(),
+                            x_padded.stride(0), x_padded.stride(1), N, T, V);
 
     TORCH_CHECK(status == GATHER_STATUS_SUCCESS, "gather cat status " + std::to_string(status));
 
@@ -203,7 +205,8 @@ torch::Tensor gather_cat_forward(
 }
 
 torch::Tensor gather_cat_backward(
-    const torch::Tensor &grad_gather, const torch::Tensor &lx)
+    const torch::Tensor &grad_gather, const torch::Tensor &lx,
+    const long &N_stride, const long &T_stride)
 {
     CHECK_CONTIGUOUS(grad_gather);
     CHECK_CONTIGUOUS(lx);
@@ -234,7 +237,8 @@ torch::Tensor gather_cat_backward(
     torch::Tensor grad_padded = torch::zeros({N, T, V}, torch::dtype(torch::kFloat32).device(device));
 
     status = run_pad_grad(stream, grad_gather.data_ptr<float>(), (unsigned int *)lx.data_ptr<int>(),
-                          grad_padded.data_ptr<float>(), (unsigned int *)memPref.data_ptr<int>(), N, T, V);
+                          grad_padded.data_ptr<float>(), (unsigned int *)memPref.data_ptr<int>(),
+                          N_stride, T_stride, N, T, V);
 
     TORCH_CHECK(status == GATHER_STATUS_SUCCESS, "gather cat backward status " + std::to_string(status));
 
@@ -272,5 +276,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
         &gather_cat_backward,
         "CUDA based gather cat backward",
         pybind11::arg("grad_gather"),
-        pybind11::arg("lx"));
+        pybind11::arg("lx"),
+        pybind11::arg("N_stride"),
+        pybind11::arg("T_stride"));
 }

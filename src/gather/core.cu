@@ -160,7 +160,8 @@ rnntStatus_t run_scatter_grad(cudaStream_t stream, const float *grad_sum, float 
 
 __global__ void kernel_cat(const float *x_padded, const unsigned int *lx,
                            float *x_gather, const unsigned int *memPref,
-                           unsigned int T, unsigned int V)
+                           const unsigned int N_stride, const unsigned int T_stride,
+                           unsigned int V)
 {
     unsigned int t = blockIdx.x * W + threadIdx.x;
     unsigned int n = blockIdx.z;
@@ -171,18 +172,19 @@ __global__ void kernel_cat(const float *x_padded, const unsigned int *lx,
     if (v >= V)
         return;
 
-    x_gather[memPref[n] + t * V + v] = x_padded[n * T * V + t * V + v];
+    x_gather[memPref[n] + t * V + v] = x_padded[n * N_stride + t * T_stride + v];
 }
 
 rnntStatus_t run_gather_cat(cudaStream_t stream, const float *x_padded, const unsigned int *lx,
                             float *x_gather, const unsigned int *memPref,
+                            const unsigned int N_stride, const unsigned int T_stride,
                             unsigned int N, unsigned int T, unsigned int V)
 {
 
     dim3 threads(W, H);
     dim3 blocks((T + W - 1) / W, (V + H - 1) / H, N);
 
-    kernel_cat<<<blocks, threads, 0, stream>>>(x_padded, lx, x_gather, memPref, T, V);
+    kernel_cat<<<blocks, threads, 0, stream>>>(x_padded, lx, x_gather, memPref, N_stride, T_stride, V);
     if (cudaGetLastError() != cudaSuccess)
         return GATHER_STATUS_FAILED;
 
@@ -191,7 +193,8 @@ rnntStatus_t run_gather_cat(cudaStream_t stream, const float *x_padded, const un
 
 __global__ void kernel_pad(const float *grad_gather, const unsigned int *lx,
                            float *grad_padded, const unsigned int *memPref,
-                           unsigned int T, unsigned int V)
+                           const unsigned int N_stride, const unsigned int T_stride,
+                           unsigned int V)
 {
     unsigned int t = blockIdx.x * W + threadIdx.x;
     unsigned int n = blockIdx.z;
@@ -202,18 +205,20 @@ __global__ void kernel_pad(const float *grad_gather, const unsigned int *lx,
     if (v >= V)
         return;
 
-    grad_padded[n * T * V + t * V + v] = grad_gather[memPref[n] + t * V + v];
+    // grad_padded[n * T * V + t * V + v] = grad_gather[memPref[n] + t * V + v];
+    grad_padded[n * N_stride + t * T_stride + v] = grad_gather[memPref[n] + t * V + v];
 }
 
 rnntStatus_t run_pad_grad(cudaStream_t stream, const float *grad_gather, const unsigned int *lx,
                           float *grad_padded, const unsigned int *memPref,
+                          const unsigned int N_stride, const unsigned int T_stride,
                           unsigned int N, unsigned int T, unsigned int V)
 {
 
     dim3 threads(W, H);
     dim3 blocks((T + W - 1) / W, (V + H - 1) / H, N);
 
-    kernel_pad<<<blocks, threads, 0, stream>>>(grad_gather, lx, grad_padded, memPref, T, V);
+    kernel_pad<<<blocks, threads, 0, stream>>>(grad_gather, lx, grad_padded, memPref, N_stride, T_stride, V);
     if (cudaGetLastError() != cudaSuccess)
         return GATHER_STATUS_FAILED;
 

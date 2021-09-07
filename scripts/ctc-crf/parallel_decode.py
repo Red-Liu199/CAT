@@ -1,9 +1,3 @@
-"""
-Copyright 2021 Tsinghua University
-Apache 2.0.
-Author: Hongyu Xiang, Keyu An, Zheng Huahuan
-"""
-
 import os
 import json
 import coreutils
@@ -13,11 +7,10 @@ from tqdm import tqdm
 from transducer_train import build_model, Transducer, ConvJointNet
 from dataset import ScpDataset, TestPadCollate
 from collections import OrderedDict
+from typing import Union, List, Tuple
 
-from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
 import torch
-import torch.distributed as dist
 import torch.multiprocessing as mp
 
 
@@ -29,85 +22,62 @@ def main(args):
 
     if not torch.cuda.is_available() or args.cpu:
         coreutils.highlight_msg("Using CPU")
-        single_worker('cpu', f"{args.output_dir}/decode.0.tmp", args)
+        single_worker(args, 'cpu')
         return None
 
-    ngpus_per_node = torch.cuda.device_count()
-    args.world_size = ngpus_per_node * args.world_size
-    if args.world_size == 1:
-        single_worker('cuda:0', f"{args.output_dir}/decode.0.tmp", args)
-        return None
+    world_size = torch.cuda.device_count()
 
     L_set = sum(1 for _ in open(args.input_scp, 'r'))
-    res = L_set % args.world_size
+    intervals = L_set // world_size
+    intervals = [intervals * i for i in range(world_size+1)]
+    if intervals[-1] != L_set:
+        intervals[-1] = L_set
 
-    if res == 0:
-        mp.spawn(main_worker, nprocs=ngpus_per_node,
-                 args=(ngpus_per_node, args))
-        return None
-    else:
-        # This is a hack for non-divisible length of data to number of GPUs
-        coreutils.highlight_msg(
-            "Using hack to deal with undivisible seq length")
-        mp.spawn(main_worker, nprocs=ngpus_per_node,
-                 args=(ngpus_per_node, args, L_set-res))
-
-        single_worker(
-            "cuda:0", f"{args.output_dir}/decode.{args.world_size}.tmp", args, L_set-res)
+    mp.spawn(main_worker, nprocs=world_size,
+             args=(args, intervals))
 
 
-def main_worker(gpu, ngpus_per_node, args, len_dataset: int = -1):
-    args.gpu = gpu
+def main_worker(gpu: int, args: argparse.Namespace, intervals: List[int]):
 
-    args.rank = args.rank * ngpus_per_node + gpu
-    dist.init_process_group(
-        backend=args.dist_backend, init_method=args.dist_url,
-        world_size=args.world_size, rank=args.rank)
+    num_processes = args.nj
 
-    testset = ScpDataset(args.input_scp, idx_end=len_dataset)
+    # NOTE: this is required for the ``fork`` method to work
+    # model.share_memory()
 
-    dist_sampler = DistributedSampler(testset)
-    dist_sampler.set_epoch(1)
+    L = intervals[gpu+1] - intervals[gpu]
+    _interval = L // num_processes
+    sub_intervals = [_interval * i + intervals[gpu]
+                     for i in range(num_processes+1)]
 
-    testloader = DataLoader(
-        testset, batch_size=1, shuffle=False,
-        num_workers=1, pin_memory=True,
-        sampler=dist_sampler, collate_fn=TestPadCollate())
+    if sub_intervals[-1] != intervals[gpu+1]:
+        sub_intervals[-1] = intervals[gpu+1]
 
-    with open(args.config, 'r') as fi:
-        configures = json.load(fi)
+    processes = []
+    for rank in range(num_processes):
+        p = mp.Process(target=single_worker, args=(
+            args, gpu, sub_intervals[rank], sub_intervals[rank+1], f'{gpu}-{rank}'))
+        p.start()
+        processes.append(p)
+    for p in processes:
+        p.join()
 
-    model = build_model(args, configures)
 
-    if args.resume is not None:
-        model = load_checkpoint(model, args.resume, loc=f'cuda:{args.gpu}')
+def single_worker(args: argparse.Namespace, device: Union[int, str], idx_beg: int = 0, idx_end: int = -1, suffix: str = '0-0'):
 
+    if device != 'cpu':
+        torch.cuda.set_device(device)
+
+    model = gen_model(args, device)
     model.eval()
 
-    decode(args, model.module, testloader, args.gpu,
-           f"{args.output_dir}/decode.{args.rank}.tmp")
-
-
-def single_worker(device, path_out, args, idx_beg=0):
-
-    testset = ScpDataset(args.input_scp, idx_beg=idx_beg)
+    testset = ScpDataset(args.input_scp, idx_beg=idx_beg, idx_end=idx_end)
 
     testloader = DataLoader(
         testset, batch_size=1, shuffle=False,
         num_workers=1, pin_memory=True, collate_fn=TestPadCollate())
 
-    with open(args.config, 'r') as fi:
-        configures = json.load(fi)
-
-    model = build_model(args, configures, dist=False)
-
-    model = model.to(device)
-    if args.resume is not None:
-        model = load_checkpoint(model, args.resume, loc=device)
-
-    model.eval()
-
-    decode(args, model, testloader, device, path_out)
+    writer = os.path.join(args.output_dir, f'decode.{suffix}.tmp')
+    decode(args, model, testloader, device=device, local_writer=writer)
 
 
 @torch.no_grad()
@@ -117,7 +87,7 @@ def decode(args, model: Transducer, testloader, device, local_writer):
     for batch in tqdm(testloader):
         # for batch in testloader:
         key, x, x_lens = batch
-        x = x.to(device, non_blocking=True)
+        x = x.to(device)
 
         if isinstance(model.joint, ConvJointNet):
             pred = model.decode_conv(
@@ -136,6 +106,19 @@ def decode(args, model: Transducer, testloader, device, local_writer):
             fi.write("{} {}\n".format(key[0], pred[0]))
 
 
+def gen_model(args, device) -> torch.nn.Module:
+    with open(args.config, 'r') as fi:
+        configures = json.load(fi)
+
+    model = build_model(args, configures, dist=False, verbose=False)
+    model = model.to(device)
+    assert args.resume is not None, "Trying to decode with uninitialized parameters. Add --resume"
+    if isinstance(device, int):
+        device = f'cuda:{device}'
+    model = load_checkpoint(model, args.resume, loc=device)
+    return model
+
+
 def load_checkpoint(model: Transducer, path_ckpt, loc='cpu') -> Transducer:
 
     checkpoint = torch.load(path_ckpt, map_location=loc)
@@ -151,7 +134,7 @@ def load_checkpoint(model: Transducer, path_ckpt, loc='cpu') -> Transducer:
     return model
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
 
     parser = coreutils.BasicDDPParser(istraining=False)
 
@@ -162,6 +145,7 @@ if __name__ == "__main__":
     parser.add_argument("--beam_size", type=int, default=3)
     parser.add_argument("--spmodel", type=str, default='',
                         help="SPM model location.")
+    parser.add_argument("--nj", type=int, default=2)
     parser.add_argument("--cpu", action='store_true', default=False)
 
     args = parser.parse_args()

@@ -61,17 +61,26 @@ Originally wrote with Tensorflow, translated into PyTorch by Huahuan.
 '''
 
 
+class Unsqueeze(nn.Module):
+    """For pickle model"""
+
+    def __init__(self, dim: int):
+        super().__init__()
+        self.dim = dim
+
+    def forward(self, x: torch.Tensor):
+        return x.unsqueeze(self.dim)
+
 class Conv2dSubdampling(nn.Module):
     def __init__(self, multiplier: int, stacksup: bool = True):
         super().__init__()
         self._lens_in_args_ = None
-        def _unsqueeze(x): return x.unsqueeze(1)
 
         if stacksup:
             self.stack = StackDelta()
             idim = 3
         else:
-            self.stack = _unsqueeze
+            self.stack = Unsqueeze(1)
             idim = 1
 
         self.conv = nn.Sequential(
