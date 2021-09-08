@@ -283,7 +283,7 @@ class SchedulerTransformer(SchedulerFixedStop):
 class SchedulerTransformerEarlyStop(SchedulerEarlyStop):
     """
     Linear warmup by step + decay by step + early stop by epoch
-    peak lr = peak_factor / sqrt(d_model)
+    peak lr = peak_factor / sqrt(d_model * warpup_steps)
     """
 
     def __init__(

@@ -161,19 +161,16 @@ class LSTMPredictNet(nn.Module):
         hdim (int): hidden state dimension of decoders
         *rnn_args/**rnn_kwargs : any arguments that can be passed as 
             nn.LSTM(*rnn_args, **rnn_kwargs)
-    Inputs: inputs, input_lengths, hidden_states
+    Inputs: inputs, hidden_states, input_lengths
         inputs (torch.LongTensor): A target sequence passed to decoders. `IntTensor` of size ``(batch, seq_length)``
-        input_lengths (torch.LongTensor): The length of input tensor. ``(batch)``
         hidden_states (torch.FloatTensor): A previous hidden state of decoders. `FloatTensor` of size ``(batch, seq_length, dimension)``
+        input_lengths (torch.LongTensor): The length of input tensor. ``(batch)``
     Returns:
         (Tensor, Tensor):
         * decoder_outputs (torch.FloatTensor): A output sequence of decoders. `FloatTensor` of size
             ``(batch, seq_length, dimension)``
         * hidden_states (torch.FloatTensor): A hidden state of decoders. `FloatTensor` of size
             ``(batch, seq_length, dimension)``
-    Reference:
-        A Graves: Sequence Transduction with Recurrent Neural Networks
-        https://arxiv.org/abs/1211.3711.pdf
     """
 
     def __init__(self, num_classes: int, hdim: int, *rnn_args, **rnn_kwargs):
@@ -209,6 +206,15 @@ class LSTMPredictNet(nn.Module):
         out = self.classifier(rnn_out)
 
         return out, hidden_o
+
+
+class PlainPN(nn.Module):
+    def __init__(self, num_classes: int, hdim: int, *args, **kwargs):
+        super().__init__()
+        self.embedding = nn.Embedding(num_classes, hdim)
+
+    def forward(self, x: torch.Tensor):
+        return self.embedding(x)
 
 
 def build_model(args, configuration, dist=True) -> nn.Module:

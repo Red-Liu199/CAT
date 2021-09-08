@@ -14,7 +14,7 @@ import argparse
 import numpy as np
 import model as model_zoo
 import dataset as DataSet
-from lm_train import LSTMPredictNet
+import lm_train as pn_zoo
 from collections import OrderedDict
 from typing import Union, Tuple, Sequence, Iterable, Literal, List
 from warp_rnnt import rnnt_loss as RNNTLoss
@@ -178,7 +178,7 @@ class PackedSequence():
 
 
 class Transducer(nn.Module):
-    def __init__(self, encoder: nn.Module = None, decoder: nn.Module = None, jointnet: nn.Module = None, compact=True):
+    def __init__(self, encoder: nn.Module = None, decoder: nn.Module = None, jointnet: nn.Module = None, compact=False):
         super().__init__()
         self.encoder = encoder
         self.decoder = decoder
@@ -482,8 +482,11 @@ def build_model(args, configuration: dict, dist: bool = True, verbose: bool = Tr
                 **settings)  # type: nn.Module
 
         elif module == 'decoder':
-            # FIXME: flexible decoder network like encoder.
-            _model = LSTMPredictNet(**settings)
+            if "type" not in config:
+                # compatibility to older config
+                config["type"] = "LSTMPredictNet"
+            _model = getattr(pn_zoo, config['type'])(
+                **settings)  # type: nn.Module
 
         elif module == 'joint':
             """
@@ -560,7 +563,8 @@ def build_model(args, configuration: dict, dist: bool = True, verbose: bool = Tr
     if all(_model.freeze for _model in [encoder, decoder, jointnet]):
         raise RuntimeError("It's illegal to freeze all parts of Transducer.")
 
-    model = Transducer(encoder=encoder, decoder=decoder, jointnet=jointnet)
+    model = Transducer(encoder=encoder, decoder=decoder,
+                       jointnet=jointnet, compact=args.compact)
 
     if not all(not _model.freeze for _model in [encoder, decoder, jointnet]):
         setattr(model, 'requires_slice', True)
@@ -580,6 +584,8 @@ if __name__ == "__main__":
     parser = coreutils.BasicDDPParser()
     parser.add_argument("--h5py", action="store_true",
                         help="Load data with H5py, defaultly use pickle (recommended).")
+    parser.add_argument("--compact", action="store_true", default=False,
+                        help="Use compact layout (recommended).")
 
     args = parser.parse_args()
 

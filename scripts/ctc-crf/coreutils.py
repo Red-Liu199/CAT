@@ -390,13 +390,18 @@ def train(trainloader, epoch: int, args: argparse.Namespace, manager: Manager):
 
         # update every fold times and won't drop the last batch
         if fold == 1 or (i+1) % fold == 0 or (i+1) == len(trainloader):
+            # we divide loss with fold since we want the gradients to be divided by fold
             loss = model(logits, labels, input_lengths, label_lengths)/fold
             if torch.isnan(loss):
                 raise RuntimeError(
                     "'nan' occurs in training, break.")
 
             loss.backward()
-            real_loss = _cal_real_loss(loss, path_weights)
+            # we multiply loss by fold since we want to log the real loss
+            detach_loss = loss.detach() * fold
+            # del the loss to avoid wrongly using.
+            del loss
+            real_loss = _cal_real_loss(detach_loss, path_weights)
 
             # for Adam optimizer, even though fold > 1, it's no need to normalize grad
             # if using SGD, let grad = grad_accum / fold or use a new_lr = init_lr / fold
@@ -406,7 +411,7 @@ def train(trainloader, epoch: int, args: argparse.Namespace, manager: Manager):
             scheduler.update_lr(pre_steps + (i + 1)/fold)
 
             # measure accuracy and record loss; item() can sync all processes.
-            tolog = [loss.item(), real_loss.item(),
+            tolog = [detach_loss.item(), real_loss.item(),
                      logits.size(0), time.time()-end]
             end = time.time()
             losses.update(tolog[0], tolog[2])
