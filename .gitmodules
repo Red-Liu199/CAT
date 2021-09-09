@@ -1,3 +1,6 @@
 [submodule "src/warp-rnnt"]
 	path = src/warp-rnnt
 	url = git@github.com:maxwellzh/warp-rnnt.git
+[submodule "src/torch-gather"]
+	path = src/torch-gather
+	url = git@github.com:maxwellzh/torch-gather.git

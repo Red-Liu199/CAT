@@ -95,10 +95,9 @@ def main_worker(gpu, ngpus_per_node, args, num_jobs):
     load_checkpoint(model, args.resume, loc=f"cuda:{args.gpu}")
     model.eval()
 
-    if args.rank == 0:
-        print("> Model built.")
-        print("  Model size:{:.2f}M".format(
-            coreutils.count_parameters(model)/1e6))
+    coreutils.distprint("> Model built.", args.gpu)
+    coreutils.distprint("  Model size:{:.2f}M".format(
+        coreutils.count_parameters(model)/1e6), args.gpu)
 
     cal_logit(model, testloader, args.gpu, local_writers)
 
