@@ -465,11 +465,10 @@ def train(trainloader, epoch: int, args: argparse.Namespace, manager: Manager):
 def test(testloader, args: argparse.Namespace, manager: Manager) -> float:
     def _cal_real_loss(loss, path_weights):
         if hasattr(args, 'iscrf') and args.iscrf:
-            partial_loss = loss.cpu()
             weight = torch.mean(path_weights)
-            return partial_loss - weight
+            return loss - weight
         else:
-            return loss.cpu()
+            return loss
 
     model = manager.model
 
