@@ -37,12 +37,12 @@ def SetupOptim(type_optim: str, paramlist: Iterable[torch.nn.parameter.Parameter
         >>> # With `use_zero=True`
         >>> # ... (init of DDP)
         >>> model = torch.nn.parallel.DistributedDataParallel(model)
-        >>> optimizer = SetupOptim('Adam', model.parameters(), lr=1e-3, betas=(0.9,0.99))
+        >>> optimizer = SetupOptim('Adam', model.parameters(), use_zero=True, lr=1e-3, betas=(0.9,0.99))
     """
     if not use_zero:
         return getattr(torch.optim, type_optim)(paramlist, **kwargs)
     else:
-        # raise NotImplementedError
+        raise NotImplementedError(f"Still on testing.")
         if torch.__version__ < '1.8.0':
             raise NotImplementedError
 

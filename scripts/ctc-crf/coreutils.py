@@ -16,17 +16,19 @@ from collections import OrderedDict
 from monitor import plot_monitor
 from _specaug import SpecAug
 from typing import Callable, Union, Sequence, Iterable
+from datetime import datetime
 
 import torch
 import torch.nn as nn
 import torch.distributed as dist
 from torch.nn.utils.rnn import pad_sequence
+from torch.utils.tensorboard import SummaryWriter
 if torch.__version__ >= '1.8.0':
     from torch.distributed.optim import ZeroRedundancyOptimizer
 
 
 class Manager(object):
-    def __init__(self, logger: OrderedDict, func_build_model: Callable[[argparse.Namespace, dict], Union[nn.Module, nn.parallel.DistributedDataParallel]], args: argparse.Namespace):
+    def __init__(self, func_build_model: Callable[[argparse.Namespace, dict], Union[nn.Module, nn.parallel.DistributedDataParallel]], args: argparse.Namespace):
         super().__init__()
 
         with open(args.config, 'r') as fi:
@@ -63,7 +65,18 @@ class Manager(object):
                 configures['scheduler'], self.model.parameters())
         del _model
 
-        self.log = logger
+        self.log = OrderedDict({
+            'log_train': ['epoch,loss,loss_real,net_lr,time'],
+            'log_eval': ['loss_real,time']
+        })
+
+        # self.writer = SummaryWriter(args.logsdir)
+        if args.rank == 0:
+            self.writer = SummaryWriter(os.path.join(
+                args.logsdir, "{0:%Y%m%d-%H%M%S/}".format(datetime.now())))
+        else:
+            self.writer = None
+
         self.rank = args.rank   # type: int
         self.DEBUG = args.debug  # type: bool
 
@@ -89,19 +102,20 @@ class Manager(object):
             if isinstance(metrics, tuple):
                 # defaultly use the first one to evaluate
                 metrics = metrics[0]
+
+            if args.rank == 0:
+                self.writer.add_scalar('loss/dev', metrics, epoch)
             state, info = self.scheduler.step(epoch, metrics)
 
             if torch.__version__ > '1.8.0' and isinstance(self.scheduler.optimizer, ZeroRedundancyOptimizer):
                 self.scheduler.optimizer.consolidate_state_dict(
                     recipient_rank=0)
 
-            if args.gpu == 0:
-                print(info)
+            distprint(info, args.gpu)
 
             self.model.train()
             if self.rank == 0 and not self.DEBUG:
-                self.log_export(args.ckptpath)
-                plot_monitor(args.ckptpath)
+                plot_monitor(args.dir, self.log)
 
             if state == 2:
                 print("Terminated: GPU[%d]" % self.rank)
@@ -110,10 +124,10 @@ class Manager(object):
             elif self.rank != 0 or self.DEBUG:
                 continue
             elif state == 0 or state == 1:
-                self.save("checkpoint", args.ckptpath)
+                self.save("checkpoint", args.checksdir)
                 if state == 1:
                     shutil.copyfile(
-                        f"{args.ckptpath}/checkpoint.pt", f"{args.ckptpath}/bestckpt.pt")
+                        f"{args.checksdir}/checkpoint.pt", f"{args.checksdir}/bestckpt.pt")
             else:
                 raise ValueError(f"Unknown state: {state}.")
 
@@ -142,17 +156,6 @@ class Manager(object):
 
     def log_update(self, msg: list = [], loc: str = "log_train"):
         self.log[loc].append(msg)
-
-    def log_export(self, PATH: str):
-        """Save log file in {PATH}/{key}.csv
-        """
-
-        for key, value in self.log.items():
-
-            with open(f"{PATH}/{key}.csv", 'w+', encoding='utf8') as file:
-                data = [','.join([str(x) for x in infos])
-                        for infos in value[1:]]
-                file.write(value[0] + '\n' + '\n'.join(data))
 
 
 def GetScheduler(scheduler_configs: dict, param_list: Iterable) -> scheduler.Scheduler:
@@ -186,6 +189,11 @@ def pad_list(xs: torch.Tensor, pad_value=0, dim=0) -> torch.Tensor:
         xs = [x.transpose(0, dim) for x in xs]
         padded = pad_sequence(xs, batch_first=True, padding_value=pad_value)
         return padded.transpose(1, dim+1).contiguous()
+
+
+def distprint(msg: str, gpu: int = 0, isdebug: bool = False):
+    if isdebug or gpu == 0:
+        print(msg)
 
 
 def str2num(src: str) -> Sequence[int]:
@@ -253,7 +261,7 @@ def gen_readme(path: str, model: nn.Module, gpu_info: list = []) -> str:
         "```",
         "",
         "### Monitor figure",
-        "![monitor](./ckpt/monitor.png)",
+        "![monitor](./monitor.png)",
         ""
     ]
     with open(path, 'w') as fo:
@@ -350,7 +358,7 @@ def highlight_msg(msg: Union[Sequence[str], str]):
 def train(trainloader, epoch: int, args: argparse.Namespace, manager: Manager):
     @torch.no_grad()
     def _cal_real_loss(loss, path_weights):
-        if args.iscrf:
+        if hasattr(args, 'iscrf') and args.iscrf:
             partial_loss = loss.cpu()
             weight = torch.mean(path_weights)
             return partial_loss - weight
@@ -374,7 +382,7 @@ def train(trainloader, epoch: int, args: argparse.Namespace, manager: Manager):
     end = time.time()
     fold = args.grad_accum_fold
     assert fold >= 1
-    pre_steps = int(math.ceil(len(trainloader)/float(fold)) * (epoch-1))
+    global_step = int(math.ceil(len(trainloader)/float(fold)) * (epoch-1))
 
     optimizer.zero_grad()
     for i, minibatch in enumerate(trainloader):
@@ -408,18 +416,35 @@ def train(trainloader, epoch: int, args: argparse.Namespace, manager: Manager):
 
             optimizer.step()
             optimizer.zero_grad()
-            scheduler.update_lr(pre_steps + (i + 1)/fold)
+
+            global_step += 1
+            scheduler.update_lr(global_step)
 
             # measure accuracy and record loss; item() can sync all processes.
-            tolog = [detach_loss.item(), real_loss.item(),
-                     logits.size(0), time.time()-end]
+            tolog = {
+                'loss': detach_loss.item(),
+                'loss_real': real_loss.item(),
+                'batchsize': logits.size(0),     # not strict when fold > 1
+                'time': time.time()-end,
+                'lr': scheduler.lr_cur
+            }
             end = time.time()
-            losses.update(tolog[0], tolog[2])
-            losses_real.update(tolog[1], tolog[2])
+            losses.update(tolog['loss'], tolog['time'])
+            losses_real.update(tolog['loss_real'], tolog['time'])
             # measure elapsed time
-            batch_time.update(tolog[-1])
+            batch_time.update(tolog['time'])
+
+            # update tensorboard
+            if args.rank == 0:
+                manager.writer.add_scalar(
+                    'loss/train_loss', tolog['loss'], global_step)
+                manager.writer.add_scalar(
+                    'loss/train_real_loss', tolog['loss_real'], global_step)
+                manager.writer.add_scalar(
+                    'lr', tolog['lr'], global_step)
+            # update log
             manager.log_update(
-                [epoch, tolog[0], tolog[1], scheduler.lr_cur, tolog[-1]], loc='log_train')
+                [epoch, tolog['loss'], tolog['loss_real'], tolog['lr'], tolog['time']], loc='log_train')
 
             if ((i+1)/fold % args.print_freq == 0 or args.debug) and args.gpu == 0:
                 progress.display(i+1)
@@ -438,6 +463,13 @@ def train(trainloader, epoch: int, args: argparse.Namespace, manager: Manager):
 
 @torch.no_grad()
 def test(testloader, args: argparse.Namespace, manager: Manager) -> float:
+    def _cal_real_loss(loss, path_weights):
+        if hasattr(args, 'iscrf') and args.iscrf:
+            partial_loss = loss.cpu()
+            weight = torch.mean(path_weights)
+            return partial_loss - weight
+        else:
+            return loss.cpu()
 
     model = manager.model
 
@@ -467,11 +499,7 @@ def test(testloader, args: argparse.Namespace, manager: Manager) -> float:
 
         loss = model(logits, labels, input_lengths, label_lengths)
 
-        if args.iscrf:
-            weight = torch.mean(path_weights)
-            real_loss = loss - weight
-        else:
-            real_loss = loss
+        real_loss = _cal_real_loss(loss, path_weights)
 
         dist.all_reduce(real_loss, dist.ReduceOp.SUM)
         real_loss = real_loss / dist.get_world_size()

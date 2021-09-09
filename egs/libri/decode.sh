@@ -22,7 +22,7 @@ for set in test_clean test_other dev_clean dev_other; do
         --input_scp=data/all_ark/$set.scp   \
         --output_dir=$dec_dir               \
         --spmodel=$spmdata/spm.model        \
-        --nj=4                              \
+        --nj=2                              \
         --mode=$mode                        \
         --beam_size=$beam_size              \
         || exit 1

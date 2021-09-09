@@ -7,60 +7,84 @@ Directly execute: (in working directory)
     python3 ctc-crf/monitor.py <path to my exp>
 """
 
-import argparse
 import os
+import argparse
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
+from collections import OrderedDict
+
+import torch
 
 
-def plot_monitor(log_path: str = None, train_log: str = 'log_train.csv', dev_log: str = 'log_eval.csv', task: str = None, interactive_show=False):
+def plot_monitor(log_path: str = None, log: OrderedDict = None, task: str = None, interactive_show=False):
     """Plot the monitor log files
 
     Args:
         log_path (str, optional): directory of log files
-        train_log (str, optional): location/name of training log file
-            if `log_path` is not None, would be `log_path/train_log`
-        dev_log (str, optional): location/name of dev log file
-            if `log_path` is not None, would be `log_path/dev_log`
+        log (OrderedDict, optional): log files
         task (str, optional): task name (title of ploting)
         interactive_show (bool, optional): specify whether plot in interactive mode. Default False. 
     """
 
-    if log_path is not None:
-        if not os.path.isdir(log_path):
-            raise NotADirectoryError(f"{log_path} is not a directory.")
-            pass
-        train_log = os.path.join(log_path, train_log)
-        dev_log = os.path.join(log_path, dev_log)
+    if log is None:
+        # read from file
+        if not os.path.isfile(log_path):
+            raise FileNotFoundError(f"'{log_path}' doesn't exist!")
 
-    if not os.path.isfile(train_log):
-        raise FileNotFoundError(f"'{train_log}' doesn't exist!")
-    if not os.path.isfile(dev_log):
-        raise FileNotFoundError(f"'{dev_log}' doesn't exist!")
+        log = torch.load(log_path, map_location='cpu')['log']
 
     if task is None:
-        task = train_log.split('/')[-2]
+        task = ' '
 
-    direc = os.path.dirname(train_log)
+    if log_path is None:
+        direc = './'
+    else:
+        if os.path.isfile(log_path):
+            direc = os.path.dirname(log_path)
+        elif os.path.isdir(log_path):
+            direc = log_path
+        else:
+            raise ValueError(
+                f"log_path={log_path} is neither a directory nor a file.")
 
-    df_train = pd.read_csv(train_log)
-    df_eval = pd.read_csv(dev_log)
+    '''
+    log = OrderedDict({
+            'log_train': ['epoch,loss,loss_real,net_lr,time'],
+            'log_eval': ['loss_real,time']
+        })
+    '''
+
+    df_train = np.array(log['log_train'][1:])
+    df_train = {
+        'loss': df_train[:, 1],
+        'loss_real': df_train[:, 2],
+        'lr': df_train[:, 3],
+        'time': df_train[:, 4],
+    }
+    df_eval = np.array(log['log_eval'][1:])
+    df_eval = {
+        'loss': df_eval[:, 0],
+        'time': df_eval[:, 1]
+    }
+    num_batches = df_train['loss'].shape[0]
+    num_epochs = df_eval['loss'].shape[0]
 
     _, axes = plt.subplots(2, 2)
 
     # Time
     ax = axes[0][0]
-    batch_per_epoch = len(df_train)//len(df_eval)
-    accum_time = df_train['time'].values
+    batch_per_epoch = num_batches//num_epochs
+    accum_time = df_train['time']
     for i in range(1, len(accum_time)):
         accum_time[i] += accum_time[i-1]
         if (i + 1) % batch_per_epoch == 0:
-            accum_time[i] += df_eval['time'].values[(i+1)//batch_per_epoch-1]
+            accum_time[i] += df_eval['time'][(i+1)//batch_per_epoch-1]
     del batch_per_epoch
     accum_time = [x/3600 for x in accum_time]
     ax.plot(accum_time)
     props = dict(boxstyle='round', facecolor='wheat', alpha=0.8)
-    speed = accum_time[-1]/len(df_eval)
+    speed = accum_time[-1]/num_epochs
     if speed < 1.:
         speed = speed * 60
         if speed < 1.:
@@ -82,7 +106,7 @@ def plot_monitor(log_path: str = None, train_log: str = 'log_train.csv', dev_log
 
     # Learning rate
     ax = axes[0][1]
-    lrs = df_train['net_lr'].values
+    lrs = df_train['lr']
     sim_lrs = [0]
     for i in range(1, len(lrs)):
         if lrs[i] != lrs[i-1]:
@@ -112,7 +136,7 @@ def plot_monitor(log_path: str = None, train_log: str = 'log_train.csv', dev_log
 
     # Training loss and moving average
     ax = axes[1][0]
-    train_loss = df_train['loss_real'].values
+    train_loss = df_train['loss_real']
     running_mean = [train_loss[0]]
     for i in range(1, len(train_loss)):
         running_mean.append(running_mean[i-1]*0.9+0.1*train_loss[i])
@@ -135,28 +159,28 @@ def plot_monitor(log_path: str = None, train_log: str = 'log_train.csv', dev_log
 
     # Dev loss
     ax = axes[1][1]
-    min_loss = min(df_eval['loss_real'])
+    dev_loss = df_eval['loss']
+    min_loss = min(dev_loss)
     if min_loss <= 0.:
         # ax.set_yscale('symlog')
-        ax.plot([i+1 for i in range(len(df_eval))],
-                df_eval['loss_real'].values)
+        ax.plot([i+1 for i in range(num_epochs)], dev_loss)
     else:
-        ax.semilogy([i+1 for i in range(len(df_eval))],
-                    df_eval['loss_real'].values)
+        ax.semilogy([i+1 for i in range(num_epochs)], dev_loss)
 
     ax.axhline(y=min_loss, ls='--', color='black', alpha=0.5)
     props = dict(boxstyle='round', facecolor='wheat', alpha=0.8)
     textstr = '\n'.join([
         "min={:.2f}".format(min_loss),
-        f"{len(df_eval)} epoch"
+        f"{num_epochs} epoch"
     ])
-    speed = accum_time[-1]/len(df_eval)
+    speed = accum_time[-1]/num_epochs
     ax.text(0.95, 0.95, textstr, transform=ax.transAxes,
             fontsize=8, verticalalignment='top', horizontalalignment='right', bbox=props)
     ax.grid(True, which="both", ls='--')
     ax.set_ylabel('Dev set loss')
     ax.set_xlabel('Epoch')
     del ax
+    del dev_loss
 
     # Global settings
     titles = [
@@ -164,14 +188,13 @@ def plot_monitor(log_path: str = None, train_log: str = 'log_train.csv', dev_log
     ]
     plt.suptitle('\n'.join(titles))
     plt.tight_layout()
-    plt.savefig(os.path.join(direc, 'monitor.png'), dpi=300)
     if interactive_show:
         plt.show()
     else:
-        print("Current lr: {:.2e} | Speed: {:.2f} hour / epoch.".format(
-            df_train['net_lr'].values[-1], speed))
+        outpath = os.path.join(direc, 'monitor.png')
+        plt.savefig(outpath, dpi=300)
+        print(f"> Saved at {outpath}")
     plt.close()
-    return None
 
 
 if __name__ == "__main__":
@@ -181,9 +204,4 @@ if __name__ == "__main__":
                         help="Configure the plotting title.")
     args = parser.parse_args()
 
-    try:
-        plot_monitor(args.log, task=args.title)
-    except FileNotFoundError:
-        print(
-            "Log files not found in {0}, try to find {0}/ckpt".format(args.log))
-        plot_monitor(os.path.join(args.log, 'ckpt'), task=args.title)
+    plot_monitor(args.log, task=args.title)

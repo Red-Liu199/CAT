@@ -221,6 +221,9 @@
                                 "SGD"
                             ]
                         },
+                        "use_zero": {
+                            "type": "boolean"
+                        },
                         "kwargs": {
                             "description": "key word arguments passed into optimizer __init__()",
                             "type": "object",

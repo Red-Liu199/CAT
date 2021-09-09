@@ -9,30 +9,21 @@ and is more non-hard-coding style.
 """
 
 import coreutils
+from am_train import setPath, main_spawner
+from dataset import sortedPadCollateLM, CorpusDataset
+
 import os
 import argparse
-from dataset import sortedPadCollateLM, CorpusDataset
-from collections import OrderedDict
 from typing import Tuple, Union
+from collections import OrderedDict
 
 import torch
 import torch.nn as nn
 import torch.distributed as dist
 import torch.multiprocessing as mp
-from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
-
-
-def main(args: argparse.Namespace):
-    if not torch.cuda.is_available():
-        coreutils.highlight_msg("CPU only training is unsupported.")
-        return None
-
-    ngpus_per_node = torch.cuda.device_count()
-    args.world_size = ngpus_per_node * args.world_size
-    print(f"Global number of GPUs: {args.world_size}")
-    mp.spawn(main_worker, nprocs=ngpus_per_node, args=(ngpus_per_node, args))
 
 
 def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
@@ -65,22 +56,17 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         num_workers=args.workers, pin_memory=True,
         sampler=test_sampler, collate_fn=sortedPadCollateLM())
 
-    logger = OrderedDict({
-        'log_train': ['epoch,loss,loss_real,net_lr,time'],
-        'log_eval': ['loss_real,time']
-    })
-    manager = coreutils.Manager(logger, build_model, args)
+    manager = coreutils.Manager(build_model, args)
     # lm training does not need specaug
     manager.specaug = None
 
     # get GPU info
     gpu_info = coreutils.gather_all_gpu_info(args.gpu)
 
-    if args.rank == 0:
-        print("> Model built.")
-        print("  Model size:{:.2f}M".format(
-            coreutils.count_parameters(manager.model)/1e6))
-
+    coreutils.distprint("> Model built.", args.gpu)
+    coreutils.distprint("  Model size:{:.2f}M".format(
+        coreutils.count_parameters(manager.model)/1e6), args.gpu)
+    if args.rank == 0 and not args.debug:
         coreutils.gen_readme(args.dir+'/readme.md',
                              model=manager.model, gpu_info=gpu_info)
 
@@ -97,9 +83,8 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
             dist.all_reduce(ppl_i)
             ppl += ppl_i
 
-        if args.rank == 0:
-            print("PPL for {} sentences: {:.2f}".format(
-                len(test_set), ppl/len(test_set)))
+        coreutils.distprint("PPL for {} sentences: {:.2f}".format(
+            len(test_set), ppl/len(test_set)), args.gpu)
         return
 
     # training
@@ -183,8 +168,12 @@ class LSTMPredictNet(nn.Module):
             odim = hdim*2
         else:
             odim = hdim
+        self.out_proj = nn.Linear(odim, odim)
 
-        self.classifier = nn.Linear(odim, num_classes)
+        self.classifier = nn.Sequential(OrderedDict({
+            'act': nn.ReLU(),
+            'linear': nn.Linear(odim, num_classes)
+        }))
 
     def forward(self, inputs: torch.LongTensor, hidden: torch.FloatTensor = None, input_lengths: torch.LongTensor = None) -> Tuple[torch.FloatTensor, Union[torch.FloatTensor, None]]:
 
@@ -203,7 +192,8 @@ class LSTMPredictNet(nn.Module):
         else:
             rnn_out, hidden_o = self.rnn(embedded, hidden)
 
-        out = self.classifier(rnn_out)
+        proj_out = self.out_proj(rnn_out)
+        out = self.classifier(proj_out)
 
         return out, hidden_o
 
@@ -213,8 +203,8 @@ class PlainPN(nn.Module):
         super().__init__()
         self.embedding = nn.Embedding(num_classes, hdim)
 
-    def forward(self, x: torch.Tensor):
-        return self.embedding(x)
+    def forward(self, x: torch.Tensor, *args):
+        return self.embedding(x), None
 
 
 def build_model(args, configuration, dist=True) -> nn.Module:
@@ -246,20 +236,6 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # FIXME: rm this dependencies
-    setattr(args, 'iscrf', False)
+    setPath(args)
 
-    if not args.debug:
-        ckptpath = os.path.join(args.dir, 'ckpt')
-        os.makedirs(ckptpath, exist_ok=True)
-    else:
-        coreutils.highlight_msg("Debugging")
-        # This is a hack, we won't read/write anything in debug mode.
-        ckptpath = '/'
-
-    setattr(args, 'ckptpath', ckptpath)
-    if os.listdir(ckptpath) != [] and not args.debug and args.resume is None:
-        raise FileExistsError(
-            f"{args.ckptpath} is not empty! Refuse to run the experiment.")
-
-    main(args)
+    main_spawner(args, main_worker)
