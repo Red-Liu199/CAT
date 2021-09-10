@@ -1,0 +1,56 @@
+{
+    "specaug_config": {
+        "freq_mask_width_range": 0.15,
+        "num_freq_mask": 2,
+        "num_time_mask": 2,
+        "time_mask_width_range": 0.05,
+        "time_warp_window": 0.2
+    },
+    "encoder": {
+        "type": "ConformerNet",
+        "kwargs": {
+            "num_cells": 16,
+            "idim": 80,
+            "hdim": 128,
+            "conv_multiplier": 128,
+            "num_classes": 1024,
+            "delta_feats": false
+        }
+    },
+    "decoder": {
+        "type": "PlainPN",
+        "kwargs": {
+            "num_classes": 1024,
+            "hdim": 512
+        }
+    },
+    "joint": {
+        "type": "JointNet",
+        "kwargs": {
+            "odim_encoder": 128,
+            "odim_decoder": 512,
+            "num_classes": 1024
+        }
+    },
+    "scheduler": {
+        "type": "SchedulerTransformerEarlyStop",
+        "optimizer": {
+            "type_optim": "Adam",
+            "kwargs": {
+                "lr": 3e-4,
+                "betas": [
+                    0.9,
+                    0.98
+                ]
+            }
+        },
+        "kwargs": {
+            "peak_factor": 1.0,
+            "d_model": 128,
+            "warmup_steps": 5e3,
+            "lr_stop": 1e-6,
+            "gamma": 0.3,
+            "reverse_metric_direc": true
+        }
+    }
+}
