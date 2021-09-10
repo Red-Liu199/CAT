@@ -13,7 +13,7 @@ import model as model_zoo
 import lm_train as pn_zoo
 import dataset as DataSet
 from am_train import setPath, main_spawner
-from beam_search_base import BeamSearchRNNTransducer, BeamSearchConvTransducer, ConvMemBuffer
+from beam_search_base import ConvMemBuffer
 
 import os
 import argparse
@@ -207,7 +207,7 @@ class Transducer(nn.Module):
         return loss
 
     @torch.no_grad()
-    def decode(self, inputs: torch.FloatTensor, input_lengths: torch.LongTensor, mode='beam', beam_size: int = 3) -> torch.LongTensor:
+    def decode(self, inputs: torch.FloatTensor, input_lengths: torch.LongTensor, mode='beam', beamSearcher=None) -> torch.LongTensor:
         encoder_output, o_lens = self.encoder(inputs, input_lengths)
 
         if mode == 'greedy':
@@ -234,18 +234,9 @@ class Transducer(nn.Module):
 
             return coreutils.pad_list(outputs).to(torch.long)
         elif mode == 'beam':
-            assert beam_size > 1
-            searcher = BeamSearchRNNTransducer(self, beam_size, blank_id=0)
-            return searcher.forward(encoder_output, o_lens.max())
+            return beamSearcher(encoder_output)
         else:
             raise ValueError("Unknown decode mode: {}".format(mode))
-
-    @torch.no_grad()
-    def decode_conv(self, inputs: torch.FloatTensor, input_lengths: torch.LongTensor, beam_size: int, kernel_size: Union[int, Tuple[int, int]]):
-        encoder_output, o_lens = self.encoder(inputs, input_lengths)
-        searcher = BeamSearchConvTransducer(
-            self, kernel_size, beam_size, blank_id=0).to(inputs.device)
-        return searcher.forward(encoder_output, o_lens.max())
 
 
 class JointNet(nn.Module):

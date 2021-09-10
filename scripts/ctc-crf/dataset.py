@@ -200,29 +200,27 @@ class ScpDataset(Dataset):
     Read data from scp file ranging [idx_beg, idx_end)
     """
 
-    def __init__(self, scp_file, idx_beg: int = 0, idx_end: int = -1) -> None:
+    def __init__(self, scp_file, idx_beg: int = 0, idx_end: int = -1, sort: bool = True) -> None:
         super().__init__()
 
         if not os.path.isfile(scp_file):
             raise FileNotFoundError(f"{scp_file} is not a valid file.")
 
+        dataset = []
+        with ReadHelper('scp:'+scp_file) as reader:
+            for key, mat in reader:
+                dataset.append(
+                    [key, torch.tensor(mat, dtype=torch.float)])
+
+        if sort:
+            dataset = sorted(dataset, key=lambda item: item[1].size(0))
+
         assert idx_beg >= 0 and idx_end >= -1
 
         if idx_end == -1:
-            idx_end = float('inf')
-
-        self._dataset = []
-        idx = 0
-        with ReadHelper('scp:'+scp_file) as reader:
-            for key, mat in reader:
-                if idx < idx_beg:
-                    idx += 1
-                    continue
-                if idx >= idx_end:
-                    break
-                self._dataset.append(
-                    [key, torch.tensor(mat, dtype=torch.float)])
-                idx += 1
+            self._dataset = dataset[idx_beg:]
+        else:
+            self._dataset = dataset[idx_beg:idx_end]
 
     def __len__(self) -> int:
         return len(self._dataset)
