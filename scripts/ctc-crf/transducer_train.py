@@ -284,43 +284,31 @@ class JointNet(nn.Module):
 
             # shape: (\sum_{Ti(Ui+1)}, V)
             expanded_out = packed_encoder_output + packed_decoder_output
-            outputs = self.fc(expanded_out).log_softmax(dim=-1)
-            return outputs
+        elif isinstance(encoder_output, torch.Tensor) and isinstance(decoder_output, torch.Tensor):
 
-        if not isinstance(encoder_output, torch.Tensor) or not isinstance(decoder_output, torch.Tensor):
+            assert (encoder_output.dim() == 3 and decoder_output.dim() == 3) or (
+                encoder_output.dim() == 1 and decoder_output.dim() == 1)
+
+            encoder_output = self.fc_enc(encoder_output)
+            decoder_output = self.fc_dec(decoder_output)
+
+            if encoder_output.dim() == 3:
+                encoder_output = encoder_output.unsqueeze(2)
+                decoder_output = decoder_output.unsqueeze(1)
+
+            expanded_out = encoder_output + decoder_output
+        else:
             raise NotImplementedError(
                 "Output of encoder and decoder being fed into jointnet should be of same type. Expect (Tensor, Tensor) or (PackedSequence, PackedSequence), instead ({}, {})".format(type(encoder_output), type(decoder_output)))
 
-        assert (encoder_output.dim() == 3 and decoder_output.dim() == 3) or (
-            encoder_output.dim() == 1 and decoder_output.dim() == 1)
-
-        encoder_output = self.fc_enc(encoder_output)
-        decoder_output = self.fc_dec(decoder_output)
-
-        if encoder_output.dim() == 3:
-            # expand the outputs
-            T_max = encoder_output.size(1)
-            U_max = decoder_output.size(1)
-
-            encoder_output = encoder_output.unsqueeze(2)
-            decoder_output = decoder_output.unsqueeze(1)
-
-            encoder_output = encoder_output.repeat(
-                [1, 1, U_max, 1])
-            decoder_output = decoder_output.repeat(
-                [1, T_max, 1, 1])
-
         if self._isHAT:
-            conbined_input = encoder_output + decoder_output
-
-            vocab_logits = self.fc(conbined_input)
+            vocab_logits = self.fc(expanded_out)
             prob_blk = self.distr_blk(vocab_logits[..., :1])
             vocab_log_probs = torch.log(
                 1-prob_blk)+torch.log_softmax(vocab_logits[..., 1:], dim=-1)
             outputs = torch.cat([torch.log(prob_blk), vocab_log_probs], dim=-1)
         else:
-            outputs = self.fc(
-                encoder_output+decoder_output).log_softmax(dim=-1)
+            outputs = self.fc(expanded_out).log_softmax(dim=-1)
 
         return outputs
 

@@ -6,8 +6,8 @@
 
 data_train="data/train_tr95"
 data_dev="data/train_cv05"
-stage=3
-stop_stage=3
+stage=4
+stop_stage=4
 export CUDA_VISIBLE_DEVICES="8,7,6,5,4"
 
 dir=$(dirname $0)
@@ -36,7 +36,7 @@ if [ $stage -le 1 ] && [ $stop_stage -ge 1 ]; then
     # predefined_syms="<NOISE>"
     predefined_syms=""
     python3 ctc-crf/spm_train.py --num_threads=$nj --input=$spmdata/corpus.tmp --model_prefix=$spmdata/spm \
-        --bos_id=0 --eos_id=-1 --unk_id=1 --vocab_size=1024 --user_defined_symbols=$predefined_syms \
+        --bos_id=0 --eos_id=-1 --unk_id=1 --vocab_size=4096 --user_defined_symbols=$predefined_syms \
         --model_type=unigram   \
         > $spmdata/spm_training.log 2>&1 \
         && echo "SentenPiece training succeed." || \
@@ -106,15 +106,20 @@ if [ $stage -le 3 ] && [ $stop_stage -ge 3 ]; then
     python3 ctc-crf/transducer_train.py --seed=0  \
         --world-size 1 --rank 0             \
         --dist-url='tcp://127.0.0.1:13944'  \
-        --batch_size=72                     \
+        --batch_size=35                     \
         --dir=$dir                          \
         --config=$dir/config.json           \
         --data=data/                        \
         --trset=$spmdata/tr.pickle          \
         --devset=$spmdata/cv.pickle         \
-        --grad-accum-fold=8                 \
+        --grad-accum-fold=16                \
         --compact                           \
+        --resume=$dir/checks/checkpoint.pt  \
         || exit 1
 
+fi
+
+
+if [ $stage -le 4 ] && [ $stop_stage -ge 4 ]; then
     ./decode.sh $dir
 fi

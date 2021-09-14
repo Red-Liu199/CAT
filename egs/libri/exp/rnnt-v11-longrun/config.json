@@ -1,43 +1,41 @@
 {
     "specaug_config": {
-        "time_warp_window": 0.2,
         "freq_mask_width_range": 0.15,
         "num_freq_mask": 2,
+        "num_time_mask": 2,
         "time_mask_width_range": 0.05,
-        "num_time_mask": 2
+        "time_warp_window": 0.2
     },
     "encoder": {
         "type": "ConformerNet",
         "kwargs": {
             "num_cells": 16,
             "idim": 80,
-            "hdim": 128,
-            "conv_multiplier": 128,
-            "num_classes": 1024,
+            "hdim": 144,
+            "conv_multiplier": 144,
+            "num_classes": 4096,
             "delta_feats": false
         }
     },
     "decoder": {
         "type": "LSTMPredictNet",
         "kwargs": {
-            "num_classes": 1024,
-            "hdim": 512,
-            "num_layers": 2,
-            "dropout": 0.5
+            "num_classes": 4096,
+            "hdim": 320,
+            "num_layers": 1,
+            "norm": true
         }
     },
     "joint": {
         "type": "JointNet",
         "kwargs": {
-            "odim_encoder": 128,
-            "odim_decoder": 512,
-            "num_classes": 1024,
-            "HAT": true,
-            "act": "tanh"
+            "odim_encoder": 144,
+            "odim_decoder": 320,
+            "num_classes": 4096
         }
     },
     "scheduler": {
-        "type": "SchedulerTransformerEarlyStop",
+        "type": "SchedulerTransformer",
         "optimizer": {
             "type_optim": "Adam",
             "kwargs": {
@@ -45,15 +43,15 @@
                 "betas": [
                     0.9,
                     0.98
-                ]
+                ],
+                "weight_decay": 1e-6
             }
         },
         "kwargs": {
-            "peak_factor": 1.0,
-            "d_model": 128,
-            "warmup_steps": 5e3,
-            "lr_stop": 1e-6,
-            "gamma": 0.3,
+            "peak_factor": 5.0,
+            "d_model": 144,
+            "warmup_steps": 1e4,
+            "epoch_max": 84,
             "reverse_metric_direc": true
         }
     }

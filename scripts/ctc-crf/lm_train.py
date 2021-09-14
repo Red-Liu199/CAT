@@ -158,11 +158,16 @@ class LSTMPredictNet(nn.Module):
             ``(batch, seq_length, dimension)``
     """
 
-    def __init__(self, num_classes: int, hdim: int, *rnn_args, **rnn_kwargs):
+    def __init__(self, num_classes: int, hdim: int, norm: bool = False, *rnn_args, **rnn_kwargs):
         super().__init__()
         self.embedding = nn.Embedding(num_classes, hdim)
 
         rnn_kwargs['batch_first'] = True
+        if norm:
+            self.norm = nn.LayerNorm([hdim])
+        else:
+            self.norm = None
+
         self.rnn = nn.LSTM(hdim, hdim, *rnn_args, **rnn_kwargs)
         if 'bidirectional' in rnn_kwargs and rnn_kwargs['bidirectional']:
             odim = hdim*2
@@ -178,6 +183,9 @@ class LSTMPredictNet(nn.Module):
     def forward(self, inputs: torch.LongTensor, hidden: torch.FloatTensor = None, input_lengths: torch.LongTensor = None) -> Tuple[torch.FloatTensor, Union[torch.FloatTensor, None]]:
 
         embedded = self.embedding(inputs)
+        if self.norm is not None:
+            embedded = self.norm(embedded)
+
         self.rnn.flatten_parameters()
         '''
         since the batch is sorted by time_steps length rather the target length

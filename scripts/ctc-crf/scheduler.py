@@ -251,6 +251,7 @@ class SchedulerWarmupMileStone(SchedulerEarlyStop):
 class SchedulerTransformer(SchedulerFixedStop):
     """
     The standard scheduler of "Attention is all you need"
+    peak learning rate peak_factor / sqrt(warmup_steps * d_model)
     """
 
     def __init__(
@@ -260,11 +261,12 @@ class SchedulerTransformer(SchedulerFixedStop):
             d_model: int,
             warmup_steps: int,
             epoch_max: int,
+            peak_factor: float = 1.0,
             reverse_metric_direc=False):
         super().__init__(optimizer_configs, paramlist, epoch_max, reverse_metric_direc)
         assert d_model > 0
         assert warmup_steps > 0
-        self.lr_init = 1./math.sqrt(d_model)
+        self.lr_init = peak_factor/math.sqrt(d_model)
         self._div_warmup_steps = 1./math.sqrt(warmup_steps)/warmup_steps
         self.update_lr(1)
 

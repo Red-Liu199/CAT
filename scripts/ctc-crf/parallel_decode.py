@@ -39,6 +39,10 @@ def main(args):
 
     world_size = torch.cuda.device_count() * args.nj
 
+    if world_size == 1:
+        single_worker(args, device=0)
+        return None
+
     # L_set = sum(1 for _ in open(args.input_scp, 'r'))
     # indices = equalSplitIdx(L_set, world_size)
     indices = equalLenSplit(args.input_scp, world_size)
@@ -118,12 +122,6 @@ def single_worker(args: argparse.Namespace, device: Union[int, str], idx_beg: in
         num_workers=1, pin_memory=True, collate_fn=TestPadCollate())
 
     writer = os.path.join(args.output_dir, f'decode.{suffix}.tmp')
-    decode(args, model, testloader, device=device, local_writer=writer)
-
-
-@torch.no_grad()
-def decode(args, model: Transducer, testloader, device, local_writer):
-    sp = spm.SentencePieceProcessor(model_file=args.spmodel)
     if args.mode == 'beam':
         # if isinstance(model.joint, ConvJointNet):
         #     beamsearcher = BeamSearchConvTransducer(
@@ -132,9 +130,16 @@ def decode(args, model: Transducer, testloader, device, local_writer):
         #     beamsearcher = BeamSearchRNNTransducer(
         #         model, beam_size=args.beam_size)
         # beamsearcher = beamsearcher.to(device)
-        beamsearcher = TransducerBeamSearcher(model, 0, args.beam_size)
+        beamsearcher = TransducerBeamSearcher(
+            model, 0, args.beam_size, state_beam=2.3, expand_beam=2.3, lm_module=ext_lm, lm_weight=1.0)
     else:
         beamsearcher = None
+    decode(args, model, beamsearcher, testloader, device=device, local_writer=writer)
+
+
+@torch.no_grad()
+def decode(args, model: Transducer, beamsearcher, testloader, device, local_writer):
+    sp = spm.SentencePieceProcessor(model_file=args.spmodel)
     results = []
     L = len(testloader)
     for i, batch in enumerate(testloader):
@@ -144,7 +149,7 @@ def decode(args, model: Transducer, testloader, device, local_writer):
         pred, _, _, _ = model.decode(x, x_lens, mode=args.mode,
                                      beamSearcher=beamsearcher)
 
-        seq = sp.decode(pred[0])
+        seq = sp.decode(pred)
         results.append((key, seq))
         print(
             "\r|{:<80}|[{:>5}/{:<5}]".format(int((i+1)/L*80)*'#', i+1, L), end='')

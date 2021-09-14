@@ -130,8 +130,8 @@
                     ],
                     "type": "object",
                     "properties": {
-                        "idim": {
-                            "type": "number"
+                        "norm": {
+                            "type": "boolean"
                         },
                         "hdim": {
                             "type": "number"

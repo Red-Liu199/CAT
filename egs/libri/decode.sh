@@ -17,12 +17,12 @@ mkdir -p $dec_dir
 for set in test_clean test_other dev_clean dev_other; do
     echo "> Decoding: $set"
     python3 ctc-crf/parallel_decode.py      \
-        --resume=$dir/ckpt/bestckpt.pt      \
+        --resume=$dir/checks/bestckpt.pt    \
         --config=$dir/config.json           \
         --input_scp=data/all_ark/$set.scp   \
         --output_dir=$dec_dir               \
         --spmodel=$spmdata/spm.model        \
-        --nj=2                              \
+        --nj=1                              \
         --mode=$mode                        \
         --beam_size=$beam_size              \
         || exit 1

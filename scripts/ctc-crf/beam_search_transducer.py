@@ -150,13 +150,17 @@ class TransducerBeamSearcher(torch.nn.Module):
                     logp_targets, positions = torch.topk(
                         log_probs.view(-1), k=self.beam_size, dim=-1
                     )
+                    # logp_targets, positions = torch.topk(
+                    #     log_probs.view(-1), k=log_probs.size(0), dim=-1
+                    # )
+
                     best_logp = (
                         logp_targets[0]
                         if positions[0] != blank
                         else logp_targets[1]
                     )
 
-                    # Extend hyp by  selection
+                    # Extend hyp by selection
                     for j in range(logp_targets.size(0)):
 
                         # hyp
@@ -233,7 +237,7 @@ class TransducerBeamSearcher(torch.nn.Module):
             (e.g., RNN hidden states).
         """
 
-        logits, hs = self.lm(inp_tokens, hx=memory)
+        logits, hs = self.lm(inp_tokens, memory)
         log_probs = torch.log_softmax(logits, dim=-1)
         return log_probs, hs
 

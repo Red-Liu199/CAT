@@ -71,6 +71,7 @@ class Unsqueeze(nn.Module):
     def forward(self, x: torch.Tensor):
         return x.unsqueeze(self.dim)
 
+
 class Conv2dSubdampling(nn.Module):
     def __init__(self, multiplier: int, stacksup: bool = True):
         super().__init__()
@@ -449,7 +450,7 @@ class ConformerCell(nn.Module):
         return out, attn_ls
 
 
-class VGG2L(torch.nn.Module):
+class VGG2L(nn.Module):
     def __init__(self, in_channel=4):
         super(VGG2L, self).__init__()
         kernel_size = 3
@@ -501,7 +502,7 @@ class Lookahead(nn.Module):
         return x
 
 
-class TDNN(torch.nn.Module):
+class TDNN(nn.Module):
     def __init__(self, idim: int, odim: int, half_context: int = 1, dilation: int = 1, stride: int = 1):
         super().__init__()
 
@@ -546,3 +547,15 @@ class _LSTM(nn.Module):
         out, olens = pad_packed_sequence(packed_output, batch_first=True)
 
         return out, olens
+
+
+class TimeReduction(nn.Module):
+    def __init__(self, N: int):
+        super().__init__()
+        assert N >= 1 and isinstance(N, int)
+        if N == 1:
+            print("WARNING: TimeReduction factor was set to 1.")
+        self.N = N
+
+    def forward(self, x: torch.Tensor, x_lens: torch.Tensor):
+        return x[:, ::self.N, :], (x_lens-1)//self.N + 1

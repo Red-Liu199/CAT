@@ -70,15 +70,22 @@ if [ $stage -le 1 ] && [ $stop_stage -ge 1 ]; then
 fi
 
 
-if [ $stage -le 2 ] && [ $stop_stage -ge 2 ]; then
-    if [ ! -f $text_dir/data/dev.pkl ]; then
-        python3 local/transText2Bin.py --concat=256 $text_dir/data/dev.id $text_dir/data/dev.pkl || exit 1
-    fi
-    if [ ! -f $text_dir/data/tr.pkl ]; then
-        python3 local/transText2Bin.py --nj $(nproc) --concat=256 $text_dir/data/tr.id $text_dir/data/tr.pkl || exit 1
-    fi
-fi
+# if [ $stage -le 2 ] && [ $stop_stage -ge 2 ]; then
+#     if [ ! -f $text_dir/data/dev.pkl ]; then
+#         python3 local/transText2Bin.py --concat=256 $text_dir/data/dev.id $text_dir/data/dev.pkl || exit 1
+#     fi
+#     if [ ! -f $text_dir/data/tr.pkl ]; then
+#         python3 local/transText2Bin.py --nj $(nproc) --concat=256 $text_dir/data/tr.id $text_dir/data/tr.pkl || exit 1
+#     fi
+# fi
 
+if [ $stage -le 2 ] && [ $stop_stage -ge 2 ]; then
+    mkdir -p data/spm/data
+
+    python3 local/transText2Bin.py --strip data/spm/dev/text_number data/spm/data/dev.pkl || exit 1
+
+    python3 local/transText2Bin.py --strip --nj $(nproc) data/spm/train/text_number data/spm/data/tr.pkl || exit 1
+fi
 
 
 if [ $stage -le 3 ] && [ $stop_stage -ge 3 ]; then
@@ -89,15 +96,24 @@ if [ $stage -le 3 ] && [ $stop_stage -ge 3 ]; then
         exit 1
     fi
 
+    if [ -f $dir/train_lm.sh ]; then
+        if [ $dir != "$(dirname $0)" ] && [ $dir != "$(dirname $0)/" ]; then
+            echo "Found $dir/train_lm.sh, ensure it's useless, rm it then re-run this script."
+            exit 0
+        fi
+    else
+        cp $0 $dir
+    fi
+
     CUDA_VISIBLE_DEVICES="8,7,6,5,4"  \
     python3 ctc-crf/lm_train.py --seed=0        \
         --world-size 1 --rank 0 -j 1            \
         --batch_size=1280                       \
         --dir=$dir                              \
-        --config=$dir/config.json               \
+        --config=$dir/lm_config.json            \
         --data=data/                            \
-        --trset=$text_dir/data/tr.pkl           \
-        --devset=$text_dir/data/dev.pkl         \
+        --trset=data/spm/data/tr.pkl            \
+        --devset=data/spm/data/dev.pkl          \
         --grad-accum-fold=1                     \
         || exit 1
 fi
