@@ -200,20 +200,16 @@ class ScpDataset(Dataset):
     Read data from scp file ranging [idx_beg, idx_end)
     """
 
-    def __init__(self, scp_file, idx_beg: int = 0, idx_end: int = -1, sort: bool = True) -> None:
+    def __init__(self, scp_file, idx_beg: int = 0, idx_end: int = -1) -> None:
         super().__init__()
 
         if not os.path.isfile(scp_file):
             raise FileNotFoundError(f"{scp_file} is not a valid file.")
 
         dataset = []
-        with ReadHelper('scp:'+scp_file) as reader:
-            for key, mat in reader:
-                dataset.append(
-                    [key, torch.tensor(mat, dtype=torch.float)])
-
-        if sort:
-            dataset = sorted(dataset, key=lambda item: item[1].size(0))
+        with open(scp_file, 'r') as fi:
+            for line in fi:
+                dataset.append(line.split())
 
         assert idx_beg >= 0 and idx_end >= -1
 
@@ -226,7 +222,9 @@ class ScpDataset(Dataset):
         return len(self._dataset)
 
     def __getitem__(self, index: int) -> Tuple[str, torch.FloatTensor]:
-        return self._dataset[index]
+        key, mat_path = self._dataset[index]
+        mat = kaldiio.load_mat(mat_path)
+        return [key, torch.tensor(mat, dtype=torch.float)]
 
 
 class TestPadCollate():

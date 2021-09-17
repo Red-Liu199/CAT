@@ -215,17 +215,21 @@ class PlainPN(nn.Module):
         return self.embedding(x), None
 
 
-def build_model(args, configuration, dist=True) -> nn.Module:
+def build_model(args, configuration, dist=True, wrapper=True) -> LMTrainer:
     def _build_decoder(config) -> nn.Module:
+        LMNet = eval(config['type'])    # type: Union[PlainPN | LSTMPredictNet]
         NetKwargs = config['kwargs']
         # FIXME: flexible decoder network like encoder.
-        return LSTMPredictNet(**NetKwargs)
+        return LMNet(**NetKwargs)
 
     assert 'decoder' in configuration
 
     decoder = _build_decoder(configuration['decoder'])
 
-    model = LMTrainer(decoder)
+    if wrapper:
+        model = LMTrainer(decoder)
+    else:
+        model = decoder
 
     if not dist:
         return model

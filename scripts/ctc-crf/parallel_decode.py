@@ -9,15 +9,18 @@ Parallel decode with multi-gpu and single-gpu-multi-process support
 import coreutils
 from lm_train import build_model as lm_build
 from dataset import ScpDataset, TestPadCollate
-from transducer_train import build_model, Transducer, ConvJointNet
-from beam_search_base import BeamSearchRNNTransducer, BeamSearchConvTransducer, ConvMemBuffer
+from transducer_train import build_model  # , Transducer, ConvJointNet
+# from beam_search_base import BeamSearchRNNTransducer, BeamSearchConvTransducer, ConvMemBuffer
 from beam_search_transducer import TransducerBeamSearcher
+from beam_search_espnet import BeamSearchTransducer
 
 import os
 import json
+import pickle
 import argparse
 import sentencepiece as spm
 from tqdm import tqdm
+import kaldiio
 from collections import OrderedDict
 from typing import Union, List, Tuple
 
@@ -32,20 +35,33 @@ def main(args):
         raise FileNotFoundError(
             "Invalid sentencepiece model location: {}".format(args.spmodel))
 
+    # L_set = sum(1 for _ in open(args.input_scp, 'r'))
+    # indices = equalSplitIdx(L_set, world_size)
+    world_size = torch.cuda.device_count() * args.nj
+    if not torch.cuda.is_available():
+        world_size = args.nj
+
+    indices, sorted_scp = equalLenSplit(args.input_scp, world_size)
+    args.input_scp = sorted_scp
+
+    binary_enc = os.path.join(
+        args.enc_out_dir, f"{os.path.basename(args.input_scp)}.enc.hidB")
+    link_enc = os.path.join(
+        args.enc_out_dir, f"{os.path.basename(args.input_scp)}.enc.hidL")
+    if not os.path.isfile(binary_enc) or not os.path.isfile(link_enc):
+        print("> Encoder output file not found, generating...")
+        gen_encode_hidden(args, enc_bin=binary_enc, enc_link=link_enc)
+    setattr(args, 'enc_hid_bin', binary_enc)
+    setattr(args, 'enc_hid_link', link_enc)
+
     if not torch.cuda.is_available() or args.cpu:
         coreutils.highlight_msg("Using CPU")
         single_worker(args, 'cpu')
         return None
 
-    world_size = torch.cuda.device_count() * args.nj
-
     if world_size == 1:
         single_worker(args, device=0)
         return None
-
-    # L_set = sum(1 for _ in open(args.input_scp, 'r'))
-    # indices = equalSplitIdx(L_set, world_size)
-    indices = equalLenSplit(args.input_scp, world_size)
 
     mp.spawn(main_worker, nprocs=world_size,
              args=(args, indices))
@@ -62,37 +78,52 @@ def equalSplitIdx(tot_len: int, N: int, idx_beg=0, idx_end=-1):
 
 def equalLenSplit(scp_in: str, N: int, idx_beg=0, idx_end=-1):
 
-    testset = ScpDataset(scp_in, idx_beg=idx_beg, idx_end=idx_end, sort=True)
+    sorted_scp = f"{scp_in}.sorted"
+    linfo = f"{scp_in}.lens"
+    if not os.path.isfile(sorted_scp) or not os.path.isfile(linfo):
+        print("> Generate sorted dataset, might take a while...")
+        dataset = []
+        with open(scp_in, 'r') as fi:
+            for line in fi:
+                key, m_path = line.split()
+                mat = kaldiio.load_mat(m_path)
+                dataset.append([key, m_path, mat.shape[0]])
+        dataset = sorted(dataset, key=lambda item: item[2], reverse=True)
+        with open(sorted_scp, 'w') as fo:
+            for key, m_path, _ in dataset:
+                fo.write(f"{key} {m_path}\n")
+
+        with open(linfo, 'wb') as fo:
+            pickle.dump([L for _, _, L in dataset], fo)
+
+    with open(linfo, 'rb') as fi:
+        linfo = pickle.load(fi)
 
     if idx_end == -1:
-        idx_end = len(testset)
+        idx_end = len(linfo)
 
     L = idx_end - idx_beg
     if L < N:
         raise RuntimeError(f"len(set) < N: {L} < {N}")
-    cnt = 0
-    for i in range(L):
-        key, mat = testset[i]
-        cnt += mat.size(0)
 
+    cnt = sum(linfo)
     avg = float(cnt) / N
 
     # greedy not optimal
     indices = [idx_beg]
     cnt_interval = 0
     for i in range(L):
-        key, mat = testset[i]
-        cnt_interval += mat.size(0)
-        if cnt_interval >= avg:
-            indices.append(i+idx_beg)
-            cnt_interval = 0
+        cnt_interval += linfo[i]
+        if cnt_interval > avg:
+            indices.append(i-1 + idx_beg)
+            cnt_interval = linfo[i]
 
     while len(indices) < N+1:
         indices[1:] = [x-1 for x in indices[1:]]
         indices.append(idx_end)
 
     indices[-1] = idx_end
-    return indices
+    return indices, sorted_scp
 
 
 def main_worker(rank: int, args: argparse.Namespace, intervals: List[int]):
@@ -130,34 +161,90 @@ def single_worker(args: argparse.Namespace, device: Union[int, str], idx_beg: in
         #     beamsearcher = BeamSearchRNNTransducer(
         #         model, beam_size=args.beam_size)
         # beamsearcher = beamsearcher.to(device)
-        beamsearcher = TransducerBeamSearcher(
-            model, 0, args.beam_size, state_beam=2.3, expand_beam=2.3, lm_module=ext_lm, lm_weight=1.0)
+        # beamsearcher = BeamSearchTransducer(model.decoder, model.joint, args.beam_size,
+                                            # lm=ext_lm, lm_weight=args.lm_weight)
+        beamsearcher = TransducerBeamSearcher(model.decoder, model.joint, 0, args.beam_size,
+                                              state_beam=2.3, expand_beam=2.3, lm_module=ext_lm, lm_weight=args.lm_weight)
+        del model
     else:
         beamsearcher = None
-    decode(args, model, beamsearcher, testloader, device=device, local_writer=writer)
+    decode(args, beamsearcher, testloader,
+           device=device, local_writer=writer)
 
 
 @torch.no_grad()
-def decode(args, model: Transducer, beamsearcher, testloader, device, local_writer):
+def gen_encode_hidden(args, enc_bin: str, enc_link: str):
+    if torch.cuda.is_available():
+        device = 'cuda:0'
+    else:
+        device = 'cpu'
+
+    model = gen_model(args, device)
+    model.eval()
+
+    testset = ScpDataset(args.input_scp)
+    testloader = DataLoader(
+        testset, batch_size=1, shuffle=False,
+        num_workers=1, pin_memory=False, collate_fn=TestPadCollate())
+
+    fseeks = {}
+    with open(enc_bin, 'wb') as fo:
+        L = len(testloader)
+        for i, batch in enumerate(testloader):
+            key, x, x_lens = batch
+            x = x.to(device)
+
+            encoder_o, _ = model.encoder(x, x_lens)
+            fseeks[key[0]] = fo.tell()
+            pickle.dump(encoder_o.cpu(), fo)
+            print(
+                "\r|{:<80}|[{:>5}/{:<5}]".format(int((i+1)/L*80)*'#', i+1, L), end='')
+    print("")
+    with open(enc_link, 'wb') as fo:
+        pickle.dump(fseeks, fo)
+
+    del model, x, x_lens, encoder_o, fseeks, testset, testloader
+    torch.cuda.empty_cache()
+
+
+@torch.no_grad()
+def decode(args, beamsearcher, testloader, device, local_writer):
+    f_enc_hid = open(args.enc_hid_bin, 'rb')
+    with open(args.enc_hid_link, 'rb') as fi:
+        f_enc_seeks = pickle.load(fi)
+
+    def _load_enc_mat(k: str):
+        f_enc_hid.seek(f_enc_seeks[k])
+        return pickle.load(f_enc_hid)
+
     sp = spm.SentencePieceProcessor(model_file=args.spmodel)
     results = []
+
     L = len(testloader)
     for i, batch in enumerate(testloader):
-        key, x, x_lens = batch
-        x = x.to(device)
+        with torch.cuda.amp.autocast():
+            key, _, _ = batch
 
-        pred, _, _, _ = model.decode(x, x_lens, mode=args.mode,
-                                     beamSearcher=beamsearcher)
+            enc_o = _load_enc_mat(key[0])
+            enc_o = enc_o.to(device)
+            pred = beamsearcher(enc_o)
+        if isinstance(pred, tuple):
+            pred = pred[0]
+        
+        if isinstance(beamsearcher, BeamSearchTransducer):
+            pred = pred[0].yseq
 
         seq = sp.decode(pred)
         results.append((key, seq))
         print(
             "\r|{:<80}|[{:>5}/{:<5}]".format(int((i+1)/L*80)*'#', i+1, L), end='')
-    print("")
+    print("\r|{0}|[{1:>5}/{1:<5}]".format(80*'#', L))
     with open(local_writer, 'w') as fi:
         for key, pred in results:
             assert len(key) == 1
             fi.write("{} {}\n".format(key[0], pred[0]))
+
+    f_enc_hid.close()
 
 
 def gen_model(args, device, use_ext_lm=False) -> Union[Tuple[torch.nn.Module, torch.nn.Module], torch.nn.Module]:
@@ -181,12 +268,13 @@ def gen_model(args, device, use_ext_lm=False) -> Union[Tuple[torch.nn.Module, to
         ext_lm_model = lm_build(args, lm_configures, dist=False)
         ext_lm_model = load_checkpoint(
             ext_lm_model.to(device), args.ext_lm_check)
+        ext_lm_model = ext_lm_model.lm
         return model, ext_lm_model
     else:
         return model
 
 
-def load_checkpoint(model: Union[torch.nn.Module, torch.nn.parallel.DistributedDataParallel], path_ckpt: str) -> Transducer:
+def load_checkpoint(model: Union[torch.nn.Module, torch.nn.parallel.DistributedDataParallel], path_ckpt: str) -> torch.nn.Module:
 
     checkpoint = torch.load(
         path_ckpt, map_location=next(model.parameters()).device)
@@ -210,9 +298,12 @@ if __name__ == '__main__':
                         help="Config of external LM.")
     parser.add_argument("--ext-lm-check", type=str, default=None,
                         help="Checkpoint of external LM.")
+    parser.add_argument("--lm-weight", type=float, default=1.0,
+                        help="Weight of external LM.")
 
-    parser.add_argument("--input_scp", type=str)
-    parser.add_argument("--output_dir", type=str)
+    parser.add_argument("--input_scp", type=str, default=None)
+    parser.add_argument("--output_dir", type=str, default=None)
+    parser.add_argument("--enc-out-dir", type=str, default=None)
     parser.add_argument("--mode", type=str,
                         choices=['greedy', 'beam'], default='beam')
     parser.add_argument("--beam_size", type=int, default=3)

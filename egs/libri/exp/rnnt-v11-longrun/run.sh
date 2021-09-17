@@ -19,8 +19,9 @@ if [ ! -d $dir ]; then
 fi
 
 # train sentencepiece
-mkdir -p data/spm
-spmdata=data/spm
+n_units=4096
+mkdir -p data/spm$n_units
+spmdata=data/spm$n_units
 
 if [ $stage -le 1 ] && [ $stop_stage -ge 1 ]; then
     # rm seq id to get pure text
@@ -36,7 +37,7 @@ if [ $stage -le 1 ] && [ $stop_stage -ge 1 ]; then
     # predefined_syms="<NOISE>"
     predefined_syms=""
     python3 ctc-crf/spm_train.py --num_threads=$nj --input=$spmdata/corpus.tmp --model_prefix=$spmdata/spm \
-        --bos_id=0 --eos_id=-1 --unk_id=1 --vocab_size=4096 --user_defined_symbols=$predefined_syms \
+        --bos_id=0 --eos_id=-1 --unk_id=1 --vocab_size=$n_units --user_defined_symbols=$predefined_syms \
         --model_type=unigram   \
         > $spmdata/spm_training.log 2>&1 \
         && echo "SentenPiece training succeed." || \

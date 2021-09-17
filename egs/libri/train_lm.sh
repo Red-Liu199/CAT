@@ -69,29 +69,35 @@ if [ $stage -le 1 ] && [ $stop_stage -ge 1 ]; then
     echo "...and set the <blk>=0)"
 fi
 
-
-# if [ $stage -le 2 ] && [ $stop_stage -ge 2 ]; then
-#     if [ ! -f $text_dir/data/dev.pkl ]; then
-#         python3 local/transText2Bin.py --concat=256 $text_dir/data/dev.id $text_dir/data/dev.pkl || exit 1
-#     fi
-#     if [ ! -f $text_dir/data/tr.pkl ]; then
-#         python3 local/transText2Bin.py --nj $(nproc) --concat=256 $text_dir/data/tr.id $text_dir/data/tr.pkl || exit 1
-#     fi
-# fi
+spmdata=data/text
 
 if [ $stage -le 2 ] && [ $stop_stage -ge 2 ]; then
-    mkdir -p data/spm/data
-
-    python3 local/transText2Bin.py --strip data/spm/dev/text_number data/spm/data/dev.pkl || exit 1
-
-    python3 local/transText2Bin.py --strip --nj $(nproc) data/spm/train/text_number data/spm/data/tr.pkl || exit 1
+    if [ ! -f $text_dir/data/dev.pkl ]; then
+        python3 local/transText2Bin.py $text_dir/data/dev.id $text_dir/data/dev.pkl || exit 1
+    fi
+    if [ ! -f $text_dir/data/tr.pkl ]; then
+        python3 local/transText2Bin.py --nj $(nproc) --concat=128 $text_dir/data/tr.id $text_dir/data/tr.pkl || exit 1
+    fi
 fi
+
+# if [ $stage -le 2 ] && [ $stop_stage -ge 2 ]; then
+#     mkdir -p $spmdata/data
+
+#     python3 local/transText2Bin.py --strip $spmdata/dev/text_number $spmdata/data/dev.pkl || exit 1
+
+#     python3 local/transText2Bin.py --strip --nj $(nproc) $spmdata/train/text_number $spmdata/data/tr.pkl || exit 1
+# fi
 
 
 if [ $stage -le 3 ] && [ $stop_stage -ge 3 ]; then
     dir=$1
 
-    if [ ! $dir ] || [ ! -d $dir ]; then
+    if [ ! $dir ]; then
+        echo "Resolving from script directory..."
+        dir=$(dirname $0)
+    fi
+
+    if [ ! -d $dir ]; then
         echo "No such directory $dir"
         exit 1
     fi
@@ -112,8 +118,8 @@ if [ $stage -le 3 ] && [ $stop_stage -ge 3 ]; then
         --dir=$dir                              \
         --config=$dir/lm_config.json            \
         --data=data/                            \
-        --trset=data/spm/data/tr.pkl            \
-        --devset=data/spm/data/dev.pkl          \
+        --trset=$spmdata/data/tr.pkl            \
+        --devset=$spmdata/data/dev.pkl          \
         --grad-accum-fold=1                     \
         || exit 1
 fi

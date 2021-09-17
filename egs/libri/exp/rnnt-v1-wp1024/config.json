@@ -8,8 +8,6 @@
     },
     "encoder": {
         "type": "ConformerNet",
-        "freeze": true,
-        "pretrained": "exp/conformer-s-v1/ckpt/bestckpt.pt",
         "kwargs": {
             "num_cells": 16,
             "idim": 80,
@@ -20,8 +18,7 @@
         }
     },
     "decoder": {
-        "freeze": true,
-        "pretrained": "exp/rnnt-v1-wp1024/lm-non-act-ckpt/bestckpt.pt",
+        "type": "LSTMPredictNet",
         "kwargs": {
             "num_classes": 1024,
             "hdim": 512,
@@ -30,6 +27,7 @@
         }
     },
     "joint": {
+        "type": "JointNet",
         "kwargs": {
             "odim_encoder": 128,
             "odim_decoder": 512,

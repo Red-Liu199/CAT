@@ -11,7 +11,6 @@ def randName(L: int) -> str:
     return ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(L))
 
 
-# def text2bin(args: argparse.Namespace, pool_id: int = 0, idx_beg: int = 0, idx_end: int = -1) -> Tuple[str, int]:
 def text2bin(arguments: Tuple[argparse.Namespace, int, int, int]) -> Tuple[str, int]:
 
     args, pool_id, idx_beg, idx_end = arguments

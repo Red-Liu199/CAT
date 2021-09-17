@@ -13,7 +13,8 @@ class TransducerBeamSearcher(torch.nn.Module):
 
     def __init__(
         self,
-        transducer,
+        decoder,
+        joint,
         blank_id,
         beam_size=5,
         nbest=1,
@@ -23,7 +24,8 @@ class TransducerBeamSearcher(torch.nn.Module):
         expand_beam=2.3,
     ):
         super(TransducerBeamSearcher, self).__init__()
-        self.transducer = transducer
+        self.decoder = decoder
+        self.joint = joint
         self.blank_id = blank_id
         self.beam_size = beam_size
         self.nbest = nbest
@@ -182,6 +184,7 @@ class TransducerBeamSearcher(torch.nn.Module):
                             topk_hyp["hidden_dec"] = hidden
                             if self.lm_weight > 0:
                                 topk_hyp["hidden_lm"] = hidden_lm
+
                                 topk_hyp["logp_score"] += (
                                     self.lm_weight
                                     * log_probs_lm[0, 0, positions[j]]
@@ -214,7 +217,7 @@ class TransducerBeamSearcher(torch.nn.Module):
     def _joint_forward_step(self, out_TN, out_PN):
         """Join predictions (TN & PN)."""
 
-        return self.transducer.joint(out_TN.view(-1), out_PN.view(-1))
+        return self.joint(out_TN.view(-1), out_PN.view(-1))
 
     def _lm_forward_step(self, inp_tokens, memory):
         """This method should implement one step of
@@ -237,10 +240,10 @@ class TransducerBeamSearcher(torch.nn.Module):
             (e.g., RNN hidden states).
         """
 
-        logits, hs = self.lm(inp_tokens, memory)
+        logits, hs = self.lm(inp_tokens, hidden=memory)
         log_probs = torch.log_softmax(logits, dim=-1)
         return log_probs, hs
 
     def _forward_PN(self, input_PN, hidden=None):
 
-        return self.transducer.decoder(input_PN, hidden)
+        return self.decoder(input_PN, hidden)
