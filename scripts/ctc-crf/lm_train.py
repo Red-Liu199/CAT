@@ -14,7 +14,7 @@ from dataset import sortedPadCollateLM, CorpusDataset
 
 import os
 import argparse
-from typing import Tuple, Union
+from typing import Tuple, Union, List
 from collections import OrderedDict
 
 import torch
@@ -144,6 +144,8 @@ class LSTMPredictNet(nn.Module):
     Args:
         num_classes (int): number of classes, excluding the <blk>
         hdim (int): hidden state dimension of decoders
+        norm (bool, optional): whether use layernorm
+        variational_noise (tuple(float, float), optional): add variational noise with (mean, std)
         *rnn_args/**rnn_kwargs : any arguments that can be passed as 
             nn.LSTM(*rnn_args, **rnn_kwargs)
     Inputs: inputs, hidden_states, input_lengths
@@ -158,7 +160,7 @@ class LSTMPredictNet(nn.Module):
             ``(batch, seq_length, dimension)``
     """
 
-    def __init__(self, num_classes: int, hdim: int, norm: bool = False, *rnn_args, **rnn_kwargs):
+    def __init__(self, num_classes: int, hdim: int, norm: bool = False, variational_noise: Union[Tuple[float, float], List[float]] = None, *rnn_args, **rnn_kwargs):
         super().__init__()
         self.embedding = nn.Embedding(num_classes, hdim)
 
@@ -167,6 +169,23 @@ class LSTMPredictNet(nn.Module):
             self.norm = nn.LayerNorm([hdim])
         else:
             self.norm = None
+
+        if variational_noise is None:
+            self._noise = None
+        else:
+            assert isinstance(variational_noise, tuple) or isinstance(
+                variational_noise, list)
+            assert isinstance(variational_noise[0], float) and isinstance(
+                variational_noise[1], float)
+            assert variational_noise[1] > 0.
+
+            self._mean_std = variational_noise
+            self._noise = OrderedDict()  # type: OrderedDict()
+            for name, param in self.named_parameters():
+                if 'weight_' in name:
+                    _noise = name.replace("weight", "noise")
+                    self.register_buffer(_noise, torch.empty_like(param.data))
+                    self._noise[name] = getattr(self, _noise)
 
         self.rnn = nn.LSTM(hdim, hdim, *rnn_args, **rnn_kwargs)
         if 'bidirectional' in rnn_kwargs and rnn_kwargs['bidirectional']:
@@ -187,6 +206,7 @@ class LSTMPredictNet(nn.Module):
             embedded = self.norm(embedded)
 
         self.rnn.flatten_parameters()
+        self.load_noise()
         '''
         since the batch is sorted by time_steps length rather the target length
         ...so here we don't use the pack_padded_sequence()
@@ -199,11 +219,29 @@ class LSTMPredictNet(nn.Module):
                 packed_output, batch_first=True)
         else:
             rnn_out, hidden_o = self.rnn(embedded, hidden)
+        self.unload_noise()
 
         proj_out = self.out_proj(rnn_out)
         out = self.classifier(proj_out)
 
         return out, hidden_o
+
+    def load_noise(self):
+        if self._noise is None:
+            return
+
+        for name, buf in self._noise.items():
+            buf.normal_(*self._mean_std)
+            param = getattr(self, name)  # type: nn.Parameter
+            param += buf
+
+    def unload_noise(self):
+        if self._noise is None:
+            return
+
+        for name, buf in self._noise.items():
+            param = getattr(self, name)  # type: nn.Parameter
+            param -= buf
 
 
 class PlainPN(nn.Module):

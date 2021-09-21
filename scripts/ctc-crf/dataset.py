@@ -206,12 +206,12 @@ class ScpDataset(Dataset):
         if not os.path.isfile(scp_file):
             raise FileNotFoundError(f"{scp_file} is not a valid file.")
 
+        assert idx_beg >= 0 and (idx_end == -1 or idx_end > idx_beg)
+
         dataset = []
         with open(scp_file, 'r') as fi:
             for line in fi:
                 dataset.append(line.split())
-
-        assert idx_beg >= 0 and idx_end >= -1
 
         if idx_end == -1:
             self._dataset = dataset[idx_beg:]

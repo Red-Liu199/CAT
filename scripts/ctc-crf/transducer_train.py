@@ -14,6 +14,7 @@ import lm_train as pn_zoo
 import dataset as DataSet
 from am_train import setPath, main_spawner
 from beam_search_base import ConvMemBuffer
+from _layers import TimeReduction
 
 import os
 import argparse
@@ -162,16 +163,30 @@ class PackedSequence():
 
 
 class Transducer(nn.Module):
-    def __init__(self, encoder: nn.Module = None, decoder: nn.Module = None, jointnet: nn.Module = None, compact=False):
+    def __init__(self,
+                 encoder: nn.Module = None,
+                 decoder: nn.Module = None,
+                 jointnet: nn.Module = None,
+                 compact: bool = False,
+                 time_reduction: int = 1):
         super().__init__()
         self.encoder = encoder
         self.decoder = decoder
         self.joint = jointnet
         self._compact = compact and isinstance(jointnet, JointNet)
+        assert isinstance(time_reduction, int) and time_reduction >= 1
+        if time_reduction == 1:
+            self._t_reduction = None
+        else:
+            self._t_reduction = TimeReduction(time_reduction)
 
     def forward(self, inputs: torch.FloatTensor, targets: torch.LongTensor, input_lengths: torch.LongTensor, target_lengths: torch.LongTensor) -> torch.FloatTensor:
 
         output_encoder, o_lens = self.encoder(inputs, input_lengths)
+        # introduce time reduction layer
+        if self._t_reduction is not None:
+            output_encoder, o_lens = self._t_reduction(output_encoder, o_lens)
+
         padded_targets = torch.cat(
             [targets.new_zeros((targets.size(0), 1)), targets], dim=-1)
         output_decoder, _ = self.decoder(padded_targets)
@@ -190,53 +205,7 @@ class Transducer(nn.Module):
                         dtype=torch.int32), target_lengths.to(device=joint_out.device, dtype=torch.int32),
                         reduction='mean', gather=True, compact=self._compact)
 
-        ########## DEBUG CODE ###########
-        # import matplotlib.pyplot as plt
-        # harvest = torch.sum(torch.exp(joint_out[0, :o_lens[0], :, 1:].cpu().detach()), dim=-1).transpose(0,1).numpy()
-        # print(harvest.shape)
-        # fig, ax = plt.subplots()
-        # im = ax.imshow(harvest)
-        # plt.xlabel('T')
-        # plt.ylabel('U')
-        # plt.tight_layout()
-        # plt.savefig("tmp.png", dpi=300)
-        # plt.close()
-        # exit(1)
-        #################################
-
         return loss
-
-    @torch.no_grad()
-    def decode(self, inputs: torch.FloatTensor, input_lengths: torch.LongTensor, mode='beam', beamSearcher=None) -> torch.LongTensor:
-        encoder_output, o_lens = self.encoder(inputs, input_lengths)
-
-        if mode == 'greedy':
-            bos_token = inputs.new_zeros(1, 1).to(torch.long)
-            decoder_output_init, hidden_dec_init = self.decoder(bos_token)
-            outputs = []
-            for seq, T in zip(encoder_output, o_lens):
-                pred_tokens = []
-                decoder_output = decoder_output_init
-                hidden_dec = hidden_dec_init
-                for t in range(T):
-                    step_out = self.joint(seq[t], decoder_output.view(-1))
-                    pred = step_out.argmax(dim=0)
-                    pred = int(pred.item())
-                    if pred != 0:
-                        pred_tokens.append(pred)
-                    decoder_input = torch.tensor(
-                        [[pred]], device=inputs.device, dtype=torch.long)
-                    decoder_output, hidden_dec = self.decoder(
-                        decoder_input, hidden_dec)
-
-                outputs.append(torch.tensor(
-                    pred_tokens, device=inputs.device, dtype=torch.long))
-
-            return coreutils.pad_list(outputs).to(torch.long)
-        elif mode == 'beam':
-            return beamSearcher(encoder_output)
-        else:
-            raise ValueError("Unknown decode mode: {}".format(mode))
 
 
 class JointNet(nn.Module):
@@ -522,18 +491,29 @@ def build_model(args, configuration: dict, dist: bool = True, verbose: bool = Tr
     encoder = _build(configuration['encoder'], 'encoder')
     decoder = _build(configuration['decoder'], 'decoder')
     jointnet = _build(configuration['joint'], 'joint')
-
     if all(_model.freeze for _model in [encoder, decoder, jointnet]):
         raise RuntimeError("It's illegal to freeze all parts of Transducer.")
 
+    # for capability of old settings
+    if 'transducer' in configuration:
+        transducer_kwargs = configuration["transducer"]     # type: dict
+    else:
+        transducer_kwargs = {}
+
+    if 'compact' not in transducer_kwargs:
+        transducer_kwargs['compact'] = False
+
     model = Transducer(encoder=encoder, decoder=decoder,
-                       jointnet=jointnet, compact=(hasattr(args, 'compact') and args.compact))
+                       jointnet=jointnet, **transducer_kwargs)
 
     if not all(not _model.freeze for _model in [encoder, decoder, jointnet]):
         setattr(model, 'requires_slice', True)
 
     if not dist:
         return model
+
+    # make batchnorm synced across all processes
+    model = coreutils.convert_syncBatchNorm(model)
 
     torch.cuda.set_device(args.gpu)
     model.cuda(args.gpu)
@@ -547,8 +527,6 @@ if __name__ == "__main__":
     parser = coreutils.BasicDDPParser()
     parser.add_argument("--h5py", action="store_true",
                         help="Load data with H5py, defaultly use pickle (recommended).")
-    parser.add_argument("--compact", action="store_true", default=False,
-                        help="Use compact layout (recommended).")
 
     args = parser.parse_args()
 

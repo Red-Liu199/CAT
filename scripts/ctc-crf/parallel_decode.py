@@ -34,12 +34,15 @@ def main(args):
     if not os.path.isfile(args.spmodel):
         raise FileNotFoundError(
             "Invalid sentencepiece model location: {}".format(args.spmodel))
-
+    if not torch.cuda.is_available() or args.cpu:
+        coreutils.highlight_msg("Using CPU")
+        args.cpu = True
     # L_set = sum(1 for _ in open(args.input_scp, 'r'))
     # indices = equalSplitIdx(L_set, world_size)
-    world_size = torch.cuda.device_count() * args.nj
-    if not torch.cuda.is_available():
+    if args.cpu:
         world_size = args.nj
+    else:
+        world_size = torch.cuda.device_count() * args.nj
 
     indices, sorted_scp = equalLenSplit(args.input_scp, world_size)
     args.input_scp = sorted_scp
@@ -54,9 +57,9 @@ def main(args):
     setattr(args, 'enc_hid_bin', binary_enc)
     setattr(args, 'enc_hid_link', link_enc)
 
-    if not torch.cuda.is_available() or args.cpu:
-        coreutils.highlight_msg("Using CPU")
-        single_worker(args, 'cpu')
+    if args.cpu:
+        mp.spawn(main_worker, nprocs=world_size,
+                 args=(args, indices))
         return None
 
     if world_size == 1:
@@ -129,9 +132,15 @@ def equalLenSplit(scp_in: str, N: int, idx_beg=0, idx_end=-1):
 def main_worker(rank: int, args: argparse.Namespace, intervals: List[int]):
 
     gpu = rank // args.nj
+    if args.cpu:
+        device = 'cpu'
+        half_nprocs = torch.get_num_threads()
+        torch.set_num_threads((half_nprocs * 2)//(len(intervals)-1))
+    else:
+        device = gpu
     single_worker(
-        args, gpu, idx_beg=intervals[rank], idx_end=intervals[rank+1], suffix='{}-{}'.format(gpu, rank))
-    return
+        args, device, idx_beg=intervals[rank], idx_end=intervals[rank+1], suffix='{}-{}'.format(gpu, rank))
+    return None
 
 
 def single_worker(args: argparse.Namespace, device: Union[int, str], idx_beg: int = 0, idx_end: int = -1, suffix: str = '0-0'):
@@ -139,8 +148,9 @@ def single_worker(args: argparse.Namespace, device: Union[int, str], idx_beg: in
     if device != 'cpu':
         torch.cuda.set_device(device)
 
-    if args.ext_lm_config is None:
+    if args.ext_lm_config is None or args.lm_weight == 0.0:
         model = gen_model(args, device)
+        ext_lm=None
     else:
         model, ext_lm = gen_model(args, device, use_ext_lm=True)
         ext_lm.eval()
@@ -162,7 +172,7 @@ def single_worker(args: argparse.Namespace, device: Union[int, str], idx_beg: in
         #         model, beam_size=args.beam_size)
         # beamsearcher = beamsearcher.to(device)
         # beamsearcher = BeamSearchTransducer(model.decoder, model.joint, args.beam_size,
-                                            # lm=ext_lm, lm_weight=args.lm_weight)
+        # lm=ext_lm, lm_weight=args.lm_weight)
         beamsearcher = TransducerBeamSearcher(model.decoder, model.joint, 0, args.beam_size,
                                               state_beam=2.3, expand_beam=2.3, lm_module=ext_lm, lm_weight=args.lm_weight)
         del model
@@ -174,7 +184,7 @@ def single_worker(args: argparse.Namespace, device: Union[int, str], idx_beg: in
 
 @torch.no_grad()
 def gen_encode_hidden(args, enc_bin: str, enc_link: str):
-    if torch.cuda.is_available():
+    if torch.cuda.is_available() and not args.cpu:
         device = 'cuda:0'
     else:
         device = 'cpu'
@@ -230,7 +240,7 @@ def decode(args, beamsearcher, testloader, device, local_writer):
             pred = beamsearcher(enc_o)
         if isinstance(pred, tuple):
             pred = pred[0]
-        
+
         if isinstance(beamsearcher, BeamSearchTransducer):
             pred = pred[0].yseq
 

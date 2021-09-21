@@ -572,3 +572,10 @@ def SetRandomSeed(seed: int = 0):
     torch.cuda.manual_seed_all(seed)
     np.random.seed(seed)
     torch.backends.cudnn.deterministic = True
+
+
+def convert_syncBatchNorm(model: nn.Module) -> nn.Module:
+    """Convert the BatchNorm*D in model to be sync Batch Norm
+        such that it can sync across DDP processes.
+    """
+    return nn.SyncBatchNorm.convert_sync_batchnorm(model)

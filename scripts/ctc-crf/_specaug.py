@@ -303,7 +303,7 @@ class SpecAug(nn.Module):
             self.stack = StackDelta()
             self.unstack = UnStackDelta()
 
-        if apply_time_warp:
+        if apply_time_warp and time_warp_window > 0.0:
             self.time_warp = TimeWarp(
                 window=time_warp_window)
         else:

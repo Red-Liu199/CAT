@@ -1,8 +1,10 @@
 #!/bin/bash
 
 dir=$1
-if [ ! $dir ]; then
-    echo "You need to specify the experiment directory."
+weight=$2
+beam_size=5
+if [ ! $dir ] || [ ! $weight ]; then
+    echo "You need to specify the experiment directory and lm weight."
     exit 1
 fi
 
@@ -10,8 +12,6 @@ fi
 
 echo "Decoding..."
 mode='beam'
-beam_size=5
-weight=0.3
 lmdir="exp/lm1024"
 spmdata="data/spm1024"
 echo "Settings: mode=$mode | beam-width=$beam_size | lm-weight=$weight"
@@ -29,19 +29,19 @@ mkdir $dec_dir || exit 1
 mkdir -p $dir/enc
 for set in test_clean test_other dev_clean dev_other; do
     echo "> Decoding: $set"
-    python3 ctc-crf/parallel_decode.py      \
-        --resume=$dir/checks/bestckpt.pt    \
-        --config=$dir/config.json           \
-        --input_scp=data/all_ark/$set.scp   \
-        --output_dir=$dec_dir               \
-        --enc-out-dir=$dir/enc              \
-        --spmodel=$spmdata/spm.model        \
-        --nj=1                              \
-        --mode=$mode                        \
-        --beam_size=$beam_size              \
-        --ext-lm-config=$lmdir/lm_config.json \
-        --ext-lm-check=$lmdir/checks/bestckpt.pt   \
-        --lm-weight=$weight \
+    python3 ctc-crf/parallel_decode.py              \
+        --resume=$dir/checks/bestckpt.pt            \
+        --config=$dir/config.json                   \
+        --input_scp=data/all_ark/$set.scp           \
+        --output_dir=$dec_dir                       \
+        --enc-out-dir=$dir/enc                      \
+        --spmodel=$spmdata/spm.model                \
+        --nj=1                                      \
+        --mode=$mode                                \
+        --beam_size=$beam_size                      \
+        --ext-lm-config=$lmdir/lm_config.json       \
+        --ext-lm-check=$lmdir/checks/bestckpt.pt    \
+        --lm-weight=$weight                         \
         || exit 1
 
     if [ -f $dec_dir/decode.0-0.tmp ]; then
