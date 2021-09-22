@@ -63,7 +63,6 @@ if [ ! $KALDI_ROOT ]; then
     exit 1
 fi
 
-echo "" >$dec_dir/result
 for set in test_clean test_other dev_clean dev_other; do
     if [ -f $dec_dir/decode_${set}.txt ]; then
         $KALDI_ROOT/src/bin/compute-wer --text --mode=present ark:data/$set/text ark:$dec_dir/decode_${set}.txt | grep WER >>$dec_dir/result
