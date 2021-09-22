@@ -146,6 +146,7 @@ class LSTMPredictNet(nn.Module):
         hdim (int): hidden state dimension of decoders
         norm (bool, optional): whether use layernorm
         variational_noise (tuple(float, float), optional): add variational noise with (mean, std)
+        classical (bool, optional): whether use classical way of linear proj layer
         *rnn_args/**rnn_kwargs : any arguments that can be passed as 
             nn.LSTM(*rnn_args, **rnn_kwargs)
     Inputs: inputs, hidden_states, input_lengths
@@ -160,7 +161,14 @@ class LSTMPredictNet(nn.Module):
             ``(batch, seq_length, dimension)``
     """
 
-    def __init__(self, num_classes: int, hdim: int, norm: bool = False, variational_noise: Union[Tuple[float, float], List[float]] = None, *rnn_args, **rnn_kwargs):
+    def __init__(self,
+                 num_classes: int,
+                 hdim: int,
+                 norm: bool = False,
+                 variational_noise: Union[Tuple[float,
+                                                float], List[float]] = None,
+                 classical=True,
+                 *rnn_args, **rnn_kwargs):
         super().__init__()
         self.embedding = nn.Embedding(num_classes, hdim)
 
@@ -192,12 +200,15 @@ class LSTMPredictNet(nn.Module):
             odim = hdim*2
         else:
             odim = hdim
-        self.out_proj = nn.Linear(odim, odim)
 
-        self.classifier = nn.Sequential(OrderedDict({
-            'act': nn.ReLU(),
-            'linear': nn.Linear(odim, num_classes)
-        }))
+        if classical:
+            self.classifier = nn.Sequential(OrderedDict({
+                'proj': nn.Linear(odim, odim),
+                'act': nn.ReLU(),
+                'linear': nn.Linear(odim, num_classes)
+            }))
+        else:
+            self.classifier = nn.Linear(odim, num_classes)
 
     def forward(self, inputs: torch.LongTensor, hidden: torch.FloatTensor = None, input_lengths: torch.LongTensor = None) -> Tuple[torch.FloatTensor, Union[torch.FloatTensor, None]]:
 
@@ -221,8 +232,7 @@ class LSTMPredictNet(nn.Module):
             rnn_out, hidden_o = self.rnn(embedded, hidden)
         self.unload_noise()
 
-        proj_out = self.out_proj(rnn_out)
-        out = self.classifier(proj_out)
+        out = self.classifier(rnn_out)
 
         return out, hidden_o
 

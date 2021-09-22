@@ -218,11 +218,23 @@ class JointNet(nn.Module):
         outputs (torch.FloatTensor): outputs of joint `encoder_output` and `decoder_output`. `FloatTensor` of size ``(batch, time_steps, label_length, dimensionA + dimensionB)``
     """
 
-    def __init__(self, odim_encoder: int, odim_decoder: int, num_classes: int, HAT: bool = False, act: Union[Literal['tanh'], Literal['relu']] = 'tanh'):
+    def __init__(self,
+                 odim_encoder: int,
+                 odim_decoder: int,
+                 num_classes: int,
+                 hdim: int = -1,
+                 HAT: bool = False,
+                 act: Literal['tanh', 'relu'] = 'tanh',
+                 # NOTE: classical for capability of old version, will be deprecated soon
+                 classical: bool = True):
         super().__init__()
-        in_features = odim_encoder+odim_decoder
+        if classical:
+            in_features = odim_encoder+odim_decoder
+        else:
+            in_features = hdim
         self.fc_enc = nn.Linear(odim_encoder, in_features)
         self.fc_dec = nn.Linear(odim_decoder, in_features)
+
         self._isHAT = HAT
         if act == 'tanh':
             act_layer = nn.Tanh()

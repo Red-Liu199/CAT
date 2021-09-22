@@ -148,9 +148,9 @@ def single_worker(args: argparse.Namespace, device: Union[int, str], idx_beg: in
     if device != 'cpu':
         torch.cuda.set_device(device)
 
-    if args.ext_lm_config is None or args.lm_weight == 0.0:
+    if args.lm_weight == 0.0 or args.lm_dir is None:
         model = gen_model(args, device)
-        ext_lm=None
+        ext_lm = None
     else:
         model, ext_lm = gen_model(args, device, use_ext_lm=True)
         ext_lm.eval()
