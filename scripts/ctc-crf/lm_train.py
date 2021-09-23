@@ -237,7 +237,7 @@ class LSTMPredictNet(nn.Module):
         return out, hidden_o
 
     def load_noise(self):
-        if self._noise is None:
+        if self._noise is None or not self.training:
             return
 
         for name, buf in self._noise.items():
@@ -246,7 +246,7 @@ class LSTMPredictNet(nn.Module):
             param += buf
 
     def unload_noise(self):
-        if self._noise is None:
+        if self._noise is None or not self.training:
             return
 
         for name, buf in self._noise.items():

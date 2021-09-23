@@ -201,9 +201,14 @@ class Transducer(nn.Module):
         if isinstance(joint_out, tuple):
             joint_out = joint_out[0]
 
+        if self.training:
+            reduction = 'mean'
+        else:
+            reduction = 'sum'
+
         loss = RNNTLoss(joint_out, targets.to(dtype=torch.int32), o_lens.to(device=joint_out.device,
                         dtype=torch.int32), target_lengths.to(device=joint_out.device, dtype=torch.int32),
-                        reduction='mean', gather=True, compact=self._compact)
+                        reduction=reduction, gather=True, compact=self._compact)
 
         return loss
 

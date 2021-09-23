@@ -370,21 +370,32 @@ def train(trainloader, epoch: int, args: argparse.Namespace, manager: Manager):
     model = manager.model
     optimizer = scheduler.optimizer
 
-    batch_time = AverageMeter('Time', ':6.3f')
-    data_time = AverageMeter('Data', ':6.3f')
-    losses = AverageMeter('Loss', ':.4e')
-    losses_real = AverageMeter('Loss_real', ':.4e')
-    progress = ProgressMeter(
-        len(trainloader),
-        [batch_time, data_time, losses, losses_real],
-        prefix="Epoch: [{}]".format(epoch))
-
-    end = time.time()
     fold = args.grad_accum_fold
     assert fold >= 1
-    global_step = int(math.ceil(len(trainloader)/float(fold)) * (epoch-1))
+    batch_in_real = len(trainloader)
+    batch_per_epoch = int(math.ceil(len(trainloader)/float(fold)))
+    batch_time = AverageMeter('Time', ':6.3f')
+    losses = AverageMeter('Loss', ':.3e')
+    if fold > 1:
+        # FIXME(Huahuan): it's difficult to monitor data loading time with fold > 1
+        data_time = None
+        progress = ProgressMeter(
+            batch_per_epoch,
+            [batch_time, losses],
+            prefix="Epoch: [{}]".format(epoch))
+    else:
+        data_time = AverageMeter('Data', ':6.3f')
+        progress = ProgressMeter(
+            batch_per_epoch,
+            [batch_time, data_time, losses],
+            prefix="Epoch: [{}]".format(epoch))
+
+    end = time.time()
+    global_step = batch_per_epoch * (epoch-1)
 
     optimizer.zero_grad()
+    detach_loss = 0.0
+    real_loss = 0.0
     for i, minibatch in enumerate(trainloader):
         # measure data loading time
         logits, input_lengths, labels, label_lengths, path_weights = minibatch
@@ -394,10 +405,10 @@ def train(trainloader, epoch: int, args: argparse.Namespace, manager: Manager):
         if manager.specaug is not None:
             logits, input_lengths = manager.specaug(logits, input_lengths)
 
-        data_time.update(time.time() - end)
-
         # update every fold times and won't drop the last batch
-        if fold == 1 or (i+1) % fold == 0 or (i+1) == len(trainloader):
+        if fold == 1 or (i+1) % fold == 0 or (i+1) == batch_in_real:
+            if fold == 1:
+                data_time.update(time.time() - end)
             # we divide loss with fold since we want the gradients to be divided by fold
             loss = model(logits, labels, input_lengths, label_lengths)/fold
             if torch.isnan(loss):
@@ -405,11 +416,15 @@ def train(trainloader, epoch: int, args: argparse.Namespace, manager: Manager):
                     "'nan' occurs in training, break.")
 
             loss.backward()
-            # we multiply loss by fold since we want to log the real loss
-            detach_loss = loss.detach() * fold
-            # del the loss to avoid wrongly using.
+
+            with torch.no_grad():
+                detach_loss += loss
+                real_loss += _cal_real_loss(loss, path_weights)
+            # we divide accumulate loss by fold since we want to log the real loss
+            detach_loss /= fold
+            real_loss /= fold
+            # del the loss to avoid wrongly usage.
             del loss
-            real_loss = _cal_real_loss(detach_loss, path_weights)
 
             # for Adam optimizer, even though fold > 1, it's no need to normalize grad
             # if using SGD, let grad = grad_accum / fold or use a new_lr = init_lr / fold
@@ -424,13 +439,11 @@ def train(trainloader, epoch: int, args: argparse.Namespace, manager: Manager):
             tolog = {
                 'loss': detach_loss.item(),
                 'loss_real': real_loss.item(),
-                'batchsize': logits.size(0),     # not strict when fold > 1
                 'time': time.time()-end,
                 'lr': scheduler.lr_cur
             }
             end = time.time()
-            losses.update(tolog['loss'], tolog['time'])
-            losses_real.update(tolog['loss_real'], tolog['time'])
+            losses.update(tolog['loss_real'])
             # measure elapsed time
             batch_time.update(tolog['time'])
 
@@ -446,26 +459,35 @@ def train(trainloader, epoch: int, args: argparse.Namespace, manager: Manager):
             manager.log_update(
                 [epoch, tolog['loss'], tolog['loss_real'], tolog['lr'], tolog['time']], loc='log_train')
 
-            if ((i+1)/fold % args.print_freq == 0 or args.debug) and args.gpu == 0:
-                progress.display(i+1)
+            n_time = (i+1)//fold
+            if (n_time % args.print_freq == 0 or args.debug) and args.gpu == 0:
+                progress.display(n_time)
 
-            if args.debug and (i+1)/fold >= 20:
+            if args.debug and n_time >= 20:
                 if args.gpu == 0:
                     highlight_msg("In debugging, quit loop")
                 dist.barrier()
                 break
+
+            # reset accumulated loss
+            detach_loss -= detach_loss
+            real_loss -= real_loss
         else:
             # gradient accumulation w/o sync
             with model.no_sync():
                 loss = model(logits, labels, input_lengths, label_lengths)/fold
                 loss.backward()
 
+            with torch.no_grad():
+                detach_loss += loss
+                real_loss += _cal_real_loss(loss, path_weights)
+
 
 @torch.no_grad()
 def test(testloader, args: argparse.Namespace, manager: Manager) -> float:
     def _cal_real_loss(loss, path_weights):
         if hasattr(args, 'iscrf') and args.iscrf:
-            weight = torch.mean(path_weights)
+            weight = torch.sum(path_weights)
             return loss - weight
         else:
             return loss
@@ -473,15 +495,16 @@ def test(testloader, args: argparse.Namespace, manager: Manager) -> float:
     model = manager.model
 
     batch_time = AverageMeter('Time', ':6.3f')
-    data_time = AverageMeter('Data', ':6.3f')
-    losses_real = AverageMeter('Loss_real', ':.4e')
+    losses = AverageMeter('Loss', ':.3e')
     progress = ProgressMeter(
         len(testloader),
-        [batch_time, data_time, losses_real],
+        [batch_time, losses],
         prefix='Test: ')
 
     beg = time.time()
     end = time.time()
+    N = 0
+    SumLoss = 0.
     for i, minibatch in enumerate(testloader):
         if args.debug and i >= 20:
             if args.gpu == 0:
@@ -494,17 +517,22 @@ def test(testloader, args: argparse.Namespace, manager: Manager) -> float:
             args.gpu, non_blocking=True), labels, input_lengths, label_lengths
         path_weights = path_weights.cuda(args.gpu, non_blocking=True)
 
-        data_time.update(time.time() - end)
-
+        '''
+        Suppose model can deal with train/eval mode.
+        And in eval mode, the loss (metric) is sum overall batches.
+        '''
         loss = model(logits, labels, input_lengths, label_lengths)
 
-        real_loss = _cal_real_loss(loss, path_weights)
+        real_loss = _cal_real_loss(loss, path_weights)  # type: torch.Tensor
+        n_batch = real_loss.new_tensor(logits.size(0), dtype=torch.long)
 
         dist.all_reduce(real_loss, dist.ReduceOp.SUM)
-        real_loss = real_loss / dist.get_world_size()
+        dist.all_reduce(n_batch, dist.ReduceOp.SUM)
 
         # measure accuracy and record loss
-        losses_real.update(real_loss.item(), logits.size(0))
+        losses.update((real_loss/n_batch).item())
+        N += n_batch.item()
+        SumLoss += real_loss.item()
 
         # measure elapsed time
         batch_time.update(time.time() - end)
@@ -514,10 +542,11 @@ def test(testloader, args: argparse.Namespace, manager: Manager) -> float:
         if ((i+1) % args.print_freq == 0 or args.debug) and args.gpu == 0:
             progress.display(i+1)
 
+    avgloss = SumLoss/N
     manager.log_update(
-        [losses_real.avg, time.time() - beg], loc='log_eval')
+        [avgloss, time.time() - beg], loc='log_eval')
 
-    return losses_real.avg
+    return avgloss
 
 
 def BasicDDPParser(istraining: bool = True, prog: str = '') -> argparse.ArgumentParser:
