@@ -303,7 +303,7 @@ class RelPositionMultiHeadAttention(nn.Module):
         if attn_mask is not None:
             # use in-plcae fill
             attn_score = attn_score.masked_fill_(
-                attn_mask[None, :, :, None], -1e30)
+                attn_mask[None, :, :, None], -float('inf'))
 
         # attn_prob: f([T, K, B, H]) -> [T, K, B, H]
         attn_prob = torch.softmax(attn_score, dim=1)

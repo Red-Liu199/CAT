@@ -10,7 +10,7 @@ import h5py
 import coreutils
 import pickle
 from kaldiio import ReadHelper
-from typing import Union, Tuple, Sequence
+from typing import Union, Tuple, Sequence, List
 
 import torch
 from torch.utils.data import Dataset
@@ -61,32 +61,18 @@ class SpeechDatasetMem(Dataset):
         return self.data_batch[idx]
 
 
-class CorpusDataset(Dataset):
-    def __init__(self, pickle_path: str) -> None:
-        super().__init__()
-        assert os.path.isfile(pickle_path)
-
-        self.dataset = None
-        with open(pickle_path, 'rb') as fi:
-            self._pathbin = pickle.load(fi)
-            self._seeks = pickle.load(fi)
-
-    def __len__(self):
-        return len(self._seeks)
-
-    def __getitem__(self, index: int) -> torch.LongTensor:
-        if self.dataset is None:
-            self.dataset = open(self._pathbin, 'rb')
-
-        self.dataset.seek(self._seeks[index], 0)
-        data = pickle.load(self.dataset)    # type: Sequence[int]
-        return torch.LongTensor(data)
-
-
 class SpeechDatasetPickle(Dataset):
     def __init__(self, pickle_path):
         with open(pickle_path, 'rb') as f:
             self.dataset = pickle.load(f)
+
+    def get_seq_len(self) -> List[int]:
+        _ls = []
+        for _, feature_path, _, _ in self.dataset:
+            mat = kaldiio.load_mat(feature_path)
+            _ls.append(mat.shape[0])
+
+        return _ls
 
     def __len__(self):
         return len(self.dataset)
@@ -248,6 +234,28 @@ class TestPadCollate():
         lengths = torch.LongTensor([feature.size(0) for _, feature in batch])
 
         return keys, mats, lengths
+
+
+class CorpusDataset(Dataset):
+    def __init__(self, pickle_path: str) -> None:
+        super().__init__()
+        assert os.path.isfile(pickle_path)
+
+        self.dataset = None
+        with open(pickle_path, 'rb') as fi:
+            self._pathbin = pickle.load(fi)
+            self._seeks = pickle.load(fi)
+
+    def __len__(self):
+        return len(self._seeks)
+
+    def __getitem__(self, index: int) -> torch.LongTensor:
+        if self.dataset is None:
+            self.dataset = open(self._pathbin, 'rb')
+
+        self.dataset.seek(self._seeks[index], 0)
+        data = pickle.load(self.dataset)    # type: Sequence[int]
+        return torch.LongTensor(data)
 
 
 class sortedPadCollateLM():

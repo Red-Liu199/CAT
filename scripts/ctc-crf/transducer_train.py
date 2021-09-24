@@ -21,6 +21,9 @@ import argparse
 from collections import OrderedDict
 from gather import gathersum, gathercat
 from warp_rnnt import rnnt_loss as RNNTLoss
+import warp_rnnt
+if warp_rnnt.__version__ >= '0.7.0':
+    from warp_rnnt import fused_rnnt_loss as RNNTFusedLoss
 from typing import Union, Tuple, Sequence, Iterable, Literal, List
 
 import torch
@@ -41,8 +44,6 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
     dist.init_process_group(
         backend=args.dist_backend, init_method=args.dist_url,
         world_size=args.world_size, rank=args.rank)
-
-    args.batch_size = args.batch_size // ngpus_per_node
 
     if args.h5py:
         data_format = "hdf5"
@@ -65,17 +66,34 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
     tr_set = Dataset(args.trset)
     test_set = Dataset(args.devset)
 
-    train_sampler = DistributedSampler(tr_set)
+    if args.databalance:
+        if args.debug:
+            tr_set.dataset = tr_set.dataset[-int(len(tr_set)*0.1):]
+        coreutils.distprint(
+            "> Enable data balanced loading.\n  It takes a while to initialize...", args.gpu)
+        train_sampler = coreutils.BalanceDistributedSampler(
+            tr_set, args.batch_size, args.len_norm)
+        trainloader = DataLoader(
+            tr_set, batch_sampler=train_sampler,
+            num_workers=args.workers, pin_memory=True,
+            collate_fn=DataSet.sortedPadCollateTransducer())
+        coreutils.distprint(
+            "> Seq length info for balanced loading generated.", args.gpu)
+    else:
+        train_sampler = DistributedSampler(tr_set)
+
+        trainloader = DataLoader(
+            tr_set, batch_size=args.batch_size//ngpus_per_node, shuffle=(train_sampler is None),
+            num_workers=args.workers, pin_memory=True,
+            sampler=train_sampler, collate_fn=DataSet.sortedPadCollateTransducer())
+
+    setattr(args, 'n_steps',
+            train_sampler.total_size//args.batch_size//args.grad_accum_fold)
+
     test_sampler = DistributedSampler(test_set)
     test_sampler.set_epoch(1)
-
-    trainloader = DataLoader(
-        tr_set, batch_size=args.batch_size, shuffle=(train_sampler is None),
-        num_workers=args.workers, pin_memory=True,
-        sampler=train_sampler, collate_fn=DataSet.sortedPadCollateTransducer())
-
     testloader = DataLoader(
-        test_set, batch_size=args.batch_size, shuffle=(test_sampler is None),
+        test_set, batch_size=args.batch_size//ngpus_per_node, shuffle=(test_sampler is None),
         num_workers=args.workers, pin_memory=True,
         sampler=test_sampler, collate_fn=DataSet.sortedPadCollateTransducer())
 
@@ -115,7 +133,8 @@ class PackedSequence():
                 self._data = torch.cat([xs[i, :xn[i]].view(-1, V)
                                        for i in range(xn.size(0))], dim=0)
             else:
-                self._data = gathercat(xs, xn)
+                with coreutils.autocast(enabled=False):
+                    self._data = gathercat(xs.float(), xn)
             self._lens = xn
         else:
             # identical to torch.nn.utils.rnn.pad_sequence
@@ -159,7 +178,8 @@ class PackedSequence():
         return out, self._lens
 
     def __add__(self, _y) -> torch.Tensor:
-        return gathersum(self._data, _y._data, self._lens, _y._lens)
+        with coreutils.autocast(enabled=False):
+            return gathersum(self._data.float(), _y._data.float(), self._lens, _y._lens)
 
 
 class Transducer(nn.Module):
@@ -168,12 +188,14 @@ class Transducer(nn.Module):
                  decoder: nn.Module = None,
                  jointnet: nn.Module = None,
                  compact: bool = False,
+                 fused: bool = False,
                  time_reduction: int = 1):
         super().__init__()
         self.encoder = encoder
         self.decoder = decoder
         self.joint = jointnet
         self._compact = compact and isinstance(jointnet, JointNet)
+        self.isfused = fused
         assert isinstance(time_reduction, int) and time_reduction >= 1
         if time_reduction == 1:
             self._t_reduction = None
@@ -193,10 +215,18 @@ class Transducer(nn.Module):
         if self._compact:
             packed_enc = PackedSequence(output_encoder, o_lens)
             packed_dec = PackedSequence(output_decoder, target_lengths+1)
-            joint_out = self.joint(packed_enc, packed_dec)
+            if self.isfused:
+                joint_out = self.joint.skip_softmax_forward(
+                    packed_enc, packed_dec)
+            else:
+                joint_out = self.joint(packed_enc, packed_dec)
             targets = PackedSequence(targets, target_lengths).data
         else:
-            joint_out = self.joint(output_encoder, output_decoder)
+            if self.isfused:
+                joint_out = self.joint.skip_softmax_forward(
+                    output_encoder, output_decoder)
+            else:
+                joint_out = self.joint(output_encoder, output_decoder)
 
         if isinstance(joint_out, tuple):
             joint_out = joint_out[0]
@@ -206,9 +236,15 @@ class Transducer(nn.Module):
         else:
             reduction = 'sum'
 
-        loss = RNNTLoss(joint_out, targets.to(dtype=torch.int32), o_lens.to(device=joint_out.device,
-                        dtype=torch.int32), target_lengths.to(device=joint_out.device, dtype=torch.int32),
-                        reduction=reduction, gather=True, compact=self._compact)
+        with coreutils.autocast(enabled=False):
+            if self.isfused:
+                loss = RNNTFusedLoss(joint_out.float(), targets.to(dtype=torch.int32), o_lens.to(device=joint_out.device,
+                                                                                                 dtype=torch.int32), target_lengths.to(device=joint_out.device, dtype=torch.int32),
+                                     reduction=reduction)
+            else:
+                loss = RNNTLoss(joint_out.float(), targets.to(dtype=torch.int32), o_lens.to(device=joint_out.device,
+                                                                                            dtype=torch.int32), target_lengths.to(device=joint_out.device, dtype=torch.int32),
+                                reduction=reduction, gather=True, compact=self._compact)
 
         return loss
 
@@ -230,9 +266,10 @@ class JointNet(nn.Module):
                  hdim: int = -1,
                  HAT: bool = False,
                  act: Literal['tanh', 'relu'] = 'tanh',
-                 # NOTE: classical for capability of old version, will be deprecated soon
+                 # NOTE: classical for compatiblity of old version, will be deprecated soon
                  classical: bool = True):
         super().__init__()
+        self._skip_softmax = False
         if classical:
             in_features = odim_encoder+odim_decoder
         else:
@@ -287,6 +324,8 @@ class JointNet(nn.Module):
             raise NotImplementedError(
                 "Output of encoder and decoder being fed into jointnet should be of same type. Expect (Tensor, Tensor) or (PackedSequence, PackedSequence), instead ({}, {})".format(type(encoder_output), type(decoder_output)))
 
+        if self._skip_softmax and self._isHAT:
+            raise RuntimeError("HAT mode is not supprot with skip softmax.")
         if self._isHAT:
             vocab_logits = self.fc(expanded_out)
             prob_blk = self.distr_blk(vocab_logits[..., :1])
@@ -294,9 +333,18 @@ class JointNet(nn.Module):
                 1-prob_blk)+torch.log_softmax(vocab_logits[..., 1:], dim=-1)
             outputs = torch.cat([torch.log(prob_blk), vocab_log_probs], dim=-1)
         else:
-            outputs = self.fc(expanded_out).log_softmax(dim=-1)
+            if self._skip_softmax:
+                outputs = self.fc(expanded_out)
+            else:
+                outputs = self.fc(expanded_out).log_softmax(dim=-1)
 
         return outputs
+
+    def skip_softmax_forward(self, *args, **kwargs):
+        self._skip_softmax = True
+        outs = self.forward(*args, **kwargs)
+        self._skip_softmax = False
+        return outs
 
 
 class CausalConv2d(nn.Module):
@@ -496,8 +544,8 @@ def build_model(args, configuration: dict, dist: bool = True, verbose: bool = Tr
                 _path = ''
             else:
                 _path = config['pretrained']
-            print("{}: freeze={} | pretrained at {}".format(
-                module, _model.freeze, _path))
+            print("  {}: freeze={} | loaded from {}".format(
+                module.upper(), _model.freeze, _path))
             del _path
         return _model
 
@@ -511,7 +559,7 @@ def build_model(args, configuration: dict, dist: bool = True, verbose: bool = Tr
     if all(_model.freeze for _model in [encoder, decoder, jointnet]):
         raise RuntimeError("It's illegal to freeze all parts of Transducer.")
 
-    # for capability of old settings
+    # for compatible of old settings
     if 'transducer' in configuration:
         transducer_kwargs = configuration["transducer"]     # type: dict
     else:
@@ -544,6 +592,12 @@ if __name__ == "__main__":
     parser = coreutils.BasicDDPParser()
     parser.add_argument("--h5py", action="store_true",
                         help="Load data with H5py, defaultly use pickle (recommended).")
+    parser.add_argument("--databalance", action="store_true",
+                        help="Load data batches according to sequence lenth.")
+    parser.add_argument("--amp", action="store_true",
+                        help="Enable auto mixed precision training.")
+    parser.add_argument("--len-norm", type=str, default=None,
+                        help="Normal expression to seq len. Useful with --databalance. E.g. 'L**1.3'")
 
     args = parser.parse_args()
 

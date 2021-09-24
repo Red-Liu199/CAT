@@ -42,7 +42,7 @@ def SetupOptim(type_optim: str, paramlist: Iterable[torch.nn.parameter.Parameter
     if not use_zero:
         return getattr(torch.optim, type_optim)(paramlist, **kwargs)
     else:
-        raise NotImplementedError(f"Still on testing.")
+        # raise NotImplementedError(f"Still on testing.")
         if torch.__version__ < '1.8.0':
             raise NotImplementedError
 

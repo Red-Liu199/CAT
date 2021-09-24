@@ -11,6 +11,7 @@ and is more non-hard-coding style.
 import coreutils
 import model as model_zoo
 import dataset as DataSet
+from ctc_crf import CRFContext
 from ctc_crf import CTC_CRF_LOSS as CRFLoss
 from ctc_crf import WARP_CTC_LOSS as CTCLoss
 
@@ -24,8 +25,6 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
-
-import ctc_crf_base
 
 
 def main_spawner(args, _main_worker: Callable[[int, int, argparse.Namespace], None]):
@@ -104,14 +103,10 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
 
     # init ctc-crf, args.iscrf is set in build_model
     if args.iscrf:
-        gpus = torch.IntTensor([args.gpu])
-        ctc_crf_base.init_env(f"{args.data}/den_meta/den_lm.fst", gpus)
+        ctx = CRFContext(f"{args.data}/den_meta/den_lm.fst", args.gpu)
 
     # training
     manager.run(train_sampler, trainloader, testloader, args)
-
-    if args.iscrf:
-        ctc_crf_base.release_env(gpus)
 
 
 class AMTrainer(nn.Module):

@@ -80,7 +80,6 @@ def equalSplitIdx(tot_len: int, N: int, idx_beg=0, idx_end=-1):
 
 
 def equalLenSplit(scp_in: str, N: int, idx_beg=0, idx_end=-1):
-
     sorted_scp = f"{scp_in}.sorted"
     linfo = f"{scp_in}.lens"
     if not os.path.isfile(sorted_scp) or not os.path.isfile(linfo):
@@ -109,23 +108,22 @@ def equalLenSplit(scp_in: str, N: int, idx_beg=0, idx_end=-1):
     if L < N:
         raise RuntimeError(f"len(set) < N: {L} < {N}")
 
-    cnt = sum(linfo)
-    avg = float(cnt) / N
-
     # greedy not optimal
-    indices = [idx_beg]
+    avg = sum(linfo)/N
+    indices = [0]
     cnt_interval = 0
-    for i in range(L):
-        cnt_interval += linfo[i]
-        if cnt_interval > avg:
-            indices.append(i-1 + idx_beg)
-            cnt_interval = linfo[i]
+    cnt_parts = 0
+    for i, l in enumerate(linfo):
+        cnt_interval += l
+        if cnt_interval >= avg:
+            indices.append(i+1)
+            cnt_parts += 1
+            cnt_interval = 0
+            if cnt_parts < N:
+                avg = sum(linfo[indices[-1]:])/(N-cnt_parts)
 
-    while len(indices) < N+1:
-        indices[1:] = [x-1 for x in indices[1:]]
-        indices.append(idx_end)
+    assert len(indices) == N+1
 
-    indices[-1] = idx_end
     return indices, sorted_scp
 
 
