@@ -80,13 +80,13 @@ fi
 
 if [ $stage -le 2 ] && [ $stop_stage -ge 2 ]; then
     # Convert to pickle
-    python3 ctc-crf/convert_to.py -f=pickle --describe='L//4' --filer 2000 \
+    python3 exec/convert_to.py -f=pickle --describe='L//4' --filer 2000 \
         data/all_ark/cv.scp $spmdata/dev/text_number $data_dev/weight $spmdata/cv.pickle \
         > $spmdata/dev/conver2pickle.log 2>&1 || \
         { echo "Error: check $spmdata/dev/conver2pickle.log for details"; exit 1; }
     cat $spmdata/dev/conver2pickle.log | tail -n 1
 
-    python3 ctc-crf/convert_to.py -f=pickle --describe='L//4' --filer 2000 \
+    python3 exec/convert_to.py -f=pickle --describe='L//4' --filer 2000 \
         data/all_ark/tr.scp $spmdata/train/text_number $data_train/weight $spmdata/tr.pickle \
         > $spmdata/train/conver2pickle.log 2>&1 || \
         { echo "Error: check $spmdata/train/conver2pickle.log for details"; exit 1; }

@@ -3,7 +3,7 @@ use 'null' to indicat python None in JSON
 Usage: in shell script
 example.sh:
 
-opts=$(python ctc-crf/parseopt.py '{
+opts=$(python exec/parseopt.py '{
         "--data":{
             "type": "str",
             "default": 'null',

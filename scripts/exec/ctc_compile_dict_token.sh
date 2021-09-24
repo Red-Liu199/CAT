@@ -24,8 +24,8 @@ space_char="<SPACE>"   # the character you have used to represent spaces
 . utils/parse_options.sh
 
 if [ $# -ne 3 ]; then
-  echo "usage: ctc-crf/ctc_compile_dict_token.sh <dict-src-dir> <tmp-dir> <lang-dir>"
-  echo "e.g.: ctc-crf/ctc_compile_dict_token.sh data/local/dict_phn data/local/lang_phn_tmp data/lang_phn"
+  echo "usage: ctc_compile_dict_token.sh <dict-src-dir> <tmp-dir> <lang-dir>"
+  echo "e.g.: ctc_compile_dict_token.sh data/local/dict_phn data/local/lang_phn_tmp data/lang_phn"
   echo "<dict-src-dir> should contain the following files:"
   echo "lexicon.txt lexicon_numbers.txt units.txt"
   echo "options: "
@@ -64,7 +64,7 @@ cat $srcdir/units.txt | awk '{print $1}' > $tmpdir/units.list
 #   --keep_isymbols=false --keep_osymbols=false | fstarcsort --sort_type=olabel > $dir/T.fst || exit 1;
 
 # Hongyu Xiang: Eesen ctc_token_fst.py makes mistakes, as described in the CTC-CRF paper. We correct it
-ctc-crf/ctc_token_fst_corrected.py decode $dir/tokens.txt | fstcompile| fstarcsort --sort_type=olabel > $dir/T.fst || exit 1;
+exec/ctc_token_fst_corrected.py decode $dir/tokens.txt | fstcompile| fstarcsort --sort_type=olabel > $dir/T.fst || exit 1;
 
 # Encode the words with indices. Will be used in lexicon and language model FST compiling.
 cat $tmpdir/lexiconp.txt | awk '{print $1}' | sort | uniq  | awk '

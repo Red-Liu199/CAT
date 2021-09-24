@@ -1,6 +1,7 @@
 import pickle
 import os
 import argparse
+import shutil
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -11,6 +12,10 @@ if __name__ == "__main__":
 
     assert isinstance(args.inpkl, list)
     assert len(args.inpkl) > 0
+
+    if len(args.inpkl) == 1:
+        shutil.copy(args.inpkl[0], args.outpkl)
+        exit(0)
 
     datasets = []
     for pkl in args.inpkl:

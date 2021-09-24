@@ -1,9 +1,17 @@
 #!/bin/bash
 
-opts=$(python ctc-crf/parseopt.py '{
+opts=$(python exec/parseopt.py '{
         "dir":{
             "type": "str",
             "help": "Directory of experiment."
+        },
+        "n_scp":{
+            "type": "str",
+            "help": "Scp file to load search data. Expand location: data/all_ark/<n_scp>.scp."
+        },
+        "n_text":{
+            "type": "str",
+            "help": "Ground truth text file to compute WER. Expand location: data/<n_text>/text."
         },
         "spmodel":{
             "type": "str",
@@ -25,9 +33,6 @@ opts=$(python ctc-crf/parseopt.py '{
 
 echo "Decoding..."
 mode='beam'
-
-n_scp=dev_clean
-n_text=dev_clean
 
 loc_scp=data/all_ark/${n_scp}.scp
 loc_text=data/$n_text/text

@@ -26,10 +26,10 @@ echo "$0 $@"  # Print the command line for logging
 . parse_options.sh || exit 1;
 
 if [ $# != 4 ]; then
-   echo "Usage: ctc-crf/decode.sh [options] <graph-dir> <data-dir> <input-scp> <decode-dir>"
+   echo "Usage: exec/decode.sh [options] <graph-dir> <data-dir> <input-scp> <decode-dir>"
    echo "... where <decode-dir> is assumed to be a sub-directory of the directory"
    echo " where the model is."
-   echo "e.g.: ctc-crf/decode.sh data/lang_phn_test data/test data/test_data/test.scp exp/TDNN/decode"
+   echo "e.g.: exec/decode.sh data/lang_phn_test data/test data/test_data/test.scp exp/TDNN/decode"
    echo ""
    echo "main options (for others, see top of script file)"
    echo "  --config <config-file>                           # config containing options"

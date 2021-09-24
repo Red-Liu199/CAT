@@ -6,6 +6,9 @@ egs/**/fbank/
 *.jpg
 *.pt
 
+# tmp settings
+scripts/cat/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

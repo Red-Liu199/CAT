@@ -42,7 +42,7 @@ if __name__ == "__main__":
     if args.warning:
         coreutils.highlight_msg([
             "Calculation of CTC loss requires the input sequence to be longer than ctc_len(labels)",
-            "Check that in 'ctc-crf/convert_to.py' if your model does subsampling on seq",
+            "Check that in 'convert_to.py' if your model does subsampling on seq",
             "Make your modify at line 'if feature.shape[0] < ctc_len(label):' to filter unqualified seq",
             "If you have already done, ignore this."])
 

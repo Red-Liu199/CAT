@@ -18,8 +18,8 @@ from _layers import TimeReduction
 
 import os
 import argparse
+import gather
 from collections import OrderedDict
-from gather import gathersum, gathercat
 from warp_rnnt import rnnt_loss as RNNTLoss
 import warp_rnnt
 if warp_rnnt.__version__ >= '0.7.0':
@@ -133,8 +133,7 @@ class PackedSequence():
                 self._data = torch.cat([xs[i, :xn[i]].view(-1, V)
                                        for i in range(xn.size(0))], dim=0)
             else:
-                with coreutils.autocast(enabled=False):
-                    self._data = gathercat(xs.float(), xn)
+                self._data = gather.cat(xs.float(), xn)
             self._lens = xn
         else:
             # identical to torch.nn.utils.rnn.pad_sequence
@@ -179,7 +178,7 @@ class PackedSequence():
 
     def __add__(self, _y) -> torch.Tensor:
         with coreutils.autocast(enabled=False):
-            return gathersum(self._data.float(), _y._data.float(), self._lens, _y._lens)
+            return gather.sum(self._data.float(), _y._data.float(), self._lens, _y._lens)
 
 
 class Transducer(nn.Module):
