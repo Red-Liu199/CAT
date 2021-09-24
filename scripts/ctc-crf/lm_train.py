@@ -178,6 +178,7 @@ class LSTMPredictNet(nn.Module):
         else:
             self.norm = None
 
+        self.rnn = nn.LSTM(hdim, hdim, *rnn_args, **rnn_kwargs)
         if variational_noise is None:
             self._noise = None
         else:
@@ -188,14 +189,14 @@ class LSTMPredictNet(nn.Module):
             assert variational_noise[1] > 0.
 
             self._mean_std = variational_noise
-            self._noise = OrderedDict()  # type: OrderedDict()
-            for name, param in self.named_parameters():
+            self._noise = []  # type: List[Tuple[str, torch.nn.Parameter]]
+            for name, param in self.rnn.named_parameters():
                 if 'weight_' in name:
-                    _noise = name.replace("weight", "noise")
-                    self.register_buffer(_noise, torch.empty_like(param.data))
-                    self._noise[name] = getattr(self, _noise)
+                    n_noise = name.replace("weight", "_noise")
+                    self.register_buffer(n_noise, torch.empty_like(
+                        param.data), persistent=False)
+                    self._noise.append((n_noise, param))
 
-        self.rnn = nn.LSTM(hdim, hdim, *rnn_args, **rnn_kwargs)
         if 'bidirectional' in rnn_kwargs and rnn_kwargs['bidirectional']:
             odim = hdim*2
         else:
@@ -240,18 +241,18 @@ class LSTMPredictNet(nn.Module):
         if self._noise is None or not self.training:
             return
 
-        for name, buf in self._noise.items():
-            buf.normal_(*self._mean_std)
-            param = getattr(self, name)  # type: nn.Parameter
-            param += buf
+        for n_noise, param in self._noise:
+            noise = getattr(self, n_noise)
+            noise.normal_(*self._mean_std)
+            param.data += noise
 
     def unload_noise(self):
         if self._noise is None or not self.training:
             return
 
-        for name, buf in self._noise.items():
-            param = getattr(self, name)  # type: nn.Parameter
-            param -= buf
+        for n_noise, param in self._noise:
+            noise = getattr(self, n_noise)
+            param.data -= noise
 
 
 class PlainPN(nn.Module):
