@@ -48,8 +48,12 @@ def SetupOptim(type_optim: str, paramlist: Iterable[torch.nn.parameter.Parameter
 
         print("Using zero reduncdancy optimizer...")
         # FIXME: This is still a experimental function in torch 1.9.0
-        zerooptimizer = ZeroRedundancyOptimizer(
-            params=paramlist, optim=getattr(torch.optim, type_optim), **kwargs)
+        if torch.__version__ < '1.9.0':
+            zerooptimizer = ZeroRedundancyOptimizer(
+                params=paramlist, optim=getattr(torch.optim, type_optim), **kwargs)
+        else:
+            zerooptimizer = ZeroRedundancyOptimizer(
+                params=paramlist, optimizer_class=getattr(torch.optim, type_optim), **kwargs)
         return zerooptimizer
 
 

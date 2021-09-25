@@ -41,6 +41,7 @@ def main_spawner(args, _main_worker: Callable[[int, int, argparse.Namespace], No
 def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
     coreutils.SetRandomSeed(args.seed)
     args.gpu = gpu
+    torch.cuda.set_device(gpu)
 
     args.rank = args.rank * ngpus_per_node + gpu
     print(f"Use GPU: local[{args.gpu}] | global[{args.rank}]")
@@ -167,7 +168,6 @@ def build_model(args, configuration, train=True) -> nn.Module:
     setattr(args, 'iscrf', lossfn == 'crf')
     model = AMTrainer(am_model, loss_fn)
 
-    torch.cuda.set_device(args.gpu)
     model.cuda(args.gpu)
     model = torch.nn.parallel.DistributedDataParallel(
         model, device_ids=[args.gpu])

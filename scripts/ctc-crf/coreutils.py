@@ -111,8 +111,7 @@ class Manager(object):
             state, info = self.scheduler.step(self.epoch, metrics)
 
             if torch.__version__ > '1.8.0' and isinstance(self.scheduler.optimizer, ZeroRedundancyOptimizer):
-                self.scheduler.optimizer.consolidate_state_dict(
-                    recipient_rank=0)
+                self.scheduler.optimizer.consolidate_state_dict(0)
 
             distprint(info, args.gpu)
 
@@ -365,14 +364,55 @@ def highlight_msg(msg: Union[Sequence[str], str]):
     print(msg)
 
 
+'''
+NOTE (Huahuan):
+    with --databalance, batch size on each device might be different,
+    however, torch DDP automatically make a allreduce on gradients
+    then average them by world size during backward.
+    which assumes the batch sizes across devices are the same.
+    To address this, we re-calculate the loss in a hack way:
+        loss_normalized = sum(loss) / global_batch_size * world_size
+    Currently the loss is:
+        loss_current_normalized = mean_on_device(loss) / world_size
+    Substitute `loss_normalized` to replace `mean_on_device(loss)`, here is
+        loss_current_normalized' = sum(loss) / global_batch_size
+    such that the gradient is properly computed. Be aware that this
+    might cause numerical difference with float point given the fact that
+        probably: (f * N) / N != f
+'''
+
+
 def train(trainloader, args: argparse.Namespace, manager: Manager):
     @torch.no_grad()
     def _cal_real_loss(loss, path_weights):
         if hasattr(args, 'iscrf') and args.iscrf:
-            weight = torch.mean(path_weights)
+            weight = torch.sum(path_weights)
             return loss - weight
         else:
             return loss
+
+    def _go_step(detach_loss, real_loss, n_batch):
+        # we divide loss with fold since we want the gradients to be divided by fold
+        with autocast(enabled=enableAMP):
+            loss = model(logits, labels, input_lengths, label_lengths)/fold
+
+        normalized_loss = loss.detach() * logits.size(0)
+        if args.databalance:
+            # current global size
+            # efficiently, we can set t_batch_size=args.batch_size, but current impl is more robust
+            t_batch_size = logits.new_tensor(logits.size(0))
+            dist.all_reduce(t_batch_size)
+            loss.data = normalized_loss * (world_size / t_batch_size)
+        else:
+            t_batch_size = logits.size(0) * world_size
+
+        scaler.scale(loss).backward()
+
+        detach_loss += normalized_loss.float()
+        real_loss += _cal_real_loss(normalized_loss.float(), path_weights)
+        n_batch += t_batch_size
+
+        return detach_loss, real_loss, n_batch
 
     for attr in ['grad_accum_fold', 'n_steps', 'print_freq', 'rank', 'gpu', 'debug', 'amp']:
         assert hasattr(args, attr)
@@ -384,6 +424,7 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
     enableAMP = args.amp
     scaler = GradScaler(enabled=enableAMP)
 
+    world_size = dist.get_world_size()
     fold = args.grad_accum_fold
     assert fold >= 1
     batch_time = AverageMeter('Time', ':6.3f')
@@ -426,46 +467,23 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
         if fold == 1 or (i+1) % fold == 0:
             if fold == 1:
                 data_time.update(time.time() - end)
-            # we divide loss with fold since we want the gradients to be divided by fold
-            with autocast(enabled=enableAMP):
-                loss = model(logits, labels, input_lengths, label_lengths)/fold
-            if torch.isnan(loss):
-                raise RuntimeError(
-                    "'nan' occurs in training, break.")
 
-            # loss.backward()
-            scaler.scale(loss).backward()
+            detach_loss, real_loss, n_batch = _go_step(
+                detach_loss, real_loss, n_batch)
 
-            with torch.no_grad():
-                detach_loss += loss
-                real_loss += _cal_real_loss(loss, path_weights)
-            n_batch += logits.size(0)
-
-            # Reduce loss for logging
-            n_batch = logits.new_tensor(n_batch)
-            detach_loss *= n_batch
-            real_loss *= n_batch
-            dist.all_reduce(detach_loss, dist.ReduceOp.SUM)
-            dist.all_reduce(real_loss, dist.ReduceOp.SUM)
-            dist.all_reduce(n_batch, dist.ReduceOp.SUM)
-            # now n_batch is the global batch size
-            detach_loss /= n_batch
-            real_loss /= n_batch
-            # del the loss to avoid wrongly usage.
-            del loss
-
-            # for Adam optimizer, even though fold > 1, it's no need to normalize grad
-            # if using SGD, let grad = grad_accum / fold or use a new_lr = init_lr / fold
-
-            # optimizer.step()
             scaler.step(optimizer)
-            optimizer.zero_grad()
             scaler.update()
+            optimizer.zero_grad()
 
             manager.step += 1
             global_step = manager.step
             scheduler.update_lr(global_step)
 
+            # average for logging
+            dist.all_reduce(detach_loss)
+            dist.all_reduce(real_loss)
+            detach_loss /= n_batch
+            real_loss /= n_batch
             # measure accuracy and record loss; item() can sync all processes.
             tolog = {
                 'loss': detach_loss.item(),
@@ -504,20 +522,13 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
             # reset accumulated loss
             detach_loss -= detach_loss
             real_loss -= real_loss
-            n_batch = 0
+            n_batch -= n_batch
         else:
             # gradient accumulation w/o sync
             with model.no_sync():
-                with autocast(enabled=enableAMP):
-                    loss = model(logits, labels, input_lengths,
-                                 label_lengths)/fold
-                # loss.backward()
-                scaler.scale(loss).backward()
+                detach_loss, real_loss, n_batch = _go_step(
+                    detach_loss, real_loss, n_batch)
 
-            with torch.no_grad():
-                detach_loss += loss
-                real_loss += _cal_real_loss(loss, path_weights)
-            n_batch += logits.size(0)
 
 @torch.no_grad()
 def test(testloader, args: argparse.Namespace, manager: Manager) -> float:

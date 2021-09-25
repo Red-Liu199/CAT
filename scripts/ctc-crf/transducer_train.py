@@ -37,6 +37,7 @@ from torch.utils.data import DataLoader
 def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
     coreutils.SetRandomSeed(args.seed)
     args.gpu = gpu
+    torch.cuda.set_device(gpu)
 
     args.rank = args.rank * ngpus_per_node + gpu
     print(f"Use GPU: local[{args.gpu}] | global[{args.rank}]")
@@ -582,7 +583,6 @@ def build_model(args, configuration: dict, dist: bool = True, verbose: bool = Tr
     # make batchnorm synced across all processes
     model = coreutils.convert_syncBatchNorm(model)
 
-    torch.cuda.set_device(args.gpu)
     model.cuda(args.gpu)
     model = torch.nn.parallel.DistributedDataParallel(
         model, device_ids=[args.gpu])

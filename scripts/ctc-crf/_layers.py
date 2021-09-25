@@ -558,4 +558,4 @@ class TimeReduction(nn.Module):
         self.N = N
 
     def forward(self, x: torch.Tensor, x_lens: torch.Tensor):
-        return x[:, ::self.N, :].clone(), (x_lens-1)//self.N + 1
+        return x[:, ::self.N, :].clone(), torch.div(x_lens-1, self.N, rounding_mode='floor') + 1

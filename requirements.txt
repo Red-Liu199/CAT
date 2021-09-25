@@ -4,6 +4,4 @@ matplotlib
 pandas
 sentencepiece
 kaldiio
-warp-rnnt
-gather
 tensorboard
