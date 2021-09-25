@@ -37,7 +37,7 @@ echo "> Settings: mode=$mode | beam-width=$beam_size | lm-weight=$lm_weight"
 echo "  Ensure modeling unit of transducer is the same as that of extra LM."
 
 dec_dir=$dir/${mode}-${beam_size}-$lm_weight
-mkdir $dec_dir || exit 1
+mkdir -p $dec_dir
 mkdir -p $dir/enc
 for set in $(echo $test_set | tr ':' '\n'); do
     echo "> Decoding: $set"

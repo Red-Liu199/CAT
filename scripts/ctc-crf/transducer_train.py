@@ -195,6 +195,9 @@ class Transducer(nn.Module):
         self.joint = jointnet
         self._compact = compact and isinstance(jointnet, JointNet)
         self.isfused = fused
+        if self.isfused and not self._compact:
+            print("Transducer: setting isfused=True and compact=False is conflict. Force compact=True")
+            self._compact = True
         assert isinstance(time_reduction, int) and time_reduction >= 1
         if time_reduction == 1:
             self._t_reduction = None

@@ -206,7 +206,7 @@ def gen_encode_hidden(args, enc_bin: str, enc_link: str):
             fseeks[key[0]] = fo.tell()
             pickle.dump(encoder_o.cpu(), fo)
             print(
-                "\r|{:<80}|[{:>5}/{:<5}]".format(int((i+1)/L*80)*'#', i+1, L), end='')
+                "\r|{:<60}|[{:>5}/{:<5}]".format(int((i+1)/L*60)*'#', i+1, L), end='')
     print("")
     with open(enc_link, 'wb') as fo:
         pickle.dump(fseeks, fo)
@@ -230,12 +230,11 @@ def decode(args, beamsearcher, testloader, device, local_writer):
 
     L = len(testloader)
     for i, batch in enumerate(testloader):
-        with torch.cuda.amp.autocast():
-            key, _, _ = batch
-
-            enc_o = _load_enc_mat(key[0])
-            enc_o = enc_o.to(device)
-            pred = beamsearcher(enc_o)
+        key, _, _ = batch
+        enc_o = _load_enc_mat(key[0])
+        enc_o = enc_o.to(device)
+        pred = beamsearcher(enc_o)
+        
         if isinstance(pred, tuple):
             pred = pred[0]
 
@@ -245,8 +244,8 @@ def decode(args, beamsearcher, testloader, device, local_writer):
         seq = sp.decode(pred)
         results.append((key, seq))
         print(
-            "\r|{:<80}|[{:>5}/{:<5}]".format(int((i+1)/L*80)*'#', i+1, L), end='')
-    print("\r|{0}|[{1:>5}/{1:<5}]".format(80*'#', L))
+            "\r|{:<60}|[{:>5}/{:<5}]".format(int((i+1)/L*60)*'#', i+1, L), end='')
+    print("\r|{0}|[{1:>5}/{1:<5}]".format(60*'#', L))
     with open(local_writer, 'w') as fi:
         for key, pred in results:
             assert len(key) == 1
