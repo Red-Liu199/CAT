@@ -369,11 +369,10 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
     @torch.no_grad()
     def _cal_real_loss(loss, path_weights):
         if hasattr(args, 'iscrf') and args.iscrf:
-            partial_loss = loss.cpu()
             weight = torch.mean(path_weights)
-            return partial_loss - weight
+            return loss - weight
         else:
-            return loss.cpu()
+            return loss
 
     for attr in ['grad_accum_fold', 'n_steps', 'print_freq', 'rank', 'gpu', 'debug', 'amp']:
         assert hasattr(args, attr)
@@ -406,11 +405,13 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
     end = time.time()
     detach_loss = 0.0
     real_loss = 0.0
+    n_batch = 0
     for i, minibatch in enumerate(trainloader):
         # measure data loading time
         logits, input_lengths, labels, label_lengths, path_weights = minibatch
         logits, labels, input_lengths, label_lengths = logits.cuda(
             args.gpu, non_blocking=True), labels, input_lengths, label_lengths
+        path_weights = path_weights.cuda(args.gpu, non_blocking=True)
 
         ########## DEBUG CODE ###########
         # print(args.rank, logits.size(0),
@@ -438,9 +439,18 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
             with torch.no_grad():
                 detach_loss += loss
                 real_loss += _cal_real_loss(loss, path_weights)
-            # we divide accumulate loss by fold since we want to log the real loss
-            detach_loss /= fold
-            real_loss /= fold
+            n_batch += logits.size(0)
+
+            # Reduce loss for logging
+            n_batch = logits.new_tensor(n_batch)
+            detach_loss *= n_batch
+            real_loss *= n_batch
+            dist.all_reduce(detach_loss, dist.ReduceOp.SUM)
+            dist.all_reduce(real_loss, dist.ReduceOp.SUM)
+            dist.all_reduce(n_batch, dist.ReduceOp.SUM)
+            # now n_batch is the global batch size
+            detach_loss /= n_batch
+            real_loss /= n_batch
             # del the loss to avoid wrongly usage.
             del loss
 
@@ -494,6 +504,7 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
             # reset accumulated loss
             detach_loss -= detach_loss
             real_loss -= real_loss
+            n_batch = 0
         else:
             # gradient accumulation w/o sync
             with model.no_sync():
@@ -506,7 +517,7 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
             with torch.no_grad():
                 detach_loss += loss
                 real_loss += _cal_real_loss(loss, path_weights)
-
+            n_batch += logits.size(0)
 
 @torch.no_grad()
 def test(testloader, args: argparse.Namespace, manager: Manager) -> float:

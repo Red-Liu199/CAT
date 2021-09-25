@@ -7,7 +7,7 @@ opts=$(python exec/parseopt.py '{
         },
         "test_set":{
             "type": "str",
-            "help": "Test sets split by space. Such as: \"eval92 dev93\"."
+            "help": "Test sets split by ':'. Such as: \"eval92:dev93\"."
         },
         "spmodel":{
             "type": "str",
@@ -39,7 +39,7 @@ echo "  Ensure modeling unit of transducer is the same as that of extra LM."
 dec_dir=$dir/${mode}-${beam_size}-$lm_weight
 mkdir $dec_dir || exit 1
 mkdir -p $dir/enc
-for set in test_dev93 test_eval92; do
+for set in $(echo $test_set | tr ':' '\n'); do
     echo "> Decoding: $set"
     python3 ctc-crf/parallel_decode.py \
         --resume=$dir/checks/bestckpt.pt \
@@ -67,11 +67,16 @@ if [ ! $KALDI_ROOT ]; then
     exit 1
 fi
 
-for set in test_dev93 test_eval92; do
+for set in $(echo $test_set | tr ':' '\n'); do
+    if [ ! -f data/$set/text ]; then
+        echo "No true text found: data/$set/text"
+        exit 1
+    fi
     if [ -f $dec_dir/decode_${set}.txt ]; then
         $KALDI_ROOT/src/bin/compute-wer --text --mode=present ark:data/$set/text ark:$dec_dir/decode_${set}.txt | grep WER >>$dec_dir/result
     else
-        echo "No decoded text found."
+        echo "No decoded text found: $dec_dir/decode_${set}.txt"
+        exit 1
     fi
 done
 

@@ -133,7 +133,7 @@ class PackedSequence():
                 self._data = torch.cat([xs[i, :xn[i]].view(-1, V)
                                        for i in range(xn.size(0))], dim=0)
             else:
-                self._data = gather.cat(xs.float(), xn)
+                self._data = gather.cat(xs, xn)
             self._lens = xn
         else:
             # identical to torch.nn.utils.rnn.pad_sequence
