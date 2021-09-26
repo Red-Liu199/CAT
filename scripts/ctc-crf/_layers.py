@@ -95,20 +95,20 @@ class Conv2dSubdampling(nn.Module):
             )
             return
         elif norm == 'batch':
-            norm_net = nn.BatchNorm2d(multiplier)
+            Norm = nn.BatchNorm2d
         elif norm == 'layer':
-            norm_net = nn.LayerNorm(multiplier)
+            Norm = nn.LayerNorm
         else:
             raise RuntimeError(
                 f"Unknown normalization method: {norm}, expect one of ['batch', 'layer', 'none']")
         self.conv = nn.Sequential(
             nn.ConstantPad2d(padding=(0, 1, 0, 1), value=0.),
             nn.Conv2d(idim, multiplier, kernel_size=3, stride=2),
-            norm_net,
+            Norm(multiplier),
             nn.ReLU(),
             nn.ConstantPad2d(padding=(0, 1, 0, 1), value=0.),
             nn.Conv2d(multiplier, multiplier, kernel_size=3, stride=2),
-            norm_net,
+            Norm(multiplier),
             nn.ReLU()
         )
 

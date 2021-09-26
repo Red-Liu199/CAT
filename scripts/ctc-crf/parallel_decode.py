@@ -151,9 +151,6 @@ def single_worker(args: argparse.Namespace, device: Union[int, str], idx_beg: in
         ext_lm = None
     else:
         model, ext_lm = gen_model(args, device, use_ext_lm=True)
-        ext_lm.eval()
-
-    model.eval()
 
     testset = ScpDataset(args.input_scp, idx_beg=idx_beg, idx_end=idx_end)
     testloader = DataLoader(
@@ -181,41 +178,6 @@ def single_worker(args: argparse.Namespace, device: Union[int, str], idx_beg: in
 
 
 @torch.no_grad()
-def gen_encode_hidden(args, enc_bin: str, enc_link: str):
-    if torch.cuda.is_available() and not args.cpu:
-        device = 'cuda:0'
-    else:
-        device = 'cpu'
-
-    model = gen_model(args, device)
-    model.eval()
-
-    testset = ScpDataset(args.input_scp)
-    testloader = DataLoader(
-        testset, batch_size=1, shuffle=False,
-        num_workers=1, pin_memory=False, collate_fn=TestPadCollate())
-
-    fseeks = {}
-    with open(enc_bin, 'wb') as fo:
-        L = len(testloader)
-        for i, batch in enumerate(testloader):
-            key, x, x_lens = batch
-            x = x.to(device)
-
-            encoder_o, _ = model.encoder(x, x_lens)
-            fseeks[key[0]] = fo.tell()
-            pickle.dump(encoder_o.cpu(), fo)
-            print(
-                "\r|{:<60}|[{:>5}/{:<5}]".format(int((i+1)/L*60)*'#', i+1, L), end='')
-    print("")
-    with open(enc_link, 'wb') as fo:
-        pickle.dump(fseeks, fo)
-
-    del model, x, x_lens, encoder_o, fseeks, testset, testloader
-    torch.cuda.empty_cache()
-
-
-@torch.no_grad()
 def decode(args, beamsearcher, testloader, device, local_writer):
     f_enc_hid = open(args.enc_hid_bin, 'rb')
     with open(args.enc_hid_link, 'rb') as fi:
@@ -234,7 +196,7 @@ def decode(args, beamsearcher, testloader, device, local_writer):
         enc_o = _load_enc_mat(key[0])
         enc_o = enc_o.to(device)
         pred = beamsearcher(enc_o)
-        
+
         if isinstance(pred, tuple):
             pred = pred[0]
 
@@ -266,6 +228,7 @@ def gen_model(args, device, use_ext_lm=False) -> Union[Tuple[torch.nn.Module, to
     assert args.resume is not None, "Trying to decode with uninitialized parameters. Add --resume"
 
     model = load_checkpoint(model, args.resume)
+    model.eval()
 
     if use_ext_lm:
         assert args.ext_lm_check is not None
@@ -276,9 +239,44 @@ def gen_model(args, device, use_ext_lm=False) -> Union[Tuple[torch.nn.Module, to
         ext_lm_model = load_checkpoint(
             ext_lm_model.to(device), args.ext_lm_check)
         ext_lm_model = ext_lm_model.lm
+        ext_lm_model.eval()
         return model, ext_lm_model
     else:
         return model
+
+
+@torch.no_grad()
+def gen_encode_hidden(args, enc_bin: str, enc_link: str):
+    if torch.cuda.is_available() and not args.cpu:
+        device = 'cuda:0'
+    else:
+        device = 'cpu'
+
+    model = gen_model(args, device)
+
+    testset = ScpDataset(args.input_scp)
+    testloader = DataLoader(
+        testset, batch_size=1, shuffle=False,
+        num_workers=1, pin_memory=False, collate_fn=TestPadCollate())
+
+    fseeks = {}
+    with open(enc_bin, 'wb') as fo:
+        L = len(testloader)
+        for i, batch in enumerate(testloader):
+            key, x, x_lens = batch
+            x = x.to(device)
+
+            encoder_o, _ = model.encoder(x, x_lens)
+            fseeks[key[0]] = fo.tell()
+            pickle.dump(encoder_o.cpu(), fo)
+            print(
+                "\r|{:<60}|[{:>5}/{:<5}]".format(int((i+1)/L*60)*'#', i+1, L), end='')
+    print("")
+    with open(enc_link, 'wb') as fo:
+        pickle.dump(fseeks, fo)
+
+    del model, x, x_lens, encoder_o, fseeks, testset, testloader
+    torch.cuda.empty_cache()
 
 
 def load_checkpoint(model: Union[torch.nn.Module, torch.nn.parallel.DistributedDataParallel], path_ckpt: str) -> torch.nn.Module:

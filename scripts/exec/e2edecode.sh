@@ -13,6 +13,11 @@ opts=$(python exec/parseopt.py '{
             "type": "str",
             "help": "Sentence piece model location."
         },
+        "--check":{
+            "type": "str",
+            "default": "bestckpt.pt",
+            "help": "Name of checkpoint. Default: bestckpt.pt"
+        },
         "--lm_weight":{
             "type":"float",
             "default": 0.0,
@@ -42,7 +47,7 @@ mkdir -p $dir/enc
 for set in $(echo $test_set | tr ':' '\n'); do
     echo "> Decoding: $set"
     python3 ctc-crf/parallel_decode.py \
-        --resume=$dir/checks/bestckpt.pt \
+        --resume=$dir/checks/$check \
         --config=$dir/config.json \
         --input_scp=data/all_ark/$set.scp \
         --output_dir=$dec_dir \
