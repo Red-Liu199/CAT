@@ -10,14 +10,17 @@
 . ./path.sh
 
 stage=1
-stop_stage=100
+stop_stage=4
 
+swbd="/mnt/nas_workspace2/spmiData/LDC/LDC97S62_Switchboard-1-Release-2-complete"
+fisher_dirs="/mnt/nas_workspace2/spmiData/LDC/LDC2004T19_Fisher-English-Training-Part-1-Transcripts/fe_03_p1_tran/ /mnt/nas_workspace2/spmiData/LDC/LDC2005T19_Fisher-English-Training-Part-2-Transcripts/fe_03_p2_tran/"
+eval2000_dirs="/mnt/nas_workspace2/spmiData/LDC/LDC2002S09_2000-HUB5-English-Evaluation-Speech/hub5e_00 /mnt/nas_workspace2/spmiData/LDC/LDC2002T43_2000-HUB5-English-Evaluation-Transcripts/2000_hub5_eng_eval_tr/"
 # Specify data path here #
-DATAHOME=/path/to/dataset
-##########################
-swbd=$DATAHOME/LDC97S62
-fisher_dirs="$DATAHOME/LDC2004T19/fe_03_p1_tran/ $DATAHOME/LDC2005T19/fe_03_p2_tran/"
-eval2000_dirs="$DATAHOME/LDC2002S09/hub5e_00 $DATAHOME/LDC2002T43"
+# DATAHOME=/path/to/dataset
+# ##########################
+# swbd=$DATAHOME/LDC97S62
+# fisher_dirs="$DATAHOME/LDC2004T19/fe_03_p1_tran/ $DATAHOME/LDC2005T19/fe_03_p2_tran/"
+# eval2000_dirs="$DATAHOME/LDC2002S09/hub5e_00 $DATAHOME/LDC2002T43"
 
 NODE=$1
 if [ ! $NODE ]; then
@@ -35,7 +38,7 @@ if [ $NODE == 0 ]; then
     local/eval2000_data_prep.sh $eval2000_dirs || exit 1;
 
     # Compile the lexicon and token FSTs
-    ctc-crf/ctc_compile_dict_token.sh data/local/dict_phn data/local/lang_phn_tmp data/lang_phn || exit 1;
+    exec/ctc_compile_dict_token.sh data/local/dict_phn data/local/lang_phn_tmp data/lang_phn || exit 1;
 
     # Train and compile LMs.
     local/swbd1_train_lms.sh data/local/train/text data/local/dict_phn/lexicon.txt data/local/lm $fisher_dirs || exit 1;
@@ -101,16 +104,16 @@ if [ $NODE == 0 ]; then
   data_cv=data/train_dev_sp
 
   if [ $stage -le 3 ] && [ $stop_stage -ge 3 ]; then
-    python3 ctc-crf/prep_ctc_trans.py data/lang_phn/lexicon_numbers.txt $data_tr/text "<unk>" > $data_tr/text_number || exit 1;
-    python3 ctc-crf/prep_ctc_trans.py data/lang_phn/lexicon_numbers.txt $data_cv/text "<unk>" > $data_cv/text_number || exit 1;
+    python3 exec/prep_ctc_trans.py data/lang_phn/lexicon_numbers.txt $data_tr/text "<unk>" > $data_tr/text_number || exit 1;
+    python3 exec/prep_ctc_trans.py data/lang_phn/lexicon_numbers.txt $data_cv/text "<unk>" > $data_cv/text_number || exit 1;
     echo "Convert text_number finished"
  
     # prepare denominator
-    python3 ctc-crf/prep_ctc_trans.py data/lang_phn/lexicon_numbers.txt data/train_nodup/text "<unk>" > data/train_nodup/text_number || exit 1;
+    python3 exec/prep_ctc_trans.py data/lang_phn/lexicon_numbers.txt data/train_nodup/text "<unk>" > data/train_nodup/text_number || exit 1;
     cat data/train_nodup/text_number | sort -k 2 | uniq -f 1 > data/train_nodup/unique_text_number || exit 1;
     mkdir -p data/den_meta
     chain-est-phone-lm ark:data/train_nodup/unique_text_number data/den_meta/phone_lm.fst || exit 1;
-    python3 ctc-crf/ctc_token_fst_corrected.py den data/lang_phn/tokens.txt | fstcompile | fstarcsort --sort_type=olabel > data/den_meta/T_den.fst || exit 1;
+    python3 exec/ctc_token_fst_corrected.py den data/lang_phn/tokens.txt | fstcompile | fstarcsort --sort_type=olabel > data/den_meta/T_den.fst || exit 1;
     fstcompose data/den_meta/T_den.fst data/den_meta/phone_lm.fst > data/den_meta/den_lm.fst || exit 1;
     echo "Prepare denominator finished"
  

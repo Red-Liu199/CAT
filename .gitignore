@@ -5,9 +5,13 @@ egs/**/fbank/
 *.png
 *.jpg
 *.pt
+*.ark
+*.scp
+src/ctc_crf/openfst/
 
 # tmp settings
 scripts/cat/
+test_*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

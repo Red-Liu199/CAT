@@ -7,7 +7,7 @@ Author: Hongyu Xiang, Keyu An, Zheng Huahuan
 import math
 from collections import OrderedDict
 from maskedbatchnorm1d import MaskedBatchNorm1d
-from typing import Union, Tuple, Sequence
+from typing import Union, Tuple, Sequence, Literal
 
 import torch
 import torch.nn as nn
@@ -73,7 +73,7 @@ class Unsqueeze(nn.Module):
 
 
 class Conv2dSubdampling(nn.Module):
-    def __init__(self, multiplier: int, stacksup: bool = True):
+    def __init__(self, multiplier: int, norm: Literal['batch', 'layer', 'none'] = 'none', stacksup: bool = False):
         super().__init__()
         self._lens_in_args_ = None
 
@@ -84,12 +84,31 @@ class Conv2dSubdampling(nn.Module):
             self.stack = Unsqueeze(1)
             idim = 1
 
+        if norm == 'none':
+            self.conv = nn.Sequential(
+                nn.ConstantPad2d(padding=(0, 1, 0, 1), value=0.),
+                nn.Conv2d(idim, multiplier, kernel_size=3, stride=2),
+                nn.ReLU(),
+                nn.ConstantPad2d(padding=(0, 1, 0, 1), value=0.),
+                nn.Conv2d(multiplier, multiplier, kernel_size=3, stride=2),
+                nn.ReLU()
+            )
+            return
+        elif norm == 'batch':
+            norm_net = nn.BatchNorm2d(multiplier)
+        elif norm == 'layer':
+            norm_net = nn.LayerNorm(multiplier)
+        else:
+            raise RuntimeError(
+                f"Unknown normalization method: {norm}, expect one of ['batch', 'layer', 'none']")
         self.conv = nn.Sequential(
             nn.ConstantPad2d(padding=(0, 1, 0, 1), value=0.),
             nn.Conv2d(idim, multiplier, kernel_size=3, stride=2),
+            norm_net,
             nn.ReLU(),
             nn.ConstantPad2d(padding=(0, 1, 0, 1), value=0.),
             nn.Conv2d(multiplier, multiplier, kernel_size=3, stride=2),
+            norm_net,
             nn.ReLU()
         )
 

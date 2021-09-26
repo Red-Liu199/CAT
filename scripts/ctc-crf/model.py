@@ -196,13 +196,14 @@ class ConformerNet(nn.Module):
             kernel_size: int = 32,
             multiplier: int = 1,
             dropout: float = 0.1,
-            delta_feats=False):
+            delta_feats=False,
+            subsample_norm: str = 'none'):
         super().__init__()
 
         if delta_feats:
             idim = idim // 3
         self.conv_subsampling = nnlayers.Conv2dSubdampling(
-            conv_multiplier, stacksup=delta_feats)
+            conv_multiplier, norm=subsample_norm, stacksup=delta_feats)
         self.linear_drop = nn.Sequential(OrderedDict({
             'linear': nn.Linear((idim // 4) * conv_multiplier, hdim),
             'dropout': nn.Dropout(dropout_in)
@@ -246,9 +247,10 @@ class ConformerLSTM(ConformerNet):
             kernel_size: int = 32,
             multiplier: int = 1,
             dropout: float = 0.1,
-            delta_feats: bool = False):
+            delta_feats: bool = False,
+            subsample_norm: str = 'none'):
         super().__init__(num_cells, idim, hdim, num_classes, conv_multiplier=conv_multiplier, dropout_in=dropout_in, res_factor=res_factor,
-                         d_head=d_head, num_heads=num_heads, kernel_size=kernel_size, multiplier=multiplier, dropout=dropout, delta_feats=delta_feats)
+                         d_head=d_head, num_heads=num_heads, kernel_size=kernel_size, multiplier=multiplier, dropout=dropout, delta_feats=delta_feats, subsample_norm=subsample_norm)
 
         self.lstm = nnlayers._LSTM(
             idim=hdim, hdim=hdim_lstm, n_layers=num_lstm_layers, dropout=dropout_lstm)
