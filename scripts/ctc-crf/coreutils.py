@@ -93,6 +93,8 @@ class Manager(object):
 
     def run(self, train_sampler: torch.utils.data.distributed.DistributedSampler, trainloader: torch.utils.data.DataLoader, testloader: torch.utils.data.DataLoader, args: argparse.Namespace):
 
+        for attr in ['checksdir', 'rank', 'gpu', 'dir', 'checkall']:
+            assert hasattr(args, attr)
         self.model.train()
         while True:
             self.epoch += 1
@@ -126,10 +128,16 @@ class Manager(object):
             elif self.rank != 0 or self.DEBUG:
                 continue
             elif state == 0 or state == 1:
-                self.save("checkpoint", args.checksdir)
+                if args.checkall:
+                    checkpoint = os.path.join(
+                        args.checksdir, "checkpoint.{:03}.pt".format(self.epoch))
+                else:
+                    checkpoint = os.path.join(args.checksdir, "checkpoint.pt")
+
+                self.save(checkpoint)
                 if state == 1:
-                    shutil.copyfile(
-                        f"{args.checksdir}/checkpoint.pt", f"{args.checksdir}/bestckpt.pt")
+                    shutil.copyfile(checkpoint, os.path.join(
+                        args.checksdir, "bestckpt.pt"))
             else:
                 raise ValueError(f"Unknown state: {state}.")
 
@@ -139,8 +147,9 @@ class Manager(object):
         The checkpoint file would be located at `PATH/name.pt`
         or `name.pt` if `PATH` is empty.
         """
-
-        PATH = os.path.join(PATH, name+'.pt')
+        if name[-3:] != '.pt':
+            name += '.pt'
+        PATH = os.path.join(PATH, name)
         torch.save(OrderedDict({
             'model': self.model.state_dict(),
             'scheduler': self.scheduler.state_dict(),
@@ -612,6 +621,8 @@ def BasicDDPParser(istraining: bool = True, prog: str = '') -> argparse.Argument
 
         parser.add_argument("--debug", action="store_true",
                             help="Configure to debug settings, would overwrite most of the options.")
+        parser.add_argument("--checkall", action="store_true",
+                            help="Save all checkpoints instead only the recent one.")
 
         parser.add_argument("--data", type=str, default=None,
                             help="Location of training/testing data.")

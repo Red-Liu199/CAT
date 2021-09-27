@@ -44,10 +44,23 @@ echo "  Ensure modeling unit of transducer is the same as that of extra LM."
 dec_dir=$dir/${mode}-${beam_size}-$lm_weight
 mkdir -p $dec_dir
 mkdir -p $dir/enc
+checkpoint=$dir/checks/$check
+md5=$(md5sum $checkpoint | cut -d ' ' -f 1)
+if [ -f $dir/enc/cinfo.txt ]; then
+    if [ ! $(cat $dir/enc/cinfo.txt) ] || [ "$md5" != $(cat $dir/enc/cinfo.txt) ]; then
+        rm -rf $dir/enc/*
+        echo $md5 > $dir/enc/cinfo.txt
+    fi
+else
+    rm -rf $dir/enc/*
+    echo $md5 > $dir/enc/cinfo.txt
+fi
+unset md5
+
 for set in $(echo $test_set | tr ':' '\n'); do
     echo "> Decoding: $set"
     python3 ctc-crf/parallel_decode.py \
-        --resume=$dir/checks/$check \
+        --resume=$checkpoint \
         --config=$dir/config.json \
         --input_scp=data/all_ark/$set.scp \
         --output_dir=$dec_dir \

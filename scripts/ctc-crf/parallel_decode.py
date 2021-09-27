@@ -101,6 +101,7 @@ def equalLenSplit(scp_in: str, N: int, idx_beg=0, idx_end=-1):
     with open(linfo, 'rb') as fi:
         linfo = pickle.load(fi)
 
+    linfo = [x**1.2 for x in linfo]
     if idx_end == -1:
         idx_end = len(linfo)
 

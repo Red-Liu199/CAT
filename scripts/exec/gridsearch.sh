@@ -5,6 +5,10 @@ opts=$(python exec/parseopt.py '{
             "type": "str",
             "help": "Directory of experiment."
         },
+        "spmodel":{
+            "type": "str",
+            "help": "Sentence piece model location."
+        },
         "n_scp":{
             "type": "str",
             "help": "Scp file to load search data. Expand location: data/all_ark/<n_scp>.scp."
@@ -12,10 +16,6 @@ opts=$(python exec/parseopt.py '{
         "n_text":{
             "type": "str",
             "help": "Ground truth text file to compute WER. Expand location: data/<n_text>/text."
-        },
-        "spmodel":{
-            "type": "str",
-            "help": "Sentence piece model location."
         },
         "--lmdir":{
             "type": "str",
