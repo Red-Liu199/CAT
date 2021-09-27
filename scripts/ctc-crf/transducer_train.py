@@ -11,7 +11,7 @@ and is more non-hard-coding style.
 import coreutils
 import model as model_zoo
 import lm_train as pn_zoo
-import dataset as DataSet
+import dataset as datautils
 from am_train import setPath, main_spawner
 from beam_search_base import ConvMemBuffer
 from _layers import TimeReduction
@@ -24,12 +24,11 @@ from warp_rnnt import rnnt_loss as RNNTLoss
 import warp_rnnt
 if warp_rnnt.__version__ >= '0.7.0':
     from warp_rnnt import fused_rnnt_loss as RNNTFusedLoss
-from typing import Union, Tuple, Sequence, Iterable, Literal, List
+from typing import Union, Tuple, Sequence, Literal, List
 
 import torch
 import torch.nn as nn
 import torch.distributed as dist
-import torch.multiprocessing as mp
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
 
@@ -50,13 +49,13 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         data_format = "hdf5"
         coreutils.highlight_msg(
             "H5py reading might cause error with Multi-GPUs")
-        Dataset = DataSet.SpeechDataset
+        Dataset = datautils.SpeechDataset
         if args.trset is None or args.devset is None:
             raise FileNotFoundError(
                 "With '--hdf5' option, you must specify data location with '--trset' and '--devset'.")
     else:
         data_format = "pickle"
-        Dataset = DataSet.SpeechDatasetPickle
+        Dataset = datautils.SpeechDatasetPickle
 
     if args.trset is None:
         args.trset = os.path.join(args.data, f'{data_format}/tr.{data_format}')
@@ -72,12 +71,12 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
             tr_set.dataset = tr_set.dataset[-int(len(tr_set)*0.1):]
         coreutils.distprint(
             "> Enable data balanced loading.\n  It takes a while to initialize...", args.gpu)
-        train_sampler = coreutils.BalanceDistributedSampler(
+        train_sampler = datautils.BalancedDistributedSampler(
             tr_set, args.batch_size, args.len_norm)
         trainloader = DataLoader(
             tr_set, batch_sampler=train_sampler,
             num_workers=args.workers, pin_memory=True,
-            collate_fn=DataSet.sortedPadCollateTransducer())
+            collate_fn=datautils.sortedPadCollateTransducer())
         coreutils.distprint(
             "> Seq length info for balanced loading generated.", args.gpu)
     else:
@@ -86,7 +85,7 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         trainloader = DataLoader(
             tr_set, batch_size=args.batch_size//ngpus_per_node, shuffle=(train_sampler is None),
             num_workers=args.workers, pin_memory=True,
-            sampler=train_sampler, collate_fn=DataSet.sortedPadCollateTransducer())
+            sampler=train_sampler, collate_fn=datautils.sortedPadCollateTransducer())
 
     setattr(args, 'n_steps',
             train_sampler.total_size//args.batch_size//args.grad_accum_fold)
@@ -96,7 +95,7 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
     testloader = DataLoader(
         test_set, batch_size=args.batch_size//ngpus_per_node, shuffle=(test_sampler is None),
         num_workers=args.workers, pin_memory=True,
-        sampler=test_sampler, collate_fn=DataSet.sortedPadCollateTransducer())
+        sampler=test_sampler, collate_fn=datautils.sortedPadCollateTransducer())
 
     manager = coreutils.Manager(build_model, args)
 
@@ -197,7 +196,8 @@ class Transducer(nn.Module):
         self._compact = compact and isinstance(jointnet, JointNet)
         self.isfused = fused
         if self.isfused and not self._compact:
-            print("Transducer: setting isfused=True and compact=False is conflict. Force compact=True")
+            print(
+                "Transducer: setting isfused=True and compact=False is conflict. Force compact=True")
             self._compact = True
         assert isinstance(time_reduction, int) and time_reduction >= 1
         if time_reduction == 1:

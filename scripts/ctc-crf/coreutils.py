@@ -8,20 +8,18 @@ import os
 import argparse
 import time
 import json
-import math
 import shutil
 import scheduler
 import numpy as np
 from collections import OrderedDict
 from monitor import plot_monitor
 from _specaug import SpecAug
-from typing import Callable, Union, Sequence, Iterable, Optional, Iterator, List, Any
+from typing import Callable, Union, Sequence, Iterable, List, Any
 from datetime import datetime
 
 import torch
 import torch.nn as nn
 import torch.distributed as dist
-from torch.utils.data.distributed import DistributedSampler
 from torch.cuda.amp import autocast, GradScaler
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.tensorboard import SummaryWriter
@@ -666,74 +664,6 @@ def convert_syncBatchNorm(model: nn.Module) -> nn.Module:
         such that it can sync across DDP processes.
     """
     return nn.SyncBatchNorm.convert_sync_batchnorm(model)
-
-
-class BalanceDistributedSampler(DistributedSampler):
-    def __init__(self,
-                 dataset: torch.utils.data.Dataset,
-                 global_batch_size: int,
-                 length_norm: Optional[str] = None,
-                 num_replicas: Optional[int] = None,
-                 rank: Optional[int] = None,
-                 shuffle: bool = True,
-                 seed: int = 0,
-                 drop_last: bool = False) -> None:
-        super().__init__(dataset, num_replicas=num_replicas, rank=rank,
-                         shuffle=shuffle, seed=seed, drop_last=drop_last)
-
-        if global_batch_size < self.num_replicas or global_batch_size > len(self.dataset):
-            raise RuntimeError(
-                "Invalid global batch size: ", global_batch_size)
-
-        if not hasattr(dataset, 'get_seq_len'):
-            raise RuntimeError(
-                f"{type(dataset)} has not implement Dataset.get_seq_len method, which is required for BalanceDistributedSampler.")
-
-        # scan data length, this might take a while
-        self._lens = dataset.get_seq_len()
-
-        self.g_batch = int(global_batch_size)
-        self._l_norm = length_norm
-
-    def __iter__(self):
-        # DistributedSampler.__init__()
-        if self.shuffle:
-            # deterministically shuffle based on epoch and seed
-            g = torch.Generator()
-            g.manual_seed(self.seed + self.epoch)
-            # type: ignore[arg-type]
-            indices = torch.randperm(len(self.dataset), generator=g).tolist()
-        else:
-            indices = list(range(len(self.dataset)))  # type: ignore[arg-type]
-
-        if not self.drop_last:
-            # add extra samples to make it evenly divisible
-            padding_size = self.total_size - len(indices)
-            if padding_size <= len(indices):
-                indices += indices[:padding_size]
-            else:
-                indices += (indices * math.ceil(padding_size /
-                            len(indices)))[:padding_size]
-        else:
-            # remove tail of data to make it evenly divisible.
-            indices = indices[:self.total_size]
-        assert len(indices) == self.total_size
-
-        # Add implementation here
-        partial_indices = []
-        offset = self.rank
-        for idx_g_batch in range(0, self.total_size, self.g_batch):
-            batches = sorted(
-                indices[idx_g_batch:idx_g_batch+self.g_batch], key=lambda i: self._lens[i], reverse=True)
-
-            # NOTE (Huahuan): L**1.3 is good for Conformer-S and batch size 240/5 for RTX 3090
-            batches = group_by_lens(
-                batches, [self._lens[i] for i in batches], self.num_replicas, _norm=self._l_norm)
-            # make it more balanced with gradient accumulation
-            partial_indices.append(batches[offset])
-            offset = (offset + 1) % self.num_replicas
-
-        return iter(partial_indices)
 
 
 def group_by_lens(src_l: List[Any], linfo: List[int], N: int, _norm: Union[None, str] = None) -> List[List[Any]]:

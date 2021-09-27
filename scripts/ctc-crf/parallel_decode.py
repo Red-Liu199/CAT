@@ -8,7 +8,7 @@ Parallel decode with multi-gpu and single-gpu-multi-process support
 
 import coreutils
 from lm_train import build_model as lm_build
-from dataset import ScpDataset, TestPadCollate
+from dataset import ScpDataset, TestPadCollate, FeatureReader
 from transducer_train import build_model  # , Transducer, ConvJointNet
 # from beam_search_base import BeamSearchRNNTransducer, BeamSearchConvTransducer, ConvMemBuffer
 from beam_search_transducer import TransducerBeamSearcher
@@ -85,10 +85,11 @@ def equalLenSplit(scp_in: str, N: int, idx_beg=0, idx_end=-1):
     if not os.path.isfile(sorted_scp) or not os.path.isfile(linfo):
         print("> Generate sorted dataset, might take a while...")
         dataset = []
+        freader = FeatureReader()
         with open(scp_in, 'r') as fi:
             for line in fi:
                 key, m_path = line.split()
-                mat = kaldiio.load_mat(m_path)
+                mat = freader(m_path)
                 dataset.append([key, m_path, mat.shape[0]])
         dataset = sorted(dataset, key=lambda item: item[2], reverse=True)
         with open(sorted_scp, 'w') as fo:

@@ -12,7 +12,8 @@
 
 ### WER
 ```
-
+%WER 21.40 [ 1220 / 5700, 151 ins, 185 del, 884 sub ]
+%WER 24.53 [ 2044 / 8334, 310 ins, 304 del, 1430 sub ]
 ```
 
 ### Monitor figure

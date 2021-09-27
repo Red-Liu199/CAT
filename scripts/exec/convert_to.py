@@ -72,13 +72,15 @@ if __name__ == "__main__":
     else:
         # type: Callable[[int], int]
         formated_L = eval(f'lambda L: {args.describe}')
+
+    f_opened = {}
     with open(args.scp, 'r') as fi:
         for line in tqdm(fi, total=num_lines):
             key, loc_ark = line.split()
 
             label = label_dict[key]
             weight = weight_dict[key]
-            feature = kaldiio.load_mat(loc_ark)
+            feature = kaldiio.load_mat(loc_ark, fd_dict=f_opened)
 
             # if formated_L(feature.shape[0]) < ctc_len(label) or feature.shape[0] > L_MAX:
             if feature.shape[0] > L_MAX:
@@ -92,6 +94,8 @@ if __name__ == "__main__":
             else:
                 pickle_dataset.append([key, loc_ark, label, weight])
 
+    for f in f_opened.values():
+        f.close()
     print(f"Remove {count} unqualified sequences in total.")
     if args.format == "pickle":
         with open(args.output_path, 'wb') as fo:

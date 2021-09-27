@@ -9,11 +9,26 @@ import kaldiio
 import h5py
 import coreutils
 import pickle
-from kaldiio import ReadHelper
-from typing import Union, Tuple, Sequence, List
+import math
+from typing import Tuple, Sequence, List, Optional
 
 import torch
 from torch.utils.data import Dataset
+import torch.distributed as dist
+from torch.utils.data.distributed import DistributedSampler
+
+
+class FeatureReader:
+    def __init__(self) -> None:
+        self._opened_fd = {}
+
+    def __call__(self, arkname: str):
+        return kaldiio.load_mat(arkname, fd_dict=self._opened_fd)
+
+    def __del__(self):
+        for f in self._opened_fd.values():
+            f.close()
+        del self._opened_fd
 
 
 class SpeechDataset(Dataset):
@@ -65,21 +80,29 @@ class SpeechDatasetPickle(Dataset):
     def __init__(self, pickle_path):
         with open(pickle_path, 'rb') as f:
             self.dataset = pickle.load(f)
+        self.freader = FeatureReader()
 
     def get_seq_len(self) -> List[int]:
         _ls = []
         for _, feature_path, _, _ in self.dataset:
-            mat = kaldiio.load_mat(feature_path)
+            mat = self.freader(feature_path)
             _ls.append(mat.shape[0])
 
+        '''
+        Files are opened in the parent process, so we close them.
+        In __getitem__ function, they would be created again. This avoids
+        errors with dataloder num_worker >= 1.
+        '''
+        del self.freader
+        self.freader = FeatureReader()
         return _ls
 
     def __len__(self):
         return len(self.dataset)
 
     def __getitem__(self, idx):
-        key, feature_path, label, weight = self.dataset[idx]
-        mat = kaldiio.load_mat(feature_path)
+        _, feature_path, label, weight = self.dataset[idx]
+        mat = self.freader(feature_path)
         return torch.tensor(mat, dtype=torch.float), torch.IntTensor(label), torch.tensor(weight, dtype=torch.float)
 
 
@@ -89,10 +112,11 @@ class SpeechDatasetMemPickle(Dataset):
             self.dataset = pickle.load(f)
 
         self.data_batch = []
+        freader = FeatureReader()
 
         for data in self.dataset:
             key, feature_path, label, weight = data
-            mat = kaldiio.load_mat(feature_path)
+            mat = freader(feature_path)
             self.data_batch.append(
                 [torch.tensor(mat, dtype=torch.float), torch.IntTensor(label), torch.tensor(weight, dtype=torch.float)])
 
@@ -109,14 +133,71 @@ class InferDataset(Dataset):
         with open(scp_path, 'r') as fi:
             lines = fi.readlines()
         self.dataset = [x.split() for x in lines]
+        self.freader = FeatureReader()
 
     def __len__(self):
         return len(self.dataset)
 
     def __getitem__(self, index):
         key, feature_path = self.dataset[index]
-        mat = kaldiio.load_mat(feature_path)
+        mat = self.freader(feature_path)
         return key, torch.tensor(mat, dtype=torch.float), torch.LongTensor([mat.shape[0]])
+
+
+class ScpDataset(Dataset):
+    """
+    Read data from scp file ranging [idx_beg, idx_end)
+    """
+
+    def __init__(self, scp_file, idx_beg: int = 0, idx_end: int = -1) -> None:
+        super().__init__()
+
+        if not os.path.isfile(scp_file):
+            raise FileNotFoundError(f"{scp_file} is not a valid file.")
+
+        assert idx_beg >= 0 and (idx_end == -1 or idx_end > idx_beg)
+
+        dataset = []
+        with open(scp_file, 'r') as fi:
+            for line in fi:
+                dataset.append(line.split())
+
+        if idx_end == -1:
+            self._dataset = dataset[idx_beg:]
+        else:
+            self._dataset = dataset[idx_beg:idx_end]
+
+        self.freader = FeatureReader()
+
+    def __len__(self) -> int:
+        return len(self._dataset)
+
+    def __getitem__(self, index: int) -> Tuple[str, torch.FloatTensor]:
+        key, mat_path = self._dataset[index]
+        mat = self.freader(mat_path)
+        return [key, torch.tensor(mat, dtype=torch.float)]
+
+
+class CorpusDataset(Dataset):
+    def __init__(self, pickle_path: str) -> None:
+        super().__init__()
+        assert os.path.isfile(pickle_path)
+
+        self.dataset = None
+        with open(pickle_path, 'rb') as fi:
+            self._pathbin = pickle.load(fi)
+            self._seeks = pickle.load(fi)
+
+    def __len__(self):
+        return len(self._seeks)
+
+    def __getitem__(self, index: int) -> torch.LongTensor:
+        if self.dataset is None:
+            self.dataset = open(self._pathbin, 'rb')
+
+        self.dataset.seek(self._seeks[index], 0)
+        data = pickle.load(self.dataset)    # type: Sequence[int]
+        return torch.LongTensor(data)
 
 
 class sortedPadCollate():
@@ -181,38 +262,6 @@ class sortedPadCollateTransducer():
         return mats, input_lengths, labels, label_lengths, weights
 
 
-class ScpDataset(Dataset):
-    """
-    Read data from scp file ranging [idx_beg, idx_end)
-    """
-
-    def __init__(self, scp_file, idx_beg: int = 0, idx_end: int = -1) -> None:
-        super().__init__()
-
-        if not os.path.isfile(scp_file):
-            raise FileNotFoundError(f"{scp_file} is not a valid file.")
-
-        assert idx_beg >= 0 and (idx_end == -1 or idx_end > idx_beg)
-
-        dataset = []
-        with open(scp_file, 'r') as fi:
-            for line in fi:
-                dataset.append(line.split())
-
-        if idx_end == -1:
-            self._dataset = dataset[idx_beg:]
-        else:
-            self._dataset = dataset[idx_beg:idx_end]
-
-    def __len__(self) -> int:
-        return len(self._dataset)
-
-    def __getitem__(self, index: int) -> Tuple[str, torch.FloatTensor]:
-        key, mat_path = self._dataset[index]
-        mat = kaldiio.load_mat(mat_path)
-        return [key, torch.tensor(mat, dtype=torch.float)]
-
-
 class TestPadCollate():
     """Collect data into batch and add padding.
 
@@ -234,28 +283,6 @@ class TestPadCollate():
         lengths = torch.LongTensor([feature.size(0) for _, feature in batch])
 
         return keys, mats, lengths
-
-
-class CorpusDataset(Dataset):
-    def __init__(self, pickle_path: str) -> None:
-        super().__init__()
-        assert os.path.isfile(pickle_path)
-
-        self.dataset = None
-        with open(pickle_path, 'rb') as fi:
-            self._pathbin = pickle.load(fi)
-            self._seeks = pickle.load(fi)
-
-    def __len__(self):
-        return len(self._seeks)
-
-    def __getitem__(self, index: int) -> torch.LongTensor:
-        if self.dataset is None:
-            self.dataset = open(self._pathbin, 'rb')
-
-        self.dataset.seek(self._seeks[index], 0)
-        data = pickle.load(self.dataset)    # type: Sequence[int]
-        return torch.LongTensor(data)
 
 
 class sortedPadCollateLM():
@@ -290,3 +317,79 @@ class sortedPadCollateLM():
         weights = torch.empty(1)
 
         return xs, input_lengths, labels, label_lengths, weights
+
+
+class BalancedDistributedSampler(DistributedSampler):
+    def __init__(self,
+                 dataset: torch.utils.data.Dataset,
+                 global_batch_size: int,
+                 length_norm: Optional[str] = None,
+                 num_replicas: Optional[int] = None,
+                 rank: Optional[int] = None,
+                 shuffle: bool = True,
+                 seed: int = 0,
+                 drop_last: bool = False) -> None:
+        super().__init__(dataset, num_replicas=num_replicas, rank=rank,
+                         shuffle=shuffle, seed=seed, drop_last=drop_last)
+
+        if global_batch_size < self.num_replicas or global_batch_size > len(self.dataset):
+            raise RuntimeError(
+                "Invalid global batch size: ", global_batch_size)
+
+        if not hasattr(dataset, 'get_seq_len'):
+            raise RuntimeError(
+                f"{type(dataset)} has not implement Dataset.get_seq_len method, which is required for BalanceDistributedSampler.")
+
+        # scan data length, this might take a while
+        if rank is None:
+            rank = dist.get_rank()
+        if rank == 0:
+            seq_lens = dataset.get_seq_len()
+        else:
+            seq_lens = [0 for _ in range(len(self.dataset))]
+        dist.broadcast_object_list(seq_lens)
+
+        self._lens = seq_lens
+
+        self.g_batch = int(global_batch_size)
+        self._l_norm = length_norm
+
+    def __iter__(self):
+        # DistributedSampler.__iter__()
+        if self.shuffle:
+            # deterministically shuffle based on epoch and seed
+            g = torch.Generator()
+            g.manual_seed(self.seed + self.epoch)
+            # type: ignore[arg-type]
+            indices = torch.randperm(len(self.dataset), generator=g).tolist()
+        else:
+            indices = list(range(len(self.dataset)))  # type: ignore[arg-type]
+
+        if not self.drop_last:
+            # add extra samples to make it evenly divisible
+            padding_size = self.total_size - len(indices)
+            if padding_size <= len(indices):
+                indices += indices[:padding_size]
+            else:
+                indices += (indices * math.ceil(padding_size /
+                            len(indices)))[:padding_size]
+        else:
+            # remove tail of data to make it evenly divisible.
+            indices = indices[:self.total_size]
+        assert len(indices) == self.total_size
+
+        # Add implementation here
+        partial_indices = []
+        offset = self.rank
+        for idx_g_batch in range(0, self.total_size, self.g_batch):
+            batches = sorted(
+                indices[idx_g_batch:idx_g_batch+self.g_batch], key=lambda i: self._lens[i], reverse=True)
+
+            # NOTE (Huahuan): L**1.3 is good for Conformer-S and batch size 240/5 for RTX 3090
+            batches = coreutils.group_by_lens(
+                batches, [self._lens[i] for i in batches], self.num_replicas, _norm=self._l_norm)
+            # make it more balanced with gradient accumulation
+            partial_indices.append(batches[offset])
+            offset = (offset + 1) % self.num_replicas
+
+        return iter(partial_indices)
