@@ -10,7 +10,6 @@ import argparse
 import pickle
 import h5py
 from tqdm import tqdm
-from typing import Callable
 
 
 def ctc_len(label):

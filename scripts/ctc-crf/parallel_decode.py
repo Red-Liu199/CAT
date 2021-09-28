@@ -19,8 +19,6 @@ import json
 import pickle
 import argparse
 import sentencepiece as spm
-from tqdm import tqdm
-import kaldiio
 from collections import OrderedDict
 from typing import Union, List, Tuple
 
@@ -213,7 +211,11 @@ def decode(args, beamsearcher, testloader, device, local_writer):
     with open(local_writer, 'w') as fi:
         for key, pred in results:
             assert len(key) == 1
-            fi.write("{} {}\n".format(key[0], pred[0]))
+            if args.lower:
+                seq = pred[0].lower()
+            else:
+                seq = pred[0].upper()
+            fi.write("{} {}\n".format(key[0], seq))
 
     f_enc_hid.close()
 
@@ -318,6 +320,7 @@ if __name__ == '__main__':
                         help="SPM model location.")
     parser.add_argument("--nj", type=int, default=2)
     parser.add_argument("--cpu", action='store_true', default=False)
+    parser.add_argument("--lower", action='store_true', default=False)
 
     args = parser.parse_args()
 

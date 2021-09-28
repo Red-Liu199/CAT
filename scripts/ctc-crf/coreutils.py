@@ -83,7 +83,8 @@ class Manager(object):
         self.step = 0       # type:int
 
         if args.resume is not None:
-            print(f"[GPU {args.rank}]: Resuming from: {args.resume}")
+            distprint(
+                f"[GPU {args.rank}]: Resuming from: {args.resume}", args.gpu)
             loc = f'cuda:{args.gpu}'
             checkpoint = torch.load(
                 args.resume, map_location=loc)  # type: OrderedDict
@@ -668,7 +669,8 @@ def convert_syncBatchNorm(model: nn.Module) -> nn.Module:
 
 def group_by_lens(src_l: List[Any], linfo: List[int], N: int, _norm: Union[None, str] = None) -> List[List[Any]]:
     """Split `src_l` by `linfo` into `N` parts.
-
+    The split is done by a kind of greedy method, considering
+    balancing the sum of lengths in each part and their paddings.
     Assume src_l is sorted by descending order.
     """
     len_src = len(linfo)
@@ -690,7 +692,7 @@ def group_by_lens(src_l: List[Any], linfo: List[int], N: int, _norm: Union[None,
     cnt_interval = 0
     cnt_parts = 0
     for i, l in enumerate(linfo):
-        cnt_interval += l
+        cnt_interval += linfo[indices[-1]]
         if cnt_interval >= avg:
             indices.append(i+1)
             cnt_parts += 1
@@ -702,3 +704,160 @@ def group_by_lens(src_l: List[Any], linfo: List[int], N: int, _norm: Union[None,
     assert len(indices) == N+1
 
     return [src_l[indices[i]:indices[i+1]] for i in range(N)]
+
+
+def test_memory(args, manager: Manager, dataset: torch.utils.data.Dataset, collect_fn, fix_batch=True):
+    """Test the batch size.
+
+    WARNING: This function would modify the model and optimizer, 
+             do not invoke this function with any train of eval process.
+
+    Return largest batch size, which is power of 2.
+    As for BalancedDistributedSampler, this function would also
+    ...registers a best length normalization formula.
+    """
+    import math
+    from torch.utils.data import DataLoader
+    from dataset import BalancedDistributedSampler
+
+    class BalancedWrapper(BalancedDistributedSampler):
+
+        def set_batch(self, N: int):
+            self.g_batch = N
+
+        def set_norm(self, norm: str):
+            self._l_norm = norm
+
+        def __iter__(self):
+            # get `batch_size` longest seqs in dataset.
+            Ls = np.asarray(self._lens)
+            topN = np.argpartition(
+                Ls, self.g_batch)[-self.g_batch:]  # type: np.ndarray
+
+            batches = sorted(
+                topN.tolist(), key=lambda i: self._lens[i], reverse=True)
+
+            batches = group_by_lens(
+                batches, [self._lens[i] for i in batches], self.num_replicas, _norm=self._l_norm)
+            # make it more balanced with gradient accumulation
+            partial_indices = [batches[self.rank]]
+            return iter(partial_indices)
+
+    def test_step(loader, model, optimizer):
+        scaler = GradScaler(enabled=enableAMP)
+        for logits, input_lengths, labels, label_lengths, _ in loader:
+            logits, labels, input_lengths, label_lengths = logits.cuda(
+                args.gpu, non_blocking=True), labels, input_lengths, label_lengths
+
+            # we divide loss with fold since we want the gradients to be divided by fold
+            with autocast(enabled=enableAMP):
+                loss = model(
+                    logits, labels, input_lengths, label_lengths)
+
+            normalized_loss = loss.detach() * logits.size(0)
+
+            t_batch_size = logits.new_tensor(logits.size(0))
+            dist.all_reduce(t_batch_size)
+            loss.data = normalized_loss * (world_size / t_batch_size)
+
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+            optimizer.zero_grad()
+
+    for attr in ['batch_size', 'amp', 'rank', 'gpu', 'databalance']:
+        assert hasattr(args, attr)
+
+    assert args.databalance
+    enableAMP = args.amp
+    world_size = dist.get_world_size()
+    wrapped_sampler = BalancedWrapper(dataset, world_size)
+
+    N = 2**math.ceil(math.log2(world_size))
+    N_limit = 0
+
+    # search over batch size
+    wrapped_sampler.set_norm(None)
+    OOM = [None for _ in range(world_size)]
+    OOM_rank = False
+    while not fix_batch:
+        distprint(
+            f"> Current limit: {N_limit}, try batch size: {N}", args.rank)
+        try:
+            wrapped_sampler.set_batch(N)
+            dummyloader = DataLoader(
+                dataset, batch_sampler=wrapped_sampler,
+                num_workers=1, collate_fn=collect_fn)
+            test_step(dummyloader, manager.model, manager.scheduler.optimizer)
+            mem = torch.cuda.max_memory_allocated(args.gpu)
+            mem_list = [None for _ in range(world_size)]
+            dist.all_gather_object(mem_list, mem)
+            distprint('  ' + '  '.join(["GPU[{}]: {:.1f}MB".format(i, m/1e6)
+                      for i, m in enumerate(mem_list)]), args.rank)
+        except RuntimeError as err:
+            if 'out of memory' in str(err):
+                print(err)
+            else:
+                raise err
+            OOM_rank = True
+        N_limit = N
+        N *= 2
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
+
+        dist.barrier()
+        dist.all_gather_object(OOM, OOM_rank)
+        if any(OOM):
+            for p in manager.model.parameters():
+                if p.grad is not None:
+                    del p.grad
+            break
+
+    if fix_batch:
+        N_limit = args.batch_size
+
+    # search over l norm
+    factor = 1.00
+    distprint("> Batch size for searching l norm set to:", N_limit)
+    wrapped_sampler.set_batch(N_limit)
+    OOM = [None for _ in range(world_size)]
+    OOM_rank = False
+    mem_dict = {}
+    while factor <= 2.0:
+        l_norm = f'L**{factor:.2f}'
+        distprint(
+            f"> Try norm '{l_norm}'", args.rank)
+        try:
+            wrapped_sampler.set_norm(l_norm)
+            dummyloader = DataLoader(
+                dataset, batch_sampler=wrapped_sampler,
+                num_workers=1, collate_fn=collect_fn)
+            test_step(dummyloader, manager.model, manager.scheduler.optimizer)
+            mem = torch.cuda.max_memory_allocated(args.gpu)
+            mem_list = [None for _ in range(world_size)]
+            dist.all_gather_object(mem_list, mem)
+            mem_dict[l_norm] = max(mem_list)
+            distprint('  ' + '  '.join(["GPU[{}]: {:.1f}MB".format(i, m/1e6)
+                      for i, m in enumerate(mem_list)]), args.rank)
+        except RuntimeError as err:
+            if 'out of memory' in str(err):
+                print(err)
+            else:
+                raise err
+            OOM_rank = True
+        dist.barrier()
+        dist.all_gather_object(OOM, OOM_rank)
+        factor += 0.05
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
+        if OOM:
+            for p in manager.model.parameters():
+                if p.grad is not None:
+                    del p.grad
+
+    if mem_dict is {}:
+        l_norm = 'L'
+    else:
+        l_norm = min(mem_dict.keys(), key=lambda k: mem_dict[k])
+    distprint(
+        f"> Recommend configure: batch size {N_limit} with norm formula '{l_norm}'", args.rank)

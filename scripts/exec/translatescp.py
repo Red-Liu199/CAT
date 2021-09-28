@@ -1,7 +1,6 @@
 
 import os
-import kaldiio
-from kaldiio import ReadHelper, WriteHelper
+
 
 if __name__ == "__main__":
 

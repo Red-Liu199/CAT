@@ -39,7 +39,6 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
     torch.cuda.set_device(gpu)
 
     args.rank = args.rank * ngpus_per_node + gpu
-    print(f"Use GPU: local[{args.gpu}] | global[{args.rank}]")
 
     dist.init_process_group(
         backend=args.dist_backend, init_method=args.dist_url,
@@ -63,12 +62,15 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         args.devset = os.path.join(
             args.data, f'{data_format}/cv.{data_format}')
 
+    manager = coreutils.Manager(build_model, args)
+
     tr_set = Dataset(args.trset)
     test_set = Dataset(args.devset)
 
-    if args.databalance:
+    if args.databalance and not args.test_mem:
         if args.debug:
             tr_set.dataset = tr_set.dataset[-int(len(tr_set)*0.1):]
+
         coreutils.distprint(
             "> Enable data balanced loading.\n  It takes a while to initialize...", args.gpu)
         train_sampler = datautils.BalancedDistributedSampler(
@@ -87,6 +89,11 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
             num_workers=args.workers, pin_memory=True,
             sampler=train_sampler, collate_fn=datautils.sortedPadCollateTransducer())
 
+    if args.test_mem:
+        coreutils.test_memory(
+            args, manager, tr_set, datautils.sortedPadCollateTransducer())
+        return
+
     setattr(args, 'n_steps',
             train_sampler.total_size//args.batch_size//args.grad_accum_fold)
 
@@ -96,8 +103,6 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         test_set, batch_size=args.batch_size//ngpus_per_node, shuffle=(test_sampler is None),
         num_workers=args.workers, pin_memory=True,
         sampler=test_sampler, collate_fn=datautils.sortedPadCollateTransducer())
-
-    manager = coreutils.Manager(build_model, args)
 
     # get GPU info
     gpu_info = coreutils.gather_all_gpu_info(args.gpu)
@@ -592,6 +597,8 @@ def build_model(args, configuration: dict, dist: bool = True, verbose: bool = Tr
 
 if __name__ == "__main__":
     parser = coreutils.BasicDDPParser()
+    parser.add_argument("--test-mem", action="store_true",
+                        help="Test memory print with and exit.")
     parser.add_argument("--h5py", action="store_true",
                         help="Load data with H5py, defaultly use pickle (recommended).")
     parser.add_argument("--databalance", action="store_true",
