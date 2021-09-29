@@ -14,7 +14,8 @@ import lm_train as pn_zoo
 import dataset as datautils
 from am_train import setPath, main_spawner
 from beam_search_base import ConvMemBuffer
-from _layers import TimeReduction
+from _layers import TimeReduction, CausalConv2d
+from _specaug import SpecAug
 
 import os
 import argparse
@@ -193,7 +194,9 @@ class Transducer(nn.Module):
                  jointnet: nn.Module = None,
                  compact: bool = False,
                  fused: bool = False,
-                 time_reduction: int = 1):
+                 time_reduction: int = 1,
+                 decoder_mask_range: float = 0.1,
+                 num_decoder_mask: int = -1):
         super().__init__()
         self.encoder = encoder
         self.decoder = decoder
@@ -210,6 +213,12 @@ class Transducer(nn.Module):
         else:
             self._t_reduction = TimeReduction(time_reduction)
 
+        if num_decoder_mask != -1:
+            self._pn_mask = SpecAug(time_mask_width_range=decoder_mask_range,
+                                    num_time_mask=num_decoder_mask, apply_freq_mask=False, apply_time_warp=False)
+        else:
+            self._pn_mask = None
+
     def forward(self, inputs: torch.FloatTensor, targets: torch.LongTensor, input_lengths: torch.LongTensor, target_lengths: torch.LongTensor) -> torch.FloatTensor:
 
         output_encoder, o_lens = self.encoder(inputs, input_lengths)
@@ -220,6 +229,10 @@ class Transducer(nn.Module):
         padded_targets = torch.cat(
             [targets.new_zeros((targets.size(0), 1)), targets], dim=-1)
         output_decoder, _ = self.decoder(padded_targets)
+
+        if self._pn_mask is not None:
+            output_decoder, _ = self._pn_mask(output_decoder, target_lengths+1)
+
         if self._compact:
             packed_enc = PackedSequence(output_encoder, o_lens)
             packed_dec = PackedSequence(output_decoder, target_lengths+1)
@@ -353,44 +366,6 @@ class JointNet(nn.Module):
         outs = self.forward(*args, **kwargs)
         self._skip_softmax = False
         return outs
-
-
-class CausalConv2d(nn.Module):
-    """
-    Causal 2d-conv. Applied to (N, T, U, K) dim tensors.
-
-    Args:
-        in_channels  (int): the input dimension (namely K)
-        out_channels (int): the output dimension
-        kernel_size  (int): the kernel size (kernel is square)
-    """
-
-    def __init__(self, in_channels: int, out_channels: int, kernel_size: Union[int, Tuple[int, int]], islast: bool = False):
-        super().__init__()
-        if in_channels < 1 or out_channels < 1:
-            raise ValueError(
-                f"Invalid initialization for CausalConv2d: {in_channels}, {out_channels}, {kernel_size}")
-
-        if islast:
-            self.causal_conv = nn.Sequential(OrderedDict({
-                # seperate convlution
-                'depth_conv': nn.Conv2d(in_channels, in_channels, kernel_size=kernel_size, groups=in_channels),
-                'point_conv': nn.Conv2d(in_channels, out_channels, kernel_size=1)
-                # 'conv': nn.Conv2d(in_channels, out_channels, kernel_size)
-            }))
-        else:
-            # FIXME: I think a normalization is helpful so that the padding won't change the distribution of features.
-            self.causal_conv = nn.Sequential(OrderedDict({
-                # seperate convlution
-                'depth_conv': nn.Conv2d(in_channels, in_channels, kernel_size=kernel_size, groups=in_channels),
-                'point_conv': nn.Conv2d(in_channels, out_channels, kernel_size=1),
-                'relu': nn.ReLU(inplace=True),
-                'bn': nn.BatchNorm2d(in_channels),
-                # 'conv': nn.Conv2d(in_channels, out_channels, kernel_size)
-            }))
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.causal_conv(x)
 
 
 class ConvJointNet(nn.Module):

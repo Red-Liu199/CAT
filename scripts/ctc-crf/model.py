@@ -188,7 +188,7 @@ class ConformerNet(nn.Module):
             idim: int,
             hdim: int,
             num_classes: int,
-            conv_multiplier: int = 144,
+            conv_multiplier: int = None,
             dropout_in: float = 0.2,
             res_factor: float = 0.5,
             d_head: int = 36,
@@ -202,6 +202,8 @@ class ConformerNet(nn.Module):
 
         if delta_feats:
             idim = idim // 3
+        if conv_multiplier is None:
+            conv_multiplier = hdim
         self.conv_subsampling = nnlayers.Conv2dSubdampling(
             conv_multiplier, norm=subsample_norm, stacksup=delta_feats)
         self.linear_drop = nn.Sequential(OrderedDict({

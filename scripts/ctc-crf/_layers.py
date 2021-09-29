@@ -347,6 +347,11 @@ class RelPositionMultiHeadAttention(nn.Module):
         return attn_out
 
 
+class StandardRelPositionalMultiHeadAttention(RelPositionMultiHeadAttention):
+    def __init__(self, idim: int, n_head: int, dropatt: float = 0):
+        super().__init__(idim, n_head, idim//n_head, dropatt=dropatt)
+
+
 class FFModule(nn.Module):
     """Feed-forward module
 
@@ -429,8 +434,12 @@ class MHSAModule(nn.Module):
         super().__init__()
 
         self.ln = nn.LayerNorm(idim)
-        self.mha = RelPositionMultiHeadAttention(
-            idim, num_heads, d_head)
+        if d_head == -1:
+            # a "standard" multi-head attention
+            self.mha = StandardRelPositionalMultiHeadAttention(idim, num_heads)
+        else:
+            self.mha = RelPositionMultiHeadAttention(
+                idim, num_heads, d_head)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor, lens: torch.Tensor, mems=None):
@@ -578,3 +587,41 @@ class TimeReduction(nn.Module):
 
     def forward(self, x: torch.Tensor, x_lens: torch.Tensor):
         return x[:, ::self.N, :].clone(), torch.div(x_lens-1, self.N, rounding_mode='floor') + 1
+
+
+class CausalConv2d(nn.Module):
+    """
+    Causal 2d-conv. Applied to (N, C, T, U) dim tensors.
+
+    Args:
+        in_channels  (int): the input dimension (namely K)
+        out_channels (int): the output dimension
+        kernel_size  (int): the kernel size (kernel is square)
+    """
+
+    def __init__(self, in_channels: int, out_channels: int, kernel_size: Union[int, Tuple[int, int]], islast: bool = False):
+        super().__init__()
+        if in_channels < 1 or out_channels < 1:
+            raise ValueError(
+                f"Invalid initialization for CausalConv2d: {in_channels}, {out_channels}, {kernel_size}")
+
+        if islast:
+            self.causal_conv = nn.Sequential(OrderedDict({
+                # seperate convlution
+                'depth_conv': nn.Conv2d(in_channels, in_channels, kernel_size=kernel_size, groups=in_channels),
+                'point_conv': nn.Conv2d(in_channels, out_channels, kernel_size=1)
+                # 'conv': nn.Conv2d(in_channels, out_channels, kernel_size)
+            }))
+        else:
+            # FIXME: I think a normalization is helpful so that the padding won't change the distribution of features.
+            self.causal_conv = nn.Sequential(OrderedDict({
+                # seperate convlution
+                'depth_conv': nn.Conv2d(in_channels, in_channels, kernel_size=kernel_size, groups=in_channels),
+                'point_conv': nn.Conv2d(in_channels, out_channels, kernel_size=1),
+                'relu': nn.ReLU(inplace=True),
+                'bn': nn.BatchNorm2d(in_channels),
+                # 'conv': nn.Conv2d(in_channels, out_channels, kernel_size)
+            }))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.causal_conv(x)

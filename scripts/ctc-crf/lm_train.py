@@ -12,7 +12,6 @@ import coreutils
 from am_train import setPath, main_spawner
 from dataset import sortedPadCollateLM, CorpusDataset
 
-import os
 import argparse
 from typing import Tuple, Union, List
 from collections import OrderedDict
@@ -20,7 +19,6 @@ from collections import OrderedDict
 import torch
 import torch.nn as nn
 import torch.distributed as dist
-import torch.multiprocessing as mp
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
