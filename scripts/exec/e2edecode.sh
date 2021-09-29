@@ -34,8 +34,6 @@ opts=$(python exec/parseopt.py '{
         }
     }' $0 $*) && eval $opts || exit 1
 
-. ./path.sh
-
 echo "Decoding..."
 mode='beam'
 echo "> Settings: mode=$mode | beam-width=$beam_size | lm-weight=$lm_weight"
@@ -49,11 +47,11 @@ md5=$(md5sum $checkpoint | cut -d ' ' -f 1)
 if [ -f $dir/enc/cinfo.txt ]; then
     if [ ! $(cat $dir/enc/cinfo.txt) ] || [ "$md5" != $(cat $dir/enc/cinfo.txt) ]; then
         rm -rf $dir/enc/*
-        echo $md5 > $dir/enc/cinfo.txt
+        echo $md5 >$dir/enc/cinfo.txt
     fi
 else
     rm -rf $dir/enc/*
-    echo $md5 > $dir/enc/cinfo.txt
+    echo $md5 >$dir/enc/cinfo.txt
 fi
 unset md5
 
@@ -80,18 +78,14 @@ for set in $(echo $test_set | tr ':' '\n'); do
     fi
 done
 
-if [ ! $KALDI_ROOT ]; then
-    echo "No KALDI_ROOT specified."
-    exit 1
-fi
-
 for set in $(echo $test_set | tr ':' '\n'); do
     if [ ! -f data/$set/text ]; then
         echo "No true text found: data/$set/text"
         exit 1
     fi
     if [ -f $dec_dir/decode_${set}.txt ]; then
-        $KALDI_ROOT/src/bin/compute-wer --text --mode=present ark:data/$set/text ark:$dec_dir/decode_${set}.txt | grep WER >>$dec_dir/result
+        echo -n "$set " >>$dec_dir/result
+        python exec/wer.py data/$set/text $dec_dir/decode_${set}.txt --stripid >>$dec_dir/result
     else
         echo "No decoded text found: $dec_dir/decode_${set}.txt"
         exit 1
