@@ -92,7 +92,7 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
 
     if args.test_mem:
         coreutils.test_memory(
-            args, manager, tr_set, datautils.sortedPadCollateTransducer())
+            args, manager, tr_set, datautils.sortedPadCollateTransducer(), True)
         return
 
     setattr(args, 'n_steps',

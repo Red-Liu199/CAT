@@ -46,8 +46,7 @@ def SetupOptim(type_optim: str, paramlist: Iterable[torch.nn.parameter.Parameter
         if torch.__version__ < '1.8.0':
             raise NotImplementedError
 
-        print("Using zero reduncdancy optimizer...")
-        # FIXME: This is still a experimental function in torch 1.9.0
+        # NOTE: This is still a experimental function in torch 1.9.0
         if torch.__version__ < '1.9.0':
             zerooptimizer = ZeroRedundancyOptimizer(
                 params=paramlist, optim=getattr(torch.optim, type_optim), **kwargs)

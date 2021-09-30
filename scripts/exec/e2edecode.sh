@@ -31,6 +31,10 @@ opts=$(python exec/parseopt.py '{
             "type":"int",
             "default": 5,
             "help": "Beam search width. Default: 5"
+        },
+        "--cpu":{
+            "action":"store_true",
+            "help": "Use cpu to decode. Default: False"
         }
     }' $0 $*) && eval $opts || exit 1
 
@@ -38,6 +42,10 @@ echo "Decoding..."
 mode='beam'
 echo "> Settings: mode=$mode | beam-width=$beam_size | lm-weight=$lm_weight"
 echo "  Ensure modeling unit of transducer is the same as that of extra LM."
+
+if [ $cpu == "True" ]; then
+    export CUDA_VISIBLE_DEVICES=""
+fi
 
 dec_dir=$dir/${mode}-${beam_size}-$lm_weight
 mkdir -p $dec_dir
@@ -64,7 +72,6 @@ for set in $(echo $test_set | tr ':' '\n'); do
         --output_dir=$dec_dir \
         --enc-out-dir=$dir/enc \
         --spmodel=$spmodel \
-        --nj=1 \
         --mode=$mode \
         --beam_size=$beam_size \
         --ext-lm-config=$lmdir/lm_config.json \
@@ -72,12 +79,17 @@ for set in $(echo $test_set | tr ':' '\n'); do
         --lm-weight=$lm_weight ||
         exit 1
 
-    if [ -f $dec_dir/decode.0-0.tmp ]; then
-        cat $dec_dir/decode.?-?.tmp | sort -k 1 >$dec_dir/decode_${set}.txt
+    if [ -f $dec_dir/decode.0.tmp ]; then
+        cat $dec_dir/decode.*.tmp | sort -k 1 >$dec_dir/decode_${set}.txt
         rm $dec_dir/*.tmp
     fi
 done
 
+if [ $check != "bestckpt.pt" ]; then
+    echo "Custom checkpoint: $check" >>$dec_dir/result
+fi
+
+echo "Use CPU = $cpu" >>$dec_dir/result
 for set in $(echo $test_set | tr ':' '\n'); do
     if [ ! -f data/$set/text ]; then
         echo "No true text found: data/$set/text"
@@ -92,4 +104,5 @@ for set in $(echo $test_set | tr ':' '\n'); do
     fi
 done
 
+echo "" >> $dec_dir/result
 cat $dec_dir/result

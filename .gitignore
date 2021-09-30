@@ -8,6 +8,7 @@ egs/**/fbank/
 *.ark
 *.scp
 src/ctc_crf/openfst/
+tmp/
 
 # tmp settings
 scripts/cat/

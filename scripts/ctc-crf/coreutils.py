@@ -667,14 +667,15 @@ def convert_syncBatchNorm(model: nn.Module) -> nn.Module:
     return nn.SyncBatchNorm.convert_sync_batchnorm(model)
 
 
-def group_by_lens(src_l: List[Any], linfo: List[int], N: int, _norm: Union[None, str] = None) -> List[List[Any]]:
+def group_by_lens(src_l: List[Any], linfo: List[int], N: int, _norm: Union[None, str] = None, consider_padding:bool=True) -> List[List[Any]]:
     """Split `src_l` by `linfo` into `N` parts.
     The split is done by a kind of greedy method, considering
     balancing the sum of lengths in each part and their paddings.
     Assume src_l is sorted by descending order.
     """
     len_src = len(linfo)
-    assert len_src >= N and len_src == len(src_l)
+    assert len_src >= N, f"list to be split is shorter than number of groups: {len_src} < {N}"
+    assert len_src == len(src_l)
 
     if N == 1:
         return [src_l]
@@ -692,21 +693,23 @@ def group_by_lens(src_l: List[Any], linfo: List[int], N: int, _norm: Union[None,
     cnt_interval = 0
     cnt_parts = 0
     for i, l in enumerate(linfo):
-        cnt_interval += linfo[indices[-1]]
+        cnt_interval += linfo[indices[-1]] if consider_padding else l
+
         if cnt_interval >= avg:
             indices.append(i+1)
             cnt_parts += 1
             cnt_interval = 0
             if cnt_parts < N:
-                avg = sum(linfo[indices[-1]:])/(N-cnt_parts)
+                avg = sum(linfo[i+1:])/(N-cnt_parts)
 
     # indices: len() -> N+1
     assert len(indices) == N+1
+    indices[-1] = len_src
 
     return [src_l[indices[i]:indices[i+1]] for i in range(N)]
 
 
-def test_memory(args, manager: Manager, dataset: torch.utils.data.Dataset, collect_fn, fix_batch=True):
+def test_memory(args, manager: Manager, dataset: torch.utils.data.Dataset, collect_fn, fix_batch=False):
     """Test the batch size.
 
     WARNING: This function would modify the model and optimizer, 

@@ -149,28 +149,31 @@ class ScpDataset(Dataset):
     Read data from scp file ranging [idx_beg, idx_end)
     """
 
-    def __init__(self, scp_file, idx_beg: int = 0, idx_end: int = -1) -> None:
+    def __init__(self, scp_file: str) -> None:
         super().__init__()
 
         if not os.path.isfile(scp_file):
             raise FileNotFoundError(f"{scp_file} is not a valid file.")
 
-        assert idx_beg >= 0 and (idx_end == -1 or idx_end > idx_beg)
-
-        dataset = []
+        self._dataset = []
         with open(scp_file, 'r') as fi:
             for line in fi:
-                dataset.append(line.split())
-
-        if idx_end == -1:
-            self._dataset = dataset[idx_beg:]
-        else:
-            self._dataset = dataset[idx_beg:idx_end]
+                self._dataset.append(line.split())
 
         self.freader = FeatureReader()
 
     def __len__(self) -> int:
         return len(self._dataset)
+
+    def get_seq_len(self) -> List[int]:
+        _ls = []
+        for _, fpath in self._dataset:
+            mat = self.freader(fpath)
+            _ls.append(mat.shape[0])
+
+        del self.freader
+        self.freader = FeatureReader()
+        return _ls
 
     def __getitem__(self, index: int) -> Tuple[str, torch.FloatTensor]:
         key, mat_path = self._dataset[index]
@@ -204,13 +207,13 @@ class sortedPadCollate():
     def __call__(self, batch):
         """Collect data into batch by desending order and add padding.
 
-        Args: 
+        Args:
             batch  : list of (mat, label, weight)
             mat    : torch.FloatTensor
             label  : torch.IntTensor
             weight : torch.FloatTensor
 
-        Return: 
+        Return:
             (logits, input_lengths, labels, label_lengths, weights)
         """
         batches = [(mat, label, weight, mat.size(0))
@@ -233,13 +236,13 @@ class sortedPadCollate():
 class sortedPadCollateTransducer():
     """Collect data into batch by desending order and add padding.
 
-    Args: 
+    Args:
         batch  : list of (mat, label, weight)
         mat    : torch.FloatTensor
         label  : torch.IntTensor
         weight : torch.FloatTensor
 
-    Return: 
+    Return:
         (logits, input_lengths, labels, label_lengths, weights)
     """
 
@@ -265,12 +268,12 @@ class sortedPadCollateTransducer():
 class TestPadCollate():
     """Collect data into batch and add padding.
 
-    Args: 
+    Args:
         batch   : list of (key, feature)
         key     : str
         feature : torch.FloatTensor
-        
-    Return: 
+
+    Return:
         (keys, logits, lengths)
     """
 
@@ -288,11 +291,11 @@ class TestPadCollate():
 class sortedPadCollateLM():
     """Collect data into batch by desending order and add padding.
 
-    Args: 
+    Args:
         batch  : list of label
             label  : torch.LongTensor
 
-    Return: 
+    Return:
         (labels_with_bos, label_lengths, labels_with_eos, `torch.empty(1)`, `torch.empty(1)`)
     """
 
@@ -392,4 +395,37 @@ class BalancedDistributedSampler(DistributedSampler):
             partial_indices.append(batches[offset])
             offset = (offset + 1) % self.num_replicas
 
+        return iter(partial_indices)
+
+
+class InferenceDistributedSampler(BalancedDistributedSampler):
+    def __init__(self, dataset: torch.utils.data.Dataset, length_norm: Optional[str] = None) -> None:
+        world_size = dist.get_world_size()
+        super().__init__(dataset, world_size, length_norm=length_norm, shuffle=False)
+
+    def __iter__(self):
+        indices = list(range(len(self.dataset)))  # type: ignore[arg-type]
+
+        # split samples to make it evenly divisible
+        num_samples = len(self.dataset)
+        res_size = num_samples % self.num_replicas
+        if res_size == 0:
+            res_indices = []
+            indices = list(range(num_samples))
+        else:
+            indices = list(range(num_samples-res_size))
+            res_indices = list(range(num_samples-res_size, num_samples))
+
+        # Add implementation here
+        partial_indices = []
+
+        batches = sorted(indices, key=lambda i: self._lens[i], reverse=True)
+        batches = coreutils.group_by_lens(
+            batches, [self._lens[i] for i in batches],
+            self.num_replicas, self._l_norm, False)
+
+        partial_indices = batches[self.rank]
+
+        if res_size > 0 and self.rank < res_size:
+            partial_indices.append(res_indices[self.rank])
         return iter(partial_indices)

@@ -8,9 +8,8 @@ Parallel decode with multi-gpu and single-gpu-multi-process support
 
 import coreutils
 from lm_train import build_model as lm_build
-from dataset import ScpDataset, TestPadCollate, FeatureReader
-from transducer_train import build_model  # , Transducer, ConvJointNet
-# from beam_search_base import BeamSearchRNNTransducer, BeamSearchConvTransducer, ConvMemBuffer
+from dataset import ScpDataset, TestPadCollate, InferenceDistributedSampler
+from transducer_train import build_model
 from beam_search_transducer import TransducerBeamSearcher
 from beam_search_espnet import BeamSearchTransducer
 
@@ -25,6 +24,7 @@ from typing import Union, List, Tuple
 import torch
 import torch.multiprocessing as mp
 from torch.utils.data import DataLoader
+import torch.distributed as dist
 
 
 def main(args):
@@ -33,115 +33,51 @@ def main(args):
         raise FileNotFoundError(
             "Invalid sentencepiece model location: {}".format(args.spmodel))
     if not torch.cuda.is_available() or args.cpu:
-        coreutils.highlight_msg("Using CPU")
+        print("> Using CPU")
         args.cpu = True
-    # L_set = sum(1 for _ in open(args.input_scp, 'r'))
-    # indices = equalSplitIdx(L_set, world_size)
+
     if args.cpu:
-        world_size = args.nj
+        if args.nj is None:
+            world_size = os.cpu_count()
+        else:
+            world_size = args.nj
     else:
-        world_size = torch.cuda.device_count() * args.nj
+        world_size = torch.cuda.device_count()
+    args.world_size = world_size
 
-    indices, sorted_scp = equalLenSplit(args.input_scp, world_size)
-    args.input_scp = sorted_scp
-
+    # generate encoder output first
+    prefix = os.path.basename(args.input_scp).split('.')[0]
     binary_enc = os.path.join(
-        args.enc_out_dir, f"{os.path.basename(args.input_scp)}.enc.hidB")
+        args.enc_out_dir, f"{prefix}.bin")
     link_enc = os.path.join(
-        args.enc_out_dir, f"{os.path.basename(args.input_scp)}.enc.hidL")
+        args.enc_out_dir, f"{prefix}.lnk")
     if not os.path.isfile(binary_enc) or not os.path.isfile(link_enc):
         print("> Encoder output file not found, generating...")
-        gen_encode_hidden(args, enc_bin=binary_enc, enc_link=link_enc)
-    setattr(args, 'enc_hid_bin', binary_enc)
-    setattr(args, 'enc_hid_link', link_enc)
+        compute_encoder_output(args, enc_bin=binary_enc, enc_link=link_enc)
+    setattr(args, 'enc_bin', binary_enc)
+    setattr(args, 'enc_lnk', link_enc)
 
-    if args.cpu:
-        mp.spawn(main_worker, nprocs=world_size,
-                 args=(args, indices))
-        return None
-
-    if world_size == 1:
-        single_worker(args, device=0)
-        return None
-
-    mp.spawn(main_worker, nprocs=world_size,
-             args=(args, indices))
+    mp.spawn(main_worker, nprocs=world_size, args=(args,))
 
 
-def equalSplitIdx(tot_len: int, N: int, idx_beg=0, idx_end=-1):
-    if idx_end == -1:
-        idx_end = tot_len
-    interval = tot_len // N
-    indices = [interval * i + idx_beg for i in range(N+1)]
-    indices[-1] = idx_end
-    return indices
+def main_worker(gpu: int, args: argparse.Namespace):
 
+    args.gpu = gpu
+    # only support one node
+    args.rank = gpu
+    world_size = args.world_size
 
-def equalLenSplit(scp_in: str, N: int, idx_beg=0, idx_end=-1):
-    sorted_scp = f"{scp_in}.sorted"
-    linfo = f"{scp_in}.lens"
-    if not os.path.isfile(sorted_scp) or not os.path.isfile(linfo):
-        print("> Generate sorted dataset, might take a while...")
-        dataset = []
-        freader = FeatureReader()
-        with open(scp_in, 'r') as fi:
-            for line in fi:
-                key, m_path = line.split()
-                mat = freader(m_path)
-                dataset.append([key, m_path, mat.shape[0]])
-        dataset = sorted(dataset, key=lambda item: item[2], reverse=True)
-        with open(sorted_scp, 'w') as fo:
-            for key, m_path, _ in dataset:
-                fo.write(f"{key} {m_path}\n")
-
-        with open(linfo, 'wb') as fo:
-            pickle.dump([L for _, _, L in dataset], fo)
-
-    with open(linfo, 'rb') as fi:
-        linfo = pickle.load(fi)
-
-    linfo = [x**1.2 for x in linfo]
-    if idx_end == -1:
-        idx_end = len(linfo)
-
-    L = idx_end - idx_beg
-    if L < N:
-        raise RuntimeError(f"len(set) < N: {L} < {N}")
-
-    # greedy not optimal
-    avg = sum(linfo)/N
-    indices = [0]
-    cnt_interval = 0
-    cnt_parts = 0
-    for i, l in enumerate(linfo):
-        cnt_interval += l
-        if cnt_interval >= avg:
-            indices.append(i+1)
-            cnt_parts += 1
-            cnt_interval = 0
-            if cnt_parts < N:
-                avg = sum(linfo[indices[-1]:])/(N-cnt_parts)
-
-    assert len(indices) == N+1
-
-    return indices, sorted_scp
-
-
-def main_worker(rank: int, args: argparse.Namespace, intervals: List[int]):
-
-    gpu = rank // args.nj
     if args.cpu:
         device = 'cpu'
-        half_nprocs = torch.get_num_threads()
-        torch.set_num_threads((half_nprocs * 2)//(len(intervals)-1))
+        torch.set_num_threads((os.cpu_count() * 2)//world_size)
+        dist.init_process_group(
+            backend='gloo', init_method=args.dist_url,
+            world_size=world_size, rank=args.rank)
     else:
         device = gpu
-    single_worker(
-        args, device, idx_beg=intervals[rank], idx_end=intervals[rank+1], suffix='{}-{}'.format(gpu, rank))
-    return None
-
-
-def single_worker(args: argparse.Namespace, device: Union[int, str], idx_beg: int = 0, idx_end: int = -1, suffix: str = '0-0'):
+        dist.init_process_group(
+            backend='nccl', init_method=args.dist_url,
+            world_size=world_size, rank=args.rank)
 
     if device != 'cpu':
         torch.cuda.set_device(device)
@@ -152,35 +88,27 @@ def single_worker(args: argparse.Namespace, device: Union[int, str], idx_beg: in
     else:
         model, ext_lm = gen_model(args, device, use_ext_lm=True)
 
-    testset = ScpDataset(args.input_scp, idx_beg=idx_beg, idx_end=idx_end)
+    testset = ScpDataset(args.input_scp)
+    data_sampler = InferenceDistributedSampler(testset)
     testloader = DataLoader(
         testset, batch_size=1, shuffle=False,
-        num_workers=1, pin_memory=True, collate_fn=TestPadCollate())
+        num_workers=1, sampler=data_sampler, collate_fn=TestPadCollate())
 
-    writer = os.path.join(args.output_dir, f'decode.{suffix}.tmp')
-    if args.mode == 'beam':
-        # if isinstance(model.joint, ConvJointNet):
-        #     beamsearcher = BeamSearchConvTransducer(
-        #         model, kernel_size=(3, 3), beam_size=args.beam_size)
-        # else:
-        #     beamsearcher = BeamSearchRNNTransducer(
-        #         model, beam_size=args.beam_size)
-        # beamsearcher = beamsearcher.to(device)
-        # beamsearcher = BeamSearchTransducer(model.decoder, model.joint, args.beam_size,
-        # lm=ext_lm, lm_weight=args.lm_weight)
-        beamsearcher = TransducerBeamSearcher(model.decoder, model.joint, 0, args.beam_size,
-                                              state_beam=2.3, expand_beam=2.3, lm_module=ext_lm, lm_weight=args.lm_weight)
-        del model
-    else:
-        beamsearcher = None
+    writer = os.path.join(args.output_dir, f'decode.{gpu}.tmp')
+    beamsearcher = TransducerBeamSearcher(
+        model.decoder, model.joint, 0, args.beam_size,
+        state_beam=2.3, expand_beam=2.3, lm_module=ext_lm, lm_weight=args.lm_weight)
+
     decode(args, beamsearcher, testloader,
            device=device, local_writer=writer)
+
+    return None
 
 
 @torch.no_grad()
 def decode(args, beamsearcher, testloader, device, local_writer):
-    f_enc_hid = open(args.enc_hid_bin, 'rb')
-    with open(args.enc_hid_link, 'rb') as fi:
+    f_enc_hid = open(args.enc_bin, 'rb')
+    with open(args.enc_lnk, 'rb') as fi:
         f_enc_seeks = pickle.load(fi)
 
     def _load_enc_mat(k: str):
@@ -190,7 +118,7 @@ def decode(args, beamsearcher, testloader, device, local_writer):
     sp = spm.SentencePieceProcessor(model_file=args.spmodel)
     results = []
 
-    L = len(testloader)
+    L = sum([1 for _ in testloader])
     for i, batch in enumerate(testloader):
         key, _, _ = batch
         enc_o = _load_enc_mat(key[0])
@@ -249,38 +177,76 @@ def gen_model(args, device, use_ext_lm=False) -> Union[Tuple[torch.nn.Module, to
         return model
 
 
+def compute_encoder_output(args, enc_bin: str, enc_link: str):
+    if not torch.cuda.is_available() or args.cpu:
+        usegpu = False
+    else:
+        usegpu = True
+
+    num_workers = args.world_size
+    # binary files saved as f'{enc_bin}.x'
+    mp.spawn(worker_compute_enc_out, nprocs=num_workers,
+             args=(num_workers, enc_bin, usegpu, args))
+
+    print("> Merging sub-process output files..")
+    fseeks = {}
+    with open(enc_bin, 'wb') as fo:
+        for i in range(num_workers):
+            with open(f'{enc_bin}.{i}', 'rb') as fi:
+                # type: List[Tuple[str, torch.Tensor]]
+                part_data = pickle.load(fi)
+
+            for key, mat in part_data:
+                fseeks[key] = fo.tell()
+                pickle.dump(mat, fo)
+            os.remove(f'{enc_bin}.{i}')
+
+    with open(enc_link, 'wb') as fo:
+        pickle.dump(fseeks, fo)
+    print("  files merging done.")
+    torch.cuda.empty_cache()
+
+
 @torch.no_grad()
-def gen_encode_hidden(args, enc_bin: str, enc_link: str):
-    if torch.cuda.is_available() and not args.cpu:
-        device = 'cuda:0'
+def worker_compute_enc_out(gpu: int, world_size: int, suffix: str, usegpu: bool, args):
+    rank = gpu
+
+    if usegpu:
+        device = gpu
+        dist.init_process_group(
+            backend='nccl', init_method=args.dist_url,
+            world_size=world_size, rank=rank)
     else:
         device = 'cpu'
+        half_nprocs = torch.get_num_threads()
+        torch.set_num_threads((half_nprocs * 2)//world_size)
+        dist.init_process_group(
+            backend='gloo', init_method=args.dist_url,
+            world_size=world_size, rank=rank)
+
+    if device != 'cpu':
+        torch.cuda.set_device(device)
 
     model = gen_model(args, device)
 
     testset = ScpDataset(args.input_scp)
+    data_sampler = InferenceDistributedSampler(testset)
     testloader = DataLoader(
         testset, batch_size=1, shuffle=False,
-        num_workers=1, pin_memory=False, collate_fn=TestPadCollate())
+        num_workers=1, sampler=data_sampler, collate_fn=TestPadCollate())
 
-    fseeks = {}
-    with open(enc_bin, 'wb') as fo:
-        L = len(testloader)
-        for i, batch in enumerate(testloader):
-            key, x, x_lens = batch
-            x = x.to(device)
-
-            encoder_o, _ = model.encoder(x, x_lens)
-            fseeks[key[0]] = fo.tell()
-            pickle.dump(encoder_o.cpu(), fo)
-            print(
-                "\r|{:<60}|[{:>5}/{:<5}]".format(int((i+1)/L*60)*'#', i+1, L), end='')
-    print("")
-    with open(enc_link, 'wb') as fo:
-        pickle.dump(fseeks, fo)
-
-    del model, x, x_lens, encoder_o, fseeks, testset, testloader
-    torch.cuda.empty_cache()
+    output = []
+    L = sum([1 for _ in testloader])
+    for i, batch in enumerate(testloader):
+        key, x, x_lens = batch
+        x = x.to(device)
+        encoder_o, _ = model.encoder(x, x_lens)
+        output.append((key[0], encoder_o.cpu()))
+        print(
+            "\r|{:<60}|[{:>5}/{:<5}]".format(int((i+1)/L*60)*'#', i+1, L), end='')
+    print("\r|{0:<60}|[{1:>5}/{1:<5}]".format(60*'#', L))
+    with open(f'{suffix}.{gpu}', 'wb') as fo:
+        pickle.dump(output, fo)
 
 
 def load_checkpoint(model: Union[torch.nn.Module, torch.nn.parallel.DistributedDataParallel], path_ckpt: str) -> torch.nn.Module:
@@ -318,13 +284,10 @@ if __name__ == '__main__':
     parser.add_argument("--beam_size", type=int, default=3)
     parser.add_argument("--spmodel", type=str, default='',
                         help="SPM model location.")
-    parser.add_argument("--nj", type=int, default=2)
+    parser.add_argument("--nj", type=int, default=None)
     parser.add_argument("--cpu", action='store_true', default=False)
     parser.add_argument("--lower", action='store_true', default=False)
 
     args = parser.parse_args()
 
     main(args)
-
-
-# TODO: sort the sequence by length then feed into worker with equal total lengths.

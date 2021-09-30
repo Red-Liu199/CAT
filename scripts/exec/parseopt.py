@@ -43,7 +43,7 @@ if __name__ == "__main__":
     except SystemExit as se:
         # re-locate the help information to error
         if se.code == 0:
-            print(parser.print_help(sys.stderr))
+            parser.print_help(sys.stderr)
         sys.exit(1)
 
     sys.exit(0)
