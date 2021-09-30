@@ -15,6 +15,9 @@
 ```
 %WER 4.50 [ 2367 / 52576, 308 ins, 157 del, 1902 sub ]
 %WER 10.76 [ 5630 / 52343, 725 ins, 467 del, 4438 sub ]
+# with model average last 8
+test_clean %WER 4.30 [2262 / 52576, 292 ins, 150 del, 1820 sub ]
+test_other %WER 10.17 [5322 / 52343, 652 ins, 405 del, 4265 sub ]
 ```
 
 ### Monitor figure
