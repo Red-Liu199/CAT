@@ -117,28 +117,37 @@ class Manager(object):
             distprint(info, args.gpu)
 
             self.model.train()
-            if self.rank == 0 and not self.DEBUG:
+
+            if self.DEBUG:
+                if state == 2:
+                    distprint("Terminated: GPU[%d]" % self.rank, args.gpu)
+                    dist.barrier()
+                    break
+                continue
+
+            if args.checkall:
+                checkpoint = os.path.join(
+                    args.checksdir, "checkpoint.{:03}.pt".format(self.epoch))
+            else:
+                checkpoint = os.path.join(args.checksdir, "checkpoint.pt")
+
+            if self.rank == 0:
                 plot_monitor(args.dir, self.log)
+                self.save(checkpoint)
 
             if state == 2:
-                print("Terminated: GPU[%d]" % self.rank)
+                distprint("Terminated: GPU[%d]" % self.rank, args.gpu)
                 dist.barrier()
                 break
-            elif self.rank != 0 or self.DEBUG:
-                continue
-            elif state == 0 or state == 1:
-                if args.checkall:
-                    checkpoint = os.path.join(
-                        args.checksdir, "checkpoint.{:03}.pt".format(self.epoch))
-                else:
-                    checkpoint = os.path.join(args.checksdir, "checkpoint.pt")
-
-                self.save(checkpoint)
-                if state == 1:
+            elif state == 1:
+                if self.rank == 0:
                     shutil.copyfile(checkpoint, os.path.join(
                         args.checksdir, "bestckpt.pt"))
+                continue
+            elif state == 0:
+                continue
             else:
-                raise ValueError(f"Unknown state: {state}.")
+                raise RuntimeError(f"Unknown state: {state}.")
 
     def save(self, name: str, PATH: str = '') -> str:
         """Save checkpoint.
@@ -300,7 +309,7 @@ class ProgressMeter(object):
     def display(self, batch):
         entries = [self.prefix + self.batch_fmtstr.format(batch)]
         entries += [str(meter) for meter in self.meters]
-        print('\t'.join(entries))
+        print('  '.join(entries))
 
     def _get_batch_fmtstr(self, num_batches):
         num_digits = len(str(num_batches // 1))
@@ -667,12 +676,44 @@ def convert_syncBatchNorm(model: nn.Module) -> nn.Module:
     return nn.SyncBatchNorm.convert_sync_batchnorm(model)
 
 
-def group_by_lens(src_l: List[Any], linfo: List[int], N: int, _norm: Union[None, str] = None, consider_padding:bool=True) -> List[List[Any]]:
+def group_by_lens(src_l: List[Any], linfo: List[int], N: int, _norm: Union[None, str] = None, consider_padding: bool = False) -> List[List[Any]]:
     """Split `src_l` by `linfo` into `N` parts.
     The split is done by a kind of greedy method, considering
     balancing the sum of lengths in each part and their paddings.
     Assume src_l is sorted by descending order.
     """
+    def get_largest(_linfo, _K: int) -> List[int]:
+        _len_linfo = len(_linfo)
+        assert _len_linfo >= _K
+        if _len_linfo == _K:
+            return [0, 1]
+        if _K == 1:
+            return [0, _len_linfo]
+
+        _avg = sum(_linfo)/_K
+        cnt_interval = 0
+        for i, l in enumerate(_linfo):
+            cnt_interval += l
+            if cnt_interval >= _avg:
+                return [0, i+1]
+
+    def get_smallest(_linfo, _K: int) -> List[int]:
+        _len_linfo = len(_linfo)
+        assert _len_linfo >= _K
+        if _len_linfo == _K:
+            return [_len_linfo-1, _len_linfo]
+        if _K == 1:
+            return [0, _len_linfo]
+
+        _avg = sum(_linfo)/_K
+        lower_bound = _len_linfo
+        cnt_interval = 0
+        for i in range(_len_linfo-1, -1, -1):
+            cnt_interval += _linfo[i]
+            if cnt_interval > _avg:
+                return [lower_bound, _len_linfo]
+            lower_bound -= 1
+
     len_src = len(linfo)
     assert len_src >= N, f"list to be split is shorter than number of groups: {len_src} < {N}"
     assert len_src == len(src_l)
@@ -688,23 +729,30 @@ def group_by_lens(src_l: List[Any], linfo: List[int], N: int, _norm: Union[None,
         linfo = [norm_func(x) for x in linfo]
 
     # greedy not optimal
-    avg = sum(linfo)/N
-    indices = [0]
-    cnt_interval = 0
+    g_avg = sum(linfo) / N
     cnt_parts = 0
-    for i, l in enumerate(linfo):
-        cnt_interval += linfo[indices[-1]] if consider_padding else l
+    res = N
+    indices_fwd = [0]
+    indices_bwd = [len_src]
+    sliced_info = linfo[:]
+    while sliced_info != []:
+        running_sum = sum(linfo[indices_fwd[-1]:indices_bwd[-1]])
+        running_avg = running_sum/res
+        if running_avg > g_avg:
+            _, sliced_idx_1 = get_largest(sliced_info, res)
+            indices_fwd.append(indices_fwd[-1] + sliced_idx_1)
+        else:
+            sliced_idx_0, sliced_idx_1 = get_smallest(
+                sliced_info, res)
+            indices_bwd.append(
+                sliced_idx_0 + (indices_bwd[-1] - sliced_idx_1))
 
-        if cnt_interval >= avg:
-            indices.append(i+1)
-            cnt_parts += 1
-            cnt_interval = 0
-            if cnt_parts < N:
-                avg = sum(linfo[i+1:])/(N-cnt_parts)
+        sliced_info = linfo[indices_fwd[-1]:indices_bwd[-1]]
+        res -= 1
 
-    # indices: len() -> N+1
-    assert len(indices) == N+1
-    indices[-1] = len_src
+    assert indices_fwd[-1] == indices_bwd[-1]
+
+    indices = indices_fwd[:-1]+indices_bwd[::-1]
 
     return [src_l[indices[i]:indices[i+1]] for i in range(N)]
 
@@ -767,6 +815,7 @@ def test_memory(args, manager: Manager, dataset: torch.utils.data.Dataset, colle
             scaler.step(optimizer)
             scaler.update()
             optimizer.zero_grad()
+            print(args.rank, logits.size(0), end=' ')
 
     for attr in ['batch_size', 'amp', 'rank', 'gpu', 'databalance']:
         assert hasattr(args, attr)

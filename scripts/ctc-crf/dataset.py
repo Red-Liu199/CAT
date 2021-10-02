@@ -393,7 +393,7 @@ class BalancedDistributedSampler(DistributedSampler):
                 batches, [self._lens[i] for i in batches], self.num_replicas, _norm=self._l_norm)
             # make it more balanced with gradient accumulation
             partial_indices.append(batches[offset])
-            offset = (offset + 1) % self.num_replicas
+            # offset = (offset + 1) % self.num_replicas
 
         return iter(partial_indices)
 

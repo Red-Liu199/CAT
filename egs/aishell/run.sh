@@ -81,6 +81,8 @@ if [ $stage -le 3 ]; then
   echo "prepare denominator finished"
 fi
 
+ark_dir=data/all_ark
+mkdir -p $ark_dir
 if [ $stage -le 4 ]; then
   path_weight $data_tr/text_number data/den_meta/phone_lm.fst > $data_tr/weight
   path_weight $data_cv/text_number data/den_meta/phone_lm.fst > $data_cv/weight
@@ -90,8 +92,6 @@ if [ $stage -le 4 ]; then
   #echo "$feats_tr"
   feats_cv="ark,s,cs:apply-cmvn --norm-vars=true --utt2spk=ark:$data_cv/utt2spk scp:$data_cv/cmvn.scp scp:$data_cv/feats.scp ark:- |"
 
-  ark_dir=data/all_ark
-  mkdir -p $ark_dir
   copy-feats "$feats_tr" "ark,scp:$ark_dir/tr.ark,$ark_dir/tr.scp" || exit 1
   copy-feats "$feats_cv" "ark,scp:$ark_dir/cv.ark,$ark_dir/cv.scp" || exit 1
 
@@ -106,8 +106,7 @@ data_test=data/test
 
 if [ $stage -le 5 ]; then
   feats_test="ark,s,cs:apply-cmvn --norm-vars=true --utt2spk=ark:$data_test/utt2spk scp:$data_test/cmvn.scp scp:$data_test/feats.scp ark:- |"
-  mkdir -p data/test_data
-  copy-feats "$feats_test" "ark,scp:data/test_data/test.ark,data/test_data/test.scp"
+  copy-feats "$feats_test" "ark,scp:$ark_dir/test.ark,$ark_dir/test.scp"
 fi
 exit 0
 arch=BLSTM
