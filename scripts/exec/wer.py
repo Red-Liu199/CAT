@@ -7,6 +7,7 @@ import jiwer
 import argparse
 import os
 import sys
+import re
 from multiprocessing import Pool
 from typing import List, Tuple
 
@@ -41,8 +42,10 @@ if __name__ == "__main__":
     num_lines = len(l_gt)
     assert num_lines == len(l_hy)
 
-    l_gt = [x.strip('\n') for x in l_gt]
-    l_hy = [x.strip('\n') for x in l_hy]
+    pattern = re.compile(r' {2,}')
+    l_gt = [pattern.sub(' ', x) for x in l_gt]
+    l_gt = [x.strip('\n ') for x in l_gt]
+    l_hy = [x.strip('\n ') for x in l_hy]
 
     if args.stripid:
         l_gt = [' '.join(x.split()[1:]) for x in l_gt]
