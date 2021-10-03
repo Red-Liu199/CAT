@@ -27,6 +27,8 @@ if __name__ == "__main__":
     parser.add_argument("hy", type=str, help="Hypothesis of sequences.")
     parser.add_argument("--stripid", action="store_true", default=False,
                         help="Tell whether the sequence start with a id or not. Default: False")
+    parser.add_argument("--cer", action="store_true", default=False,
+                        help="Compute CER. Default: False")
     args = parser.parse_args()
 
     assert os.path.isfile(args.gt)
@@ -42,14 +44,26 @@ if __name__ == "__main__":
     num_lines = len(l_gt)
     assert num_lines == len(l_hy)
 
+    # rm consecutive spaces
     pattern = re.compile(r' {2,}')
     l_gt = [pattern.sub(' ', x) for x in l_gt]
+
+    # rm the '\n' and the last space
     l_gt = [x.strip('\n ') for x in l_gt]
     l_hy = [x.strip('\n ') for x in l_hy]
 
     if args.stripid:
+        # rm id in the first place
         l_gt = [' '.join(x.split()[1:]) for x in l_gt]
         l_hy = [' '.join(x.split()[1:]) for x in l_hy]
+
+    if args.cer:
+        pattern = re.compile(r'\s+')
+        l_gt = [pattern.sub('', x) for x in l_gt]
+        l_hy = [pattern.sub('', x) for x in l_hy]
+
+        l_gt = [' '.join(list(x)) for x in l_gt]
+        l_hy = [' '.join(list(x)) for x in l_hy]
 
     num_threads = int(os.cpu_count())
 
@@ -75,6 +89,7 @@ if __name__ == "__main__":
     _wer = _err / _sum
 
     # format: %WER 4.50 [ 2367 / 52576, 308 ins, 157 del, 1902 sub ]
-    pretty_str = f"%WER {_wer*100:.2f} [{_err} / {_sum}, {_ins} ins, {_del} del, {_sub} sub ]"
+    prefix = 'WER' if not args.cer else 'CER'
+    pretty_str = f"%{prefix} {_wer*100:.2f} [{_err} / {_sum}, {_ins} ins, {_del} del, {_sub} sub ]"
 
     sys.stdout.write(pretty_str+'\n')

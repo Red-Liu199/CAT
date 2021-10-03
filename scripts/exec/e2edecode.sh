@@ -35,6 +35,10 @@ opts=$(python exec/parseopt.py '{
         "--cpu":{
             "action":"store_true",
             "help": "Use cpu to decode. Default: False"
+        },
+        "--cer":{
+            "action":"store_true",
+            "help": "Compute CER along with WER. Default: False"
         }
     }' $0 $*) && eval $opts || exit 1
 
@@ -97,12 +101,15 @@ for set in $(echo $test_set | tr ':' '\n'); do
     fi
     if [ -f $dec_dir/decode_${set}.txt ]; then
         echo -n "$set " >>$dec_dir/result
-        python exec/wer.py data/$set/text $dec_dir/decode_${set}.txt --stripid >>$dec_dir/result
+        python exec/wer.py data/$set/text $dec_dir/decode_${set}.txt --stripid >>$dec_dir/result || exit 1
+        if [ $cer == "True" ]; then
+            python exec/wer.py data/$set/text $dec_dir/decode_${set}.txt --stripid --cer >>$dec_dir/result || exit 1
+        fi
     else
         echo "No decoded text found: $dec_dir/decode_${set}.txt"
         exit 1
     fi
 done
 
-echo "" >> $dec_dir/result
+echo "" >>$dec_dir/result
 cat $dec_dir/result

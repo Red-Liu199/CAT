@@ -126,9 +126,8 @@ def main():
         if args.num_epoch_checkpoints is not None:
             num = args.num_epoch_checkpoints
 
-        assert (args.upper_bound is not None) and (
-            args.num_epoch_checkpoints is not None
-        ), "--upper-bound and --num-epoch-checkpoints are required together"
+        assert not ((args.upper_bound is None) ^ (args.num_epoch_checkpoints is None)
+                    ), "--upper-bound and --num-epoch-checkpoints are required together"
 
         list_path = []
         if num is None:
