@@ -196,6 +196,7 @@ class ConformerNet(nn.Module):
             kernel_size: int = 32,
             multiplier: int = 1,
             dropout: float = 0.1,
+            dropout_attn: float = 0.0,
             delta_feats=False,
             subsample_norm: str = 'none'):
         super().__init__()
@@ -214,7 +215,7 @@ class ConformerNet(nn.Module):
         pe = nnlayers.PositionalEncoding(hdim)
         for i in range(num_cells):
             cell = nnlayers.ConformerCell(
-                hdim, res_factor, d_head, num_heads, kernel_size, multiplier, dropout)
+                hdim, res_factor, d_head, num_heads, kernel_size, multiplier, dropout, dropout_attn)
             self.cells.append(cell)
             # FIXME: Note that this is somewhat hard-code style
             cell.mhsam.mha.pe = pe

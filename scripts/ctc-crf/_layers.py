@@ -430,16 +430,17 @@ class ConvModule(nn.Module):
 
 
 class MHSAModule(nn.Module):
-    def __init__(self, idim, d_head: int, num_heads: int, dropout: float = 0.0):
+    def __init__(self, idim, d_head: int, num_heads: int, dropout: float = 0.0, dropout_attn: float = 0.0):
         super().__init__()
 
         self.ln = nn.LayerNorm(idim)
         if d_head == -1:
             # a "standard" multi-head attention
-            self.mha = StandardRelPositionalMultiHeadAttention(idim, num_heads)
+            self.mha = StandardRelPositionalMultiHeadAttention(
+                idim, num_heads, dropout_attn)
         else:
             self.mha = RelPositionMultiHeadAttention(
-                idim, num_heads, d_head)
+                idim, num_heads, d_head, dropout_attn)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor, lens: torch.Tensor, mems=None):
@@ -458,11 +459,12 @@ class ConformerCell(nn.Module):
             num_heads: int = 4,
             kernel_size: int = 32,
             multiplier: int = 1,
-            dropout: float = 0.1):
+            dropout: float = 0.1,
+            dropout_attn: float = 0.0):
         super().__init__()
 
         self.ffm0 = FFModule(idim, res_factor, dropout)
-        self.mhsam = MHSAModule(idim, d_head, num_heads, dropout)
+        self.mhsam = MHSAModule(idim, d_head, num_heads, dropout, dropout_attn)
         self.convm = ConvModule(
             idim, kernel_size, dropout, multiplier)
         self.ffm1 = FFModule(idim, res_factor, dropout)
