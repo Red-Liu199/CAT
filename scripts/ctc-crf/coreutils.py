@@ -431,7 +431,7 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
 
         return detach_loss, real_loss, n_batch
 
-    for attr in ['grad_accum_fold', 'n_steps', 'print_freq', 'rank', 'gpu', 'debug', 'amp']:
+    for attr in ['grad_accum_fold', 'n_steps', 'print_freq', 'rank', 'gpu', 'debug', 'amp', 'grad_norm']:
         assert hasattr(args, attr)
 
     model = manager.model
@@ -440,6 +440,7 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
     optimizer.zero_grad()
     enableAMP = args.amp
     scaler = GradScaler(enabled=enableAMP)
+    grad_norm = args.grad_norm
 
     world_size = dist.get_world_size()
     fold = args.grad_accum_fold
@@ -487,6 +488,11 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
 
             detach_loss, real_loss, n_batch = _go_step(
                 detach_loss, real_loss, n_batch)
+
+            if grad_norm > 0.0:
+                if enableAMP:
+                    scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_norm)
 
             scaler.step(optimizer)
             scaler.update()
@@ -626,6 +632,8 @@ def BasicDDPParser(istraining: bool = True, prog: str = '') -> argparse.Argument
                             help="Manual seed.")
         parser.add_argument("--grad-accum-fold", type=int, default=1,
                             help="Utilize gradient accumulation for K times. Default: K=1")
+        parser.add_argument("--grad-norm", type=float, default=0.0,
+                            help="Max norm of the gradients. Default: 0.0 (Disable grad-norm).")
 
         parser.add_argument("--debug", action="store_true",
                             help="Configure to debug settings, would overwrite most of the options.")

@@ -286,7 +286,7 @@ class SpecAug(nn.Module):
         apply_time_mask: bool = True,
         time_mask_width_range: Union[float, Sequence[float]] = (0., 0.1),
         num_time_mask: int = 2,
-        delta_feats=False
+        delta_feats: bool = False
     ):
         if not apply_time_warp and not apply_time_mask and not apply_freq_mask:
             raise ValueError(

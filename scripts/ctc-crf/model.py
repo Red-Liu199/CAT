@@ -22,7 +22,13 @@ def get_vgg2l_odim(idim, in_channel=1, out_channel=128):
 
 
 class LSTM(nn.Module):
-    def __init__(self, idim, hdim, n_layers, num_classes, dropout, bidirectional=False):
+    def __init__(self,
+                 idim: int,
+                 hdim: int,
+                 n_layers: int,
+                 num_classes: int,
+                 dropout: float,
+                 bidirectional: bool = False):
         super().__init__()
         self.lstm = nnlayers._LSTM(
             idim, hdim, n_layers, dropout, bidirectional=bidirectional)
@@ -39,12 +45,12 @@ class LSTM(nn.Module):
 
 
 class BLSTM(LSTM):
-    def __init__(self, idim, hdim, n_layers, num_classes, dropout):
+    def __init__(self, idim: int, hdim: int, n_layers: int, num_classes: int, dropout: float):
         super().__init__(idim, hdim, n_layers, num_classes, dropout, bidirectional=True)
 
 
 class VGGLSTM(LSTM):
-    def __init__(self, idim, hdim, n_layers, num_classes, dropout, in_channel=3, bidirectional=False):
+    def __init__(self, idim: int, hdim: int, n_layers: int, num_classes: int, dropout: float, in_channel: int = 3, bidirectional: int = False):
         super().__init__(get_vgg2l_odim(idim, in_channel=in_channel), hdim,
                          n_layers, num_classes, dropout, bidirectional=bidirectional)
 
@@ -56,13 +62,13 @@ class VGGLSTM(LSTM):
 
 
 class VGGBLSTM(VGGLSTM):
-    def __init__(self, idim, hdim, n_layers, num_classes, dropout, in_channel=3):
+    def __init__(self, idim: int, hdim: int, n_layers: int, num_classes: int, dropout: float, in_channel: int = 3):
         super().__init__(idim, hdim, n_layers, num_classes,
                          dropout, in_channel=in_channel, bidirectional=True)
 
 
 class LSTMrowCONV(nn.Module):
-    def __init__(self, idim, hdim, n_layers, num_classes, dropout):
+    def __init__(self, idim: int, hdim: int, n_layers: int, num_classes: int, dropout: float):
         super().__init__()
 
         self.lstm = nnlayers._LSTM(idim, hdim, n_layers, dropout)
@@ -197,7 +203,7 @@ class ConformerNet(nn.Module):
             multiplier: int = 1,
             dropout: float = 0.1,
             dropout_attn: float = 0.0,
-            delta_feats=False,
+            delta_feats: bool = False,
             subsample_norm: str = 'none'):
         super().__init__()
 
@@ -233,27 +239,27 @@ class ConformerNet(nn.Module):
 
 
 class ConformerLSTM(ConformerNet):
-    def __init__(
-            self,
-            num_cells: int,
-            idim: int,
-            hdim: int,
-            num_classes: int,
-            hdim_lstm: int,
-            num_lstm_layers: int,
-            dropout_lstm: float,
-            conv_multiplier: int = 144,
-            dropout_in: float = 0.2,
-            res_factor: float = 0.5,
-            d_head: int = 36,
-            num_heads: int = 4,
-            kernel_size: int = 32,
-            multiplier: int = 1,
-            dropout: float = 0.1,
-            delta_feats: bool = False,
-            subsample_norm: str = 'none'):
-        super().__init__(num_cells, idim, hdim, num_classes, conv_multiplier=conv_multiplier, dropout_in=dropout_in, res_factor=res_factor,
-                         d_head=d_head, num_heads=num_heads, kernel_size=kernel_size, multiplier=multiplier, dropout=dropout, delta_feats=delta_feats, subsample_norm=subsample_norm)
+    def __init__(self,
+                 num_cells: int,
+                 idim: int,
+                 hdim: int,
+                 num_classes: int,
+                 hdim_lstm: int,
+                 num_lstm_layers: int,
+                 dropout_lstm: float,
+                 conv_multiplier: int = None,
+                 dropout_in: float = 0.2,
+                 res_factor: float = 0.5,
+                 d_head: int = 36,
+                 num_heads: int = 4,
+                 kernel_size: int = 32,
+                 multiplier: int = 1,
+                 dropout: float = 0.1,
+                 dropout_attn: float = 0,
+                 delta_feats: bool = False,
+                 subsample_norm: str = 'none'):
+        super().__init__(num_cells, idim, hdim, num_classes, conv_multiplier=conv_multiplier, dropout_in=dropout_in, res_factor=res_factor, d_head=d_head, num_heads=num_heads,
+                         kernel_size=kernel_size, multiplier=multiplier, dropout=dropout, dropout_attn=dropout_attn, delta_feats=delta_feats, subsample_norm=subsample_norm)
 
         self.lstm = nnlayers._LSTM(
             idim=hdim, hdim=hdim_lstm, n_layers=num_lstm_layers, dropout=dropout_lstm)

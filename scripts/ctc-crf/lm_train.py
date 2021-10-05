@@ -166,7 +166,7 @@ class LSTMPredictNet(nn.Module):
                  norm: bool = False,
                  variational_noise: Union[Tuple[float,
                                                 float], List[float]] = None,
-                 classical=True,
+                 classical: bool = True,
                  *rnn_args, **rnn_kwargs):
         super().__init__()
         self.embedding = nn.Embedding(num_classes, hdim)
