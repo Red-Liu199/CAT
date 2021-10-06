@@ -492,7 +492,8 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
             if grad_norm > 0.0:
                 if enableAMP:
                     scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_norm)
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(), grad_norm, error_if_nonfinite=True)
 
             scaler.step(optimizer)
             scaler.update()
