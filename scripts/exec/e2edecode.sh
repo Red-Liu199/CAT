@@ -45,7 +45,9 @@ opts=$(python exec/parseopt.py '{
 echo "Decoding..."
 mode='beam'
 echo "> Settings: mode=$mode | beam-width=$beam_size | lm-weight=$lm_weight"
-echo "  Ensure modeling unit of transducer is the same as that of extra LM."
+if [ $(echo "$lm_weight > 0.0" | bc -l) ]; then
+    echo "  Ensure modeling unit of transducer is the same as that of extra LM."
+fi
 
 if [ $cpu == "True" ]; then
     export CUDA_VISIBLE_DEVICES=""
