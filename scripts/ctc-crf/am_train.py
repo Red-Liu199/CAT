@@ -181,15 +181,14 @@ def setPath(args: argparse.Namespace):
 
     # set checkpoint path and log files path
     if not args.debug:
+        if not os.path.isdir(args.dir):
+            raise RuntimeError(
+                f"--dir={args.dir} is not a valid directory.")
         # ckpt -> checks
         checksdir = os.path.join(args.dir, 'checks')
         logsdir = os.path.join(args.dir, 'logs')
-        if os.path.isdir(args.dir):
-            os.makedirs(checksdir, exist_ok=True)
-            os.makedirs(logsdir, exist_ok=True)
-        else:
-            raise FileNotFoundError(
-                f"--dir={args.dir} is not a valid directory.")
+        os.makedirs(checksdir, exist_ok=True)
+        os.makedirs(logsdir, exist_ok=True)
     else:
         coreutils.highlight_msg("Debugging")
         # This is a hack, we won't read/write anything in debug mode.
