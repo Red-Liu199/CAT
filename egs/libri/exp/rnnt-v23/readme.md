@@ -8,7 +8,7 @@
 
 ### Appendix
 
-* `v20` + fix distributed sampler bug
+* `v21` + fix distributed sampler bug
 
 ### WER
 ```
