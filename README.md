@@ -2,8 +2,8 @@
 
 ## Results
 
-- [Librispeech](exp/libri)
-- [AIshell-1](exp/aishell)
+- [Librispeech](egs/libri)
+- [AIshell-1](egs/aishell)
 
 ## Installation
 
