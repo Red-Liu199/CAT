@@ -413,7 +413,7 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
             loss = model(logits, labels, input_lengths, label_lengths)/fold
 
         normalized_loss = loss.detach() * logits.size(0)
-        if args.databalance:
+        if hasattr(args, 'databalance') and args.databalance:
             # current global size
             # efficiently, we can set t_batch_size=args.batch_size, but current impl is more robust
             t_batch_size = logits.new_tensor(logits.size(0))
@@ -431,7 +431,7 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
         return detach_loss, real_loss, n_batch
 
     for attr in ['grad_accum_fold', 'n_steps', 'print_freq', 'rank', 'gpu', 'debug', 'amp', 'grad_norm']:
-        assert hasattr(args, attr)
+        assert hasattr(args, attr), f"{attr} not in args"
 
     model = manager.model
     scheduler = manager.scheduler

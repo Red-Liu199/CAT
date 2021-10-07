@@ -87,7 +87,7 @@ if [ $stage -le 3 ] && [ $stop_stage -ge 3 ]; then
 
     python3 ctc-crf/lm_train.py --seed=0 \
         --world-size 1 --rank 0 -j 1 \
-        --batch_size=1152 \
+        --batch_size=512 \
         --dir=$dir \
         --config=$dir/lm_config.json \
         --data=data/ \

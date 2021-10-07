@@ -55,6 +55,9 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         num_workers=args.workers, pin_memory=True,
         sampler=test_sampler, collate_fn=sortedPadCollateLM())
 
+    setattr(args, 'n_steps',
+            train_sampler.total_size//args.batch_size//args.grad_accum_fold)
+
     manager = coreutils.Manager(build_model, args)
     # lm training does not need specaug
     manager.specaug = None
