@@ -70,7 +70,6 @@ class Manager(object):
             'log_eval': ['loss_real,time']
         })
 
-        # self.writer = SummaryWriter(args.logsdir)
         if args.rank == 0:
             self.writer = SummaryWriter(os.path.join(
                 args.logsdir, "{0:%Y%m%d-%H%M%S/}".format(datetime.now())))
@@ -525,8 +524,6 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
                 manager.writer.add_scalar(
                     'loss/train_loss', tolog['loss'], global_step)
                 manager.writer.add_scalar(
-                    'loss/train_real_loss', tolog['loss_real'], global_step)
-                manager.writer.add_scalar(
                     'lr', tolog['lr'], global_step)
             # update log
             manager.log_update(
@@ -631,6 +628,8 @@ def BasicDDPParser(istraining: bool = True, prog: str = '') -> argparse.Argument
                             'using Distributed Data Parallel')
         parser.add_argument("--seed", type=int, default=0,
                             help="Manual seed.")
+        parser.add_argument("--amp", action="store_true",
+                            help="Enable auto mixed precision training.")
         parser.add_argument("--grad-accum-fold", type=int, default=1,
                             help="Utilize gradient accumulation for K times. Default: K=1")
         parser.add_argument("--grad-norm", type=float, default=0.0,

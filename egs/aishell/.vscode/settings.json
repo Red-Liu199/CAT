@@ -3,7 +3,7 @@
     "json.schemas": [
         {
             "fileMatch": [
-                "exp/**/config.json"
+                "exp/**/*.json"
             ],
             "url": ".vscode/schemas.json"
         }

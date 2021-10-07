@@ -1,0 +1,37 @@
+{
+    "decoder": {
+        "type": "LSTMPredictNet",
+        "kwargs": {
+            "num_classes": 4232,
+            "hdim": 512,
+            "num_layers": 1,
+            "variational_noise": [
+                0.0,
+                0.075
+            ],
+            "classical": false
+        }
+    },
+    "scheduler": {
+        "type": "SchedulerEarlyStop",
+        "optimizer": {
+            "type": "Adam",
+            "use_zero": true,
+            "kwargs": {
+                "lr": 1e-3,
+                "betas": [
+                    0.9,
+                    0.98
+                ],
+                "weight_decay": 1e-6
+            }
+        },
+        "kwargs": {
+            "epoch_min": 8,
+            "gamma": 0.1,
+            "lr_stop": 0.00001,
+            "num_ahead": 1,
+            "reverse_metric_direc": true
+        }
+    }
+}

@@ -578,8 +578,6 @@ if __name__ == "__main__":
                         help="Load data with H5py, defaultly use pickle (recommended).")
     parser.add_argument("--databalance", action="store_true",
                         help="Load data batches according to sequence lenth.")
-    parser.add_argument("--amp", action="store_true",
-                        help="Enable auto mixed precision training.")
     parser.add_argument("--len-norm", type=str, default=None,
                         help="Normal expression to seq len. Useful with --databalance. E.g. 'L**1.3'")
 

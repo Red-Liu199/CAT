@@ -97,7 +97,7 @@ if __name__ == "__main__":
     print("> Sub-process done. Begin merging...")
     binfiles = sorted(binfiles, key=lambda item: item[0])
 
-    randbin = '{}.{}'.format(args.outbin, randName(8))
+    randbin = '{}.bin'.format(args.outbin)
     _seeks = []
     with open(randbin, 'wb') as fo:
         for _, file, N in binfiles:
