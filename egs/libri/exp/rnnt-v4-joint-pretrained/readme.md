@@ -8,7 +8,8 @@
 
 ### Appendix
 
-* 
+* PN pretrained from LM, TN pretrained from phone-CTC-CRF
+* No frozen module in joint training
 
 ### WER
 ```
