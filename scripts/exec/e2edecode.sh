@@ -45,7 +45,7 @@ opts=$(python exec/parseopt.py '{
 echo "Decoding..."
 mode='beam'
 echo "> Settings: mode=$mode | beam-width=$beam_size | lm-weight=$lm_weight"
-if [ $(echo "$lm_weight > 0.0" | bc -l) ]; then
+if [ $(echo "$lm_weight > 0.0" | bc -l) -eq 1 ]; then
     echo "  Ensure modeling unit of transducer is the same as that of extra LM."
 fi
 

@@ -14,8 +14,8 @@
 stage=5
 data=$(readlink -f data)
 data_url=www.openslr.org/resources/33
-aishell_wav=/mnt/nas_workspace2/spmiData/aishell_data//wav
-aishell_trans=/mnt/nas_workspace2/spmiData/aishell_data//transcript
+aishell_wav=/mnt/nas_workspace2/spmiData/aishell_data/wav
+aishell_trans=/mnt/nas_workspace2/spmiData/aishell_data/transcript
 # End configuration section
 . utils/parse_options.sh
 

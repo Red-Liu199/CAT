@@ -11,7 +11,6 @@ from lm_train import build_model as lm_build
 from dataset import ScpDataset, TestPadCollate, InferenceDistributedSampler
 from transducer_train import build_model
 from beam_search_transducer import TransducerBeamSearcher
-from beam_search_espnet import BeamSearchTransducer
 
 import os
 import json
@@ -127,9 +126,6 @@ def decode(args, beamsearcher, testloader, device, local_writer):
 
         if isinstance(pred, tuple):
             pred = pred[0]
-
-        if isinstance(beamsearcher, BeamSearchTransducer):
-            pred = pred[0].yseq
 
         seq = sp.decode(pred)
         results.append((key, seq))

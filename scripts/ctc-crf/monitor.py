@@ -4,7 +4,7 @@ Apache 2.0.
 Author: Zheng Huahuan (zhh20@mails.tsinghua.edu.cn)
 
 Directly execute: (in working directory)
-    python3 ctc-crf/monitor.py <path to my exp>
+    python3 ctc-crf/monitor.py <path to my checkpoint>
 """
 
 import os
