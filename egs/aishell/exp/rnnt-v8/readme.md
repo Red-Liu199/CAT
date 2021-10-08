@@ -26,6 +26,11 @@ Custom checkpoint: avg_last_10.pt
 Use CPU = False
 test %WER 11.14 [7179 / 64428, 926 ins, 588 del, 5665 sub ]
 %CER 5.48 [5742 / 104765, 107 ins, 122 del, 5513 sub ]
+
+Custom checkpoint: avg_last_10_bn.pt
+Use CPU = False
+test ext_lm= %WER 11.22 [7227 / 64428, 783 ins, 707 del, 5737 sub ]
+test ext_lm= %CER 5.63 [5894 / 104765, 135 ins, 121 del, 5638 sub ]
 ```
 
 ### Monitor figure

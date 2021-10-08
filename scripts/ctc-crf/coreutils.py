@@ -110,19 +110,8 @@ class Manager(object):
                 self.writer.add_scalar('loss/dev', metrics, self.epoch)
             state, info = self.scheduler.step(self.epoch, metrics)
 
-            if torch.__version__ > '1.8.0' and isinstance(self.scheduler.optimizer, ZeroRedundancyOptimizer):
-                self.scheduler.optimizer.consolidate_state_dict(0)
-
             distprint(info, args.gpu)
-
             self.model.train()
-
-            if self.DEBUG:
-                if state == 2:
-                    distprint("Terminated: GPU[%d]" % self.rank, args.gpu)
-                    dist.barrier()
-                    break
-                continue
 
             if args.checkall:
                 checkpoint = os.path.join(
@@ -130,16 +119,16 @@ class Manager(object):
             else:
                 checkpoint = os.path.join(args.checksdir, "checkpoint.pt")
 
+            self.save(checkpoint)
             if self.rank == 0:
                 plot_monitor(args.dir, self.log)
-                self.save(checkpoint)
 
             if state == 2:
                 distprint("Terminated: GPU[%d]" % self.rank, args.gpu)
                 dist.barrier()
                 break
             elif state == 1:
-                if self.rank == 0:
+                if self.rank == 0 and not self.DEBUG:
                     shutil.copyfile(checkpoint, os.path.join(
                         args.checksdir, "bestckpt.pt"))
                 continue
@@ -154,6 +143,13 @@ class Manager(object):
         The checkpoint file would be located at `PATH/name.pt`
         or `name.pt` if `PATH` is empty.
         """
+
+        if torch.__version__ > '1.8.0' and isinstance(self.scheduler.optimizer, ZeroRedundancyOptimizer):
+            self.scheduler.optimizer.consolidate_state_dict(0)
+
+        if self.rank != 0 or self.DEBUG:
+            return None
+
         if name[-3:] != '.pt':
             name += '.pt'
         PATH = os.path.join(PATH, name)
@@ -471,12 +467,6 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
             args.gpu, non_blocking=True), labels, input_lengths, label_lengths
         path_weights = path_weights.cuda(args.gpu, non_blocking=True)
 
-        ########## DEBUG CODE ###########
-        # print(args.rank, logits.size(0),
-        #       torch.cuda.max_memory_allocated(args.rank)/1e6)
-        # torch.cuda.reset_peak_memory_stats(args.rank)
-        #################################
-
         if manager.specaug is not None:
             logits, input_lengths = manager.specaug(logits, input_lengths)
 
@@ -492,7 +482,7 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
                 if enableAMP:
                     scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(
-                    model.parameters(), grad_norm, error_if_nonfinite=True)
+                    model.parameters(), grad_norm, error_if_nonfinite=False)
 
             scaler.step(optimizer)
             scaler.update()
@@ -549,6 +539,49 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
             with model.no_sync():
                 detach_loss, real_loss, n_batch = _go_step(
                     detach_loss, real_loss, n_batch)
+
+
+@torch.no_grad()
+def update_bn(trainloader, args: argparse.Namespace, manager: Manager):
+
+    for attr in ['n_steps', 'print_freq', 'rank', 'gpu', 'debug', 'amp']:
+        assert hasattr(args, attr), f"{attr} not in args"
+
+    model = manager.model
+    if not hasattr(model.module, 'impl_forward'):
+        raise RuntimeError(
+            "--update-bn requires the model trainer has impl_forward to do pure forward computation.")
+
+    model.train()
+    enableAMP = args.amp
+
+    batch_time = AverageMeter('Time', ':6.3f')
+    data_time = AverageMeter('Data', ':6.3f')
+    progress = ProgressMeter(
+        args.n_steps,
+        [batch_time, data_time],
+        prefix="Update BN stats: ")
+
+    end = time.time()
+
+    for i, minibatch in enumerate(trainloader):
+        # measure data loading time
+        logits, input_lengths, labels, label_lengths, _ = minibatch
+        logits, labels, input_lengths, label_lengths = logits.cuda(
+            args.gpu, non_blocking=True), labels, input_lengths, label_lengths
+
+        data_time.update(time.time() - end)
+
+        with autocast(enabled=enableAMP):
+            _ = model.module.impl_forward(
+                logits, labels, input_lengths, label_lengths)
+
+        # measure elapsed time
+        batch_time.update(time.time()-end)
+        end = time.time()
+
+        if ((i+1) % args.print_freq == 0 or args.debug) and args.gpu == 0:
+            progress.display(i+1)
 
 
 @torch.no_grad()
@@ -630,6 +663,8 @@ def BasicDDPParser(istraining: bool = True, prog: str = '') -> argparse.Argument
                             help="Manual seed.")
         parser.add_argument("--amp", action="store_true",
                             help="Enable auto mixed precision training.")
+        parser.add_argument("--update-bn", action="store_true",
+                            help="Update batchnorm stats for model averaging.")
         parser.add_argument("--grad-accum-fold", type=int, default=1,
                             help="Utilize gradient accumulation for K times. Default: K=1")
         parser.add_argument("--grad-norm", type=float, default=0.0,

@@ -46,27 +46,23 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         world_size=args.world_size, rank=args.rank)
 
     if args.h5py:
-        data_format = "hdf5"
-        coreutils.highlight_msg(
-            "H5py reading might cause error with Multi-GPUs")
         Dataset = datautils.SpeechDataset
-        if args.trset is None or args.devset is None:
-            raise FileNotFoundError(
-                "With '--hdf5' option, you must specify data location with '--trset' and '--devset'.")
     else:
-        data_format = "pickle"
         Dataset = datautils.SpeechDatasetPickle
 
-    if args.trset is None:
-        args.trset = os.path.join(args.data, f'{data_format}/tr.{data_format}')
-    if args.devset is None:
-        args.devset = os.path.join(
-            args.data, f'{data_format}/cv.{data_format}')
-
     manager = coreutils.Manager(build_model, args)
+    coreutils.distprint("> Model built.", args.gpu)
+    coreutils.distprint("  Model size:{:.2f}M".format(
+        coreutils.count_parameters(manager.model)/1e6), args.gpu)
+    # get GPU info
+    gpu_info = coreutils.gather_all_gpu_info(args.gpu)
+    if args.rank == 0 and not args.debug:
+        coreutils.gen_readme(args.dir+'/readme.md',
+                             model=manager.model, gpu_info=gpu_info)
 
     tr_set = Dataset(args.trset)
     test_set = Dataset(args.devset)
+    setattr(args, 'n_steps', 0)
 
     if args.databalance and not args.test_mem:
         if args.debug:
@@ -82,6 +78,8 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
             collate_fn=datautils.sortedPadCollateTransducer())
         coreutils.distprint(
             "> Seq length info for balanced loading generated.", args.gpu)
+
+        args.n_steps = train_sampler.total_size//args.batch_size//args.grad_accum_fold
     else:
         train_sampler = DistributedSampler(tr_set)
 
@@ -89,14 +87,12 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
             tr_set, batch_size=args.batch_size//ngpus_per_node, shuffle=(train_sampler is None),
             num_workers=args.workers, pin_memory=True,
             sampler=train_sampler, collate_fn=datautils.sortedPadCollateTransducer())
+        args.n_steps = len(trainloader)//args.grad_accum_fold
 
     if args.test_mem:
         coreutils.test_memory(
             args, manager, tr_set, datautils.sortedPadCollateTransducer(), True)
         return
-
-    setattr(args, 'n_steps',
-            train_sampler.total_size//args.batch_size//args.grad_accum_fold)
 
     test_sampler = DistributedSampler(test_set)
     test_sampler.set_epoch(1)
@@ -105,15 +101,15 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         num_workers=args.workers, pin_memory=True,
         sampler=test_sampler, collate_fn=datautils.sortedPadCollateTransducer())
 
-    # get GPU info
-    gpu_info = coreutils.gather_all_gpu_info(args.gpu)
+    if args.update_bn:
+        assert args.resume is not None, "invalid behavior"
 
-    coreutils.distprint("> Model built.", args.gpu)
-    coreutils.distprint("  Model size:{:.2f}M".format(
-        coreutils.count_parameters(manager.model)/1e6), args.gpu)
-    if args.rank == 0 and not args.debug:
-        coreutils.gen_readme(args.dir+'/readme.md',
-                             model=manager.model, gpu_info=gpu_info)
+        coreutils.update_bn(trainloader, args, manager)
+        updated_check = args.resume.replace('.pt', '_bn.pt')
+        manager.save(updated_check)
+        coreutils.distprint(
+            f"> Save updated model at {updated_check}", args.rank)
+        return
 
     # training
     manager.run(train_sampler, trainloader, testloader, args)
@@ -219,7 +215,9 @@ class Transducer(nn.Module):
         else:
             self._pn_mask = None
 
-    def forward(self, inputs: torch.FloatTensor, targets: torch.LongTensor, input_lengths: torch.LongTensor, target_lengths: torch.LongTensor) -> torch.FloatTensor:
+    def impl_forward(self, inputs: torch.FloatTensor, targets: torch.LongTensor, input_lengths: torch.LongTensor, target_lengths: torch.LongTensor) -> torch.FloatTensor:
+
+        targets = targets.to(inputs.device, non_blocking=True)
 
         output_encoder, o_lens = self.encoder(inputs, input_lengths)
         # introduce time reduction layer
@@ -248,6 +246,13 @@ class Transducer(nn.Module):
                     output_encoder, output_decoder)
             else:
                 joint_out = self.joint(output_encoder, output_decoder)
+
+        return joint_out, o_lens
+
+    def forward(self, inputs: torch.FloatTensor, targets: torch.LongTensor, input_lengths: torch.LongTensor, target_lengths: torch.LongTensor) -> torch.FloatTensor:
+
+        joint_out, o_lens = self.impl_forward(
+            inputs, targets, input_lengths, target_lengths)
 
         if isinstance(joint_out, tuple):
             joint_out = joint_out[0]
@@ -527,7 +532,7 @@ def build_model(args, configuration: dict, dist: bool = True, verbose: bool = Tr
                 _path = ''
             else:
                 _path = config['pretrained']
-            print("  {}: freeze={} | loaded from {}".format(
+            print("{:<8}: freeze={} | loaded from {}".format(
                 module.upper(), _model.freeze, _path))
             del _path
         return _model
@@ -547,9 +552,6 @@ def build_model(args, configuration: dict, dist: bool = True, verbose: bool = Tr
         transducer_kwargs = configuration["transducer"]     # type: dict
     else:
         transducer_kwargs = {}
-
-    if 'compact' not in transducer_kwargs:
-        transducer_kwargs['compact'] = False
 
     model = Transducer(encoder=encoder, decoder=decoder,
                        jointnet=jointnet, **transducer_kwargs)
