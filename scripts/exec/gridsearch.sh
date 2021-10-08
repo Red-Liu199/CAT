@@ -76,5 +76,5 @@ done
 if [ $cer == "True" ]; then
     cat $dec_dir/result | grep "CER" | sort -g -k 4 >$dec_dir/grid_out
 else
-    cat $dec_dir/result | grep "CER" | sort -g -k 4 >$dec_dir/grid_out
+    cat $dec_dir/result | grep "WER" | sort -g -k 4 >$dec_dir/grid_out
 fi

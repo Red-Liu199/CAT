@@ -247,11 +247,11 @@ class Transducer(nn.Module):
             else:
                 joint_out = self.joint(output_encoder, output_decoder)
 
-        return joint_out, o_lens
+        return joint_out, targets, o_lens, target_lengths
 
     def forward(self, inputs: torch.FloatTensor, targets: torch.LongTensor, input_lengths: torch.LongTensor, target_lengths: torch.LongTensor) -> torch.FloatTensor:
 
-        joint_out, o_lens = self.impl_forward(
+        joint_out, targets, o_lens, target_lengths = self.impl_forward(
             inputs, targets, input_lengths, target_lengths)
 
         if isinstance(joint_out, tuple):
@@ -264,12 +264,14 @@ class Transducer(nn.Module):
 
         with coreutils.autocast(enabled=False):
             if self.isfused:
-                loss = RNNTFusedLoss(joint_out.float(), targets.to(dtype=torch.int32), o_lens.to(device=joint_out.device,
-                                                                                                 dtype=torch.int32), target_lengths.to(device=joint_out.device, dtype=torch.int32),
-                                     reduction=reduction)
+                loss = RNNTFusedLoss(joint_out.float(), targets.to(dtype=torch.int32),
+                                     o_lens.to(device=joint_out.device,
+                                               dtype=torch.int32),
+                                     target_lengths.to(device=joint_out.device, dtype=torch.int32), reduction=reduction)
             else:
-                loss = RNNTLoss(joint_out.float(), targets.to(dtype=torch.int32), o_lens.to(device=joint_out.device,
-                                                                                            dtype=torch.int32), target_lengths.to(device=joint_out.device, dtype=torch.int32),
+                loss = RNNTLoss(joint_out.float(), targets.to(dtype=torch.int32),
+                                o_lens.to(device=joint_out.device, dtype=torch.int32), target_lengths.to(
+                                    device=joint_out.device, dtype=torch.int32),
                                 reduction=reduction, gather=True, compact=self._compact)
 
         return loss

@@ -113,10 +113,10 @@ for set in $(echo $test_set | tr ':' '\n'); do
     fi
     if [ -f $dec_dir/decode_${set}.txt ]; then
         echo -n "$set $prefix" >>$dec_dir/result
-        python exec/wer.py data/$set/text $dec_dir/decode_${set}.txt --stripid >>$dec_dir/result || exit 1
         if [ $cer == "True" ]; then
-            echo -n "$set $prefix" >>$dec_dir/result
             python exec/wer.py data/$set/text $dec_dir/decode_${set}.txt --stripid --cer >>$dec_dir/result || exit 1
+        else
+            python exec/wer.py data/$set/text $dec_dir/decode_${set}.txt --stripid >>$dec_dir/result || exit 1
         fi
     else
         echo "No decoded text found: $dec_dir/decode_${set}.txt"
