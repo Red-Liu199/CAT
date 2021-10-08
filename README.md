@@ -27,7 +27,7 @@
    
    # warp-rnnt >= 0.7.0
    cd warp-rnnt/pytorch_binding/
-   git checkout -r origin/dev
+   git checkout -t origin/dev
    python setup.py install
    cd ../../
    
