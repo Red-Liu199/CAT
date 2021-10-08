@@ -73,6 +73,9 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
                              model=manager.model, gpu_info=gpu_info)
 
     if args.evaluate:
+        if args.resume is None:
+            raise RuntimeError("--evaluate option must be with --resume")
+
         manager.model.eval()
 
         ppl = 0.
