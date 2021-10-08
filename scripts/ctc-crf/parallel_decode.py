@@ -81,7 +81,7 @@ def main_worker(gpu: int, args: argparse.Namespace):
     if device != 'cpu':
         torch.cuda.set_device(device)
 
-    if args.lm_weight == 0.0 or args.lm_dir is None:
+    if args.lm_weight == 0.0 or args.ext_lm_config is None or args.ext_lm_check is None:
         model = gen_model(args, device)
         ext_lm = None
     else:

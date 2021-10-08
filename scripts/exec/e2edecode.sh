@@ -32,6 +32,10 @@ opts=$(python exec/parseopt.py '{
             "default": 5,
             "help": "Beam search width. Default: 5"
         },
+        "--dec-dir":{
+            "type":"str",
+            "help": "Decode output directory. Default: beam-{beam_size}-{lm_weight}"
+        },
         "--cpu":{
             "action":"store_true",
             "help": "Use cpu to decode. Default: False"
@@ -42,18 +46,24 @@ opts=$(python exec/parseopt.py '{
         }
     }' $0 $*) && eval $opts || exit 1
 
-echo "Decoding..."
+
 mode='beam'
 echo "> Settings: mode=$mode | beam-width=$beam_size | lm-weight=$lm_weight"
+
 if [ $(echo "$lm_weight > 0.0" | bc -l) -eq 1 ]; then
+    prefix="ext_lm=$lm_weight "
     echo "  Ensure modeling unit of transducer is the same as that of extra LM."
+else
+    prefix="ext_lm= "
 fi
 
 if [ $cpu == "True" ]; then
     export CUDA_VISIBLE_DEVICES=""
 fi
 
-dec_dir=$dir/${mode}-${beam_size}-$lm_weight
+if [ $dec_dir == "None" ]; then
+    dec_dir=$dir/${mode}-${beam_size}-$lm_weight
+fi
 mkdir -p $dec_dir
 mkdir -p $dir/enc
 checkpoint=$dir/checks/$check
@@ -102,9 +112,10 @@ for set in $(echo $test_set | tr ':' '\n'); do
         exit 1
     fi
     if [ -f $dec_dir/decode_${set}.txt ]; then
-        echo -n "$set " >>$dec_dir/result
+        echo -n "$set $prefix" >>$dec_dir/result
         python exec/wer.py data/$set/text $dec_dir/decode_${set}.txt --stripid >>$dec_dir/result || exit 1
         if [ $cer == "True" ]; then
+            echo -n "$set $prefix" >>$dec_dir/result
             python exec/wer.py data/$set/text $dec_dir/decode_${set}.txt --stripid --cer >>$dec_dir/result || exit 1
         fi
     else
