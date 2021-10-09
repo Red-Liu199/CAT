@@ -27,8 +27,6 @@ def average_checkpoints(inputs):
     params_dict = collections.OrderedDict()
     params_keys = None
     new_state = None
-    # reverse the order the checkpoints for the convenience of saving the log in last checkpoint
-    inputs = list(inputs)[::-1]
     num_models = len(inputs)
 
     for fpath in inputs:
@@ -146,6 +144,8 @@ def main():
                 args.output = os.path.join(
                     fdir, f'avg_{upper}_{num}.pt')
 
+    # reverse the order the checkpoints for the convenience of saving the log in last checkpoint
+    list_path = sorted(list_path, reverse=True)
     print("Averaging checkpoints:\n"+'\n'.join(list_path))
 
     new_state = average_checkpoints(list_path)

@@ -90,7 +90,6 @@ if [ $stage -le 3 ] && [ $stop_stage -ge 3 ]; then
         --batch_size=512 \
         --dir=$dir \
         --config=$dir/lm_config.json \
-        --data=data/ \
         --trset=$textdir/tr.pkl \
         --devset=$textdir/dev.pkl ||
         exit 1

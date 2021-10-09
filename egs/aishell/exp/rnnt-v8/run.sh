@@ -61,7 +61,6 @@ if [ $stage -le 3 ] && [ $stop_stage -ge 3 ]; then
         --batch_size=512 \
         --dir=$dir \
         --config=$dir/config.json \
-        --data=data/ \
         --trset=$dir/pkl/tr.pkl \
         --devset=$dir/pkl/cv.pkl \
         --grad-accum-fold=1 \

@@ -675,8 +675,6 @@ def BasicDDPParser(istraining: bool = True, prog: str = '') -> argparse.Argument
         parser.add_argument("--checkall", action="store_true",
                             help="Save all checkpoints instead only the recent one.")
 
-        parser.add_argument("--data", type=str, default=None,
-                            help="Location of training/testing data.")
         parser.add_argument("--trset", type=str, default=None,
                             help="Location of training data. Default: <data>/[pickle|hdf5]/tr.[pickle|hdf5]")
         parser.add_argument("--devset", type=str, default=None,

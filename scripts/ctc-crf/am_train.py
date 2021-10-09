@@ -209,6 +209,8 @@ if __name__ == "__main__":
     parser = coreutils.BasicDDPParser()
     parser.add_argument("--h5py", action="store_true",
                         help="Load data with H5py, defaultly use pickle (recommended).")
+    parser.add_argument("--data", type=str, default=None,
+                        help="Location of training/testing data.")
 
     args = parser.parse_args()
 
