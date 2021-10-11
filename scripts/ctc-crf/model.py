@@ -7,8 +7,9 @@ In this file, we define universal models
 """
 
 import numpy as np
-import _layers as nnlayers
+import _layers
 from collections import OrderedDict
+from typing import Literal
 
 import torch
 import torch.nn as nn
@@ -30,7 +31,7 @@ class LSTM(nn.Module):
                  dropout: float,
                  bidirectional: bool = False):
         super().__init__()
-        self.lstm = nnlayers._LSTM(
+        self.lstm = _layers._LSTM(
             idim, hdim, n_layers, dropout, bidirectional=bidirectional)
 
         if bidirectional:
@@ -54,7 +55,7 @@ class VGGLSTM(LSTM):
         super().__init__(get_vgg2l_odim(idim, in_channel=in_channel), hdim,
                          n_layers, num_classes, dropout, bidirectional=bidirectional)
 
-        self.VGG = nnlayers.VGG2L(in_channel)
+        self.VGG = _layers.VGG2L(in_channel)
 
     def forward(self, x: torch.Tensor, ilens: torch.Tensor):
         vgg_o, vgg_lens = self.VGG(x, ilens)
@@ -71,8 +72,8 @@ class LSTMrowCONV(nn.Module):
     def __init__(self, idim: int, hdim: int, n_layers: int, num_classes: int, dropout: float):
         super().__init__()
 
-        self.lstm = nnlayers._LSTM(idim, hdim, n_layers, dropout)
-        self.lookahead = nnlayers.Lookahead(hdim, context=5)
+        self.lstm = _layers._LSTM(idim, hdim, n_layers, dropout)
+        self.lookahead = _layers.Lookahead(hdim, context=5)
         self.linear = nn.Linear(hdim, num_classes)
 
     def forward(self, x: torch.Tensor, ilens: torch.Tensor, hidden=None):
@@ -86,15 +87,15 @@ class TDNN_NAS(torch.nn.Module):
         super().__init__()
 
         self.dropout = nn.Dropout(dropout)
-        self.tdnns = nn.ModuleDict(OrderedDict({
-            'tdnn0': nnlayers.TDNN(idim, hdim, half_context=2, dilation=1),
-            'tdnn1': nnlayers.TDNN(idim, hdim, half_context=2, dilation=2),
-            'tdnn2': nnlayers.TDNN(idim, hdim, half_context=2, dilation=1),
-            'tdnn3': nnlayers.TDNN(idim, hdim, stride=3),
-            'tdnn4': nnlayers.TDNN(idim, hdim, half_context=2, dilation=2),
-            'tdnn5': nnlayers.TDNN(idim, hdim, half_context=2, dilation=1),
-            'tdnn6': nnlayers.TDNN(idim, hdim, half_context=2, dilation=2)
-        }))
+        self.tdnns = nn.ModuleDict(OrderedDict([
+            ('tdnn0', _layers.TDNN(idim, hdim, half_context=2, dilation=1)),
+            ('tdnn1', _layers.TDNN(idim, hdim, half_context=2, dilation=2)),
+            ('tdnn2', _layers.TDNN(idim, hdim, half_context=2, dilation=1)),
+            ('tdnn3', _layers.TDNN(idim, hdim, stride=3)),
+            ('tdnn4', _layers.TDNN(idim, hdim, half_context=2, dilation=2)),
+            ('tdnn5', _layers.TDNN(idim, hdim, half_context=2, dilation=1)),
+            ('tdnn6', _layers.TDNN(idim, hdim, half_context=2, dilation=2))
+        ]))
 
         self.linear = nn.Linear(hdim, num_classes)
 
@@ -112,15 +113,15 @@ class TDNN_LSTM(torch.nn.Module):
     def __init__(self, idim: int, hdim: int, n_layers: int, num_classes: int,  dropout: float):
         super().__init__()
 
-        self.tdnn_init = nnlayers.TDNN(idim, hdim)
+        self.tdnn_init = _layers.TDNN(idim, hdim)
         assert n_layers > 0
         self.n_layers = n_layers
         self.cells = nn.ModuleDict()
         for i in range(n_layers):
-            self.cells[f"tdnn{i}-0"] = nnlayers.TDNN(hdim, hdim)
-            self.cells[f"tdnn{i}-1"] = nnlayers.TDNN(hdim, hdim)
-            self.cells[f"lstm{i}"] = nnlayers._LSTM(hdim, hdim, 1)
-            self.cells[f"bn{i}"] = nnlayers.MaskedBatchNorm1d(
+            self.cells[f"tdnn{i}-0"] = _layers.TDNN(hdim, hdim)
+            self.cells[f"tdnn{i}-1"] = _layers.TDNN(hdim, hdim)
+            self.cells[f"lstm{i}"] = _layers._LSTM(hdim, hdim, 1)
+            self.cells[f"bn{i}"] = _layers.MaskedBatchNorm1d(
                 hdim, eps=1e-5, affine=True)
             self.cells[f"dropout{i}"] = nn.Dropout(dropout)
 
@@ -151,9 +152,9 @@ class BLSTMN(torch.nn.Module):
                 inputdim = idim
             else:
                 inputdim = hdim * 2
-            self.cells[f"lstm{i}"] = nnlayers._LSTM(
+            self.cells[f"lstm{i}"] = _layers._LSTM(
                 inputdim, hdim, 1, bidirectional=True)
-            self.cells[f"bn{i}"] = nnlayers.MaskedBatchNorm1d(
+            self.cells[f"bn{i}"] = _layers.MaskedBatchNorm1d(
                 hdim*2, eps=1e-5, affine=True)
             self.cells[f"dropout{i}"] = nn.Dropout(dropout)
 
@@ -162,11 +163,11 @@ class BLSTMN(torch.nn.Module):
     def forward(self, x: torch.Tensor, ilens: torch.Tensor):
         tmp_x, tmp_lens = x, ilens
         for i in range(self.n_layers):
-            tmpx, tmp_lens = self.cells[f"lstm{i}"](tmpx, tmp_lens)
-            tmpx = self.cells[f"bn{i}"](tmpx, tmp_lens)
-            tmpx = self.cells[f"dropout{i}"](tmpx)
+            tmp_x, tmp_lens = self.cells[f"lstm{i}"](tmp_x, tmp_lens)
+            tmp_x = self.cells[f"bn{i}"](tmp_x, tmp_lens)
+            tmp_x = self.cells[f"dropout{i}"](tmp_x)
 
-        return self.linear(tmpx), tmp_lens
+        return self.linear(tmp_x), tmp_lens
 
 
 class ConformerNet(nn.Module):
@@ -194,6 +195,7 @@ class ConformerNet(nn.Module):
             idim: int,
             hdim: int,
             num_classes: int,
+            conv: Literal['conv2d', 'vgg2l'] = 'conv2d',
             conv_multiplier: int = None,
             dropout_in: float = 0.2,
             res_factor: float = 0.5,
@@ -208,23 +210,34 @@ class ConformerNet(nn.Module):
         super().__init__()
 
         if delta_feats:
-            idim = idim // 3
-        if conv_multiplier is None:
-            conv_multiplier = hdim
-        self.conv_subsampling = nnlayers.Conv2dSubdampling(
-            conv_multiplier, norm=subsample_norm, stacksup=delta_feats)
-        self.linear_drop = nn.Sequential(OrderedDict({
-            'linear': nn.Linear((idim // 4) * conv_multiplier, hdim),
-            'dropout': nn.Dropout(dropout_in)
-        }))
+            in_channel = 3
+        else:
+            in_channel = 1
+
+        if conv == 'vgg2l':
+            self.conv_subsampling = _layers.VGG2LSubsampling(in_channel)
+            conv_dim = 128 * (idim//in_channel//4)
+        elif conv == 'conv2d':
+            if conv_multiplier is None:
+                conv_multiplier = hdim
+            self.conv_subsampling = _layers.Conv2dSubdampling(
+                conv_multiplier, norm=subsample_norm, stacksup=delta_feats)
+            conv_dim = conv_multiplier * (idim//in_channel//4)
+        else:
+            raise RuntimeError(f"Unknown type of convolutional layer: {conv}")
+
+        self.linear_drop = nn.Sequential(OrderedDict([
+            ('linear', nn.Linear(conv_dim, hdim)),
+            ('dropout', nn.Dropout(dropout_in))
+        ]))
+
         self.cells = nn.ModuleList()
-        pe = nnlayers.PositionalEncoding(hdim)
-        for i in range(num_cells):
-            cell = nnlayers.ConformerCell(
-                hdim, res_factor, d_head, num_heads, kernel_size, multiplier, dropout, dropout_attn)
+        pe = _layers.PositionalEncoding(hdim)
+        for _ in range(num_cells):
+            cell = _layers.ConformerCell(
+                hdim, pe, res_factor, d_head, num_heads, kernel_size, multiplier, dropout, dropout_attn)
             self.cells.append(cell)
-            # FIXME: Note that this is somewhat hard-code style
-            cell.mhsam.mha.pe = pe
+
         self.classifier = nn.Linear(hdim, num_classes)
 
     def forward(self, x: torch.Tensor, lens: torch.Tensor):
@@ -240,29 +253,15 @@ class ConformerNet(nn.Module):
 
 class ConformerLSTM(ConformerNet):
     def __init__(self,
-                 num_cells: int,
-                 idim: int,
-                 hdim: int,
-                 num_classes: int,
                  hdim_lstm: int,
                  num_lstm_layers: int,
                  dropout_lstm: float,
-                 conv_multiplier: int = None,
-                 dropout_in: float = 0.2,
-                 res_factor: float = 0.5,
-                 d_head: int = 36,
-                 num_heads: int = 4,
-                 kernel_size: int = 32,
-                 multiplier: int = 1,
-                 dropout: float = 0.1,
-                 dropout_attn: float = 0,
-                 delta_feats: bool = False,
-                 subsample_norm: str = 'none'):
-        super().__init__(num_cells, idim, hdim, num_classes, conv_multiplier=conv_multiplier, dropout_in=dropout_in, res_factor=res_factor, d_head=d_head, num_heads=num_heads,
-                         kernel_size=kernel_size, multiplier=multiplier, dropout=dropout, dropout_attn=dropout_attn, delta_feats=delta_feats, subsample_norm=subsample_norm)
+                 *args, **kwargs):
 
-        self.lstm = nnlayers._LSTM(
-            idim=hdim, hdim=hdim_lstm, n_layers=num_lstm_layers, dropout=dropout_lstm)
+        super().__init__(*args, **kwargs)
+
+        self.lstm = _layers._LSTM(idim=self.linear_drop.linear.out_channels,
+                                   hdim=hdim_lstm, n_layers=num_lstm_layers, dropout=dropout_lstm)
 
     def forward(self, x: torch.Tensor, lens: torch.Tensor):
         conv_x, conv_ls = super().forward(x, lens)

@@ -207,11 +207,11 @@ class LSTMPredictNet(nn.Module):
             odim = hdim
 
         if classical:
-            self.classifier = nn.Sequential(OrderedDict({
-                'proj': nn.Linear(odim, odim),
-                'act': nn.ReLU(),
-                'linear': nn.Linear(odim, num_classes)
-            }))
+            self.classifier = nn.Sequential(OrderedDict([
+                ('proj', nn.Linear(odim, odim)),
+                ('act', nn.ReLU()),
+                ('linear', nn.Linear(odim, num_classes))
+            ]))
         else:
             self.classifier = nn.Linear(odim, num_classes)
 
@@ -272,7 +272,6 @@ def build_model(args, configuration, dist=True, wrapper=True) -> LMTrainer:
     def _build_decoder(config) -> nn.Module:
         LMNet = eval(config['type'])    # type: Union[PlainPN | LSTMPredictNet]
         NetKwargs = config['kwargs']
-        # FIXME: flexible decoder network like encoder.
         return LMNet(**NetKwargs)
 
     assert 'decoder' in configuration

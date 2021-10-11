@@ -170,7 +170,7 @@ class Manager(object):
         self.scheduler.load_state_dict(checkpoint['scheduler'])
         self.log = checkpoint['log']
 
-        # FIXME(huahuan): for compatible with old version, will be deprecated.
+        # FIXME (huahuan): for compatible with old version, will be deprecated in the future.
         if 'epoch' in checkpoint:
             self.epoch = checkpoint['epoch']
         if 'step' in checkpoint:
@@ -443,7 +443,7 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
     batch_time = AverageMeter('Time', ':6.3f')
     losses = AverageMeter('Loss', ':.3e')
     if fold > 1:
-        # FIXME(Huahuan): it's difficult to monitor data loading time with fold > 1
+        # FIXME (huahuan): it's difficult to monitor data loading time with fold > 1
         data_time = None
         progress = ProgressMeter(
             args.n_steps,

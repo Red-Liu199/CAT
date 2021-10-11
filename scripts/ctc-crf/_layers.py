@@ -137,6 +137,63 @@ class Conv2dSubdampling(nn.Module):
 
 
 '''
+VGG2L with 1/4 subsample of time dimension.
+In ESPNET impl, there is no normalization, so I just follow it.
+Reference:
+https://espnet.github.io/espnet/_modules/espnet/nets/pytorch_backend/rnn/encoders.html#VGG2L
+'''
+
+
+class VGG2LSubsampling(nn.Module):
+    def __init__(self, in_channel: int = 1):
+        '''VGG 1/4 subsample layer
+
+        Input: shape (B, T, D)
+        Ouput: shape (B, T//4, 128*(D//C//4)),
+            C: in_channel, ensure `D % C == 0`
+
+        '''
+        super().__init__()
+
+        self.vgg_conv = nn.Sequential(
+            # first block
+            nn.Conv2d(in_channel, 64, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, 3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2, ceil_mode=True),
+            # second block
+            nn.Conv2d(64, 128, 3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(128, 128, 3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2, ceil_mode=True)
+        )
+        self.in_channel = in_channel
+
+    def forward(self, x: torch.Tensor, lens: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+
+        # [B, T, D] -> [B, C, T, D//C]
+        x = x.view(
+            x.size(0),
+            x.size(1),
+            self.in_channel,
+            x.size(2) // self.in_channel,
+        ).transpose(1, 2)
+
+        # [B, C, T, D//C] -> [B, 128, T//4, D//C//4]
+        conv_out = self.vgg_conv(x)  # type:torch.Tensor
+        # [B, 128, T//4, D//C//4] -> [B, T//4, 128, D//C//4]
+        transposed_out = conv_out.transpose(1, 2)
+        # [B, T//4, 128, D//C//4] -> [B, T//4, 128 * (D//C//4)]
+        contiguous_out = transposed_out.contiguous().view(
+            transposed_out.size(0), transposed_out.size(1), -1)
+
+        lens_out = torch.ceil(torch.ceil(lens/2)/2)
+        return contiguous_out, lens_out
+
+
+'''
 PositionalEncoding: From PyTorch implementation
 The origin impl return pos_enc + x. Our impl only return pos_enc
 '''
@@ -174,13 +231,13 @@ class RelPositionMultiHeadAttention(nn.Module):
         idim: int,
         n_head: int,
         d_head: int,
-        dropatt: float = 0.
+        pe: PositionalEncoding,
+        dropatt: float = 0.0
     ):
 
         super().__init__()
 
-        # Define positional encoding in SuperNet level for efficient memory
-        self.pe = None
+        self.pe = pe
 
         self.n_head = n_head
         self.d_model = idim
@@ -348,8 +405,8 @@ class RelPositionMultiHeadAttention(nn.Module):
 
 
 class StandardRelPositionalMultiHeadAttention(RelPositionMultiHeadAttention):
-    def __init__(self, idim: int, n_head: int, dropatt: float = 0):
-        super().__init__(idim, n_head, idim//n_head, dropatt=dropatt)
+    def __init__(self, idim: int, n_head: int, pe: PositionalEncoding, dropatt: float = 0):
+        super().__init__(idim, n_head, idim//n_head, pe, dropatt=dropatt)
 
 
 class FFModule(nn.Module):
@@ -430,17 +487,17 @@ class ConvModule(nn.Module):
 
 
 class MHSAModule(nn.Module):
-    def __init__(self, idim, d_head: int, num_heads: int, dropout: float = 0.0, dropout_attn: float = 0.0):
+    def __init__(self, idim, d_head: int, num_heads: int, pe: PositionalEncoding, dropout: float = 0.0, dropout_attn: float = 0.0):
         super().__init__()
 
         self.ln = nn.LayerNorm(idim)
         if d_head == -1:
             # a "standard" multi-head attention
             self.mha = StandardRelPositionalMultiHeadAttention(
-                idim, num_heads, dropout_attn)
+                idim, num_heads, pe, dropout_attn)
         else:
             self.mha = RelPositionMultiHeadAttention(
-                idim, num_heads, d_head, dropout_attn)
+                idim, num_heads, d_head, pe, dropout_attn)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor, lens: torch.Tensor, mems=None):
@@ -454,6 +511,7 @@ class ConformerCell(nn.Module):
     def __init__(
             self,
             idim: int,
+            pe: PositionalEncoding,
             res_factor: float = 0.5,
             d_head: int = 36,
             num_heads: int = 4,
@@ -464,7 +522,8 @@ class ConformerCell(nn.Module):
         super().__init__()
 
         self.ffm0 = FFModule(idim, res_factor, dropout)
-        self.mhsam = MHSAModule(idim, d_head, num_heads, dropout, dropout_attn)
+        self.mhsam = MHSAModule(idim, d_head, num_heads,
+                                pe, dropout, dropout_attn)
         self.convm = ConvModule(
             idim, kernel_size, dropout, multiplier)
         self.ffm1 = FFModule(idim, res_factor, dropout)
@@ -545,7 +604,7 @@ class TDNN(nn.Module):
 
         self.conv = torch.nn.Conv1d(
             idim, odim, 2*half_context+1, stride=stride, padding=padding, dilation=dilation)
-        # FIXME: (Huahuan) I think we should use layernorm instead of batchnorm
+        # NOTE (Huahuan): I think we should use layernorm instead of batchnorm
         # self.bn = MaskedBatchNorm1d(odim, eps=1e-5, affine=True)
         self.ln = nn.LayerNorm(odim)
 
@@ -608,22 +667,24 @@ class CausalConv2d(nn.Module):
                 f"Invalid initialization for CausalConv2d: {in_channels}, {out_channels}, {kernel_size}")
 
         if islast:
-            self.causal_conv = nn.Sequential(OrderedDict({
+            self.causal_conv = nn.Sequential(OrderedDict([
                 # seperate convlution
-                'depth_conv': nn.Conv2d(in_channels, in_channels, kernel_size=kernel_size, groups=in_channels),
-                'point_conv': nn.Conv2d(in_channels, out_channels, kernel_size=1)
+                ('depth_conv', nn.Conv2d(in_channels, in_channels,
+                 kernel_size=kernel_size, groups=in_channels)),
+                ('point_conv', nn.Conv2d(in_channels, out_channels, kernel_size=1))
                 # 'conv': nn.Conv2d(in_channels, out_channels, kernel_size)
-            }))
+            ]))
         else:
-            # FIXME: I think a normalization is helpful so that the padding won't change the distribution of features.
-            self.causal_conv = nn.Sequential(OrderedDict({
+            # FIXME (Huahuan): I think a normalization is helpful so that the padding won't change the distribution of features.
+            self.causal_conv = nn.Sequential(OrderedDict([
                 # seperate convlution
-                'depth_conv': nn.Conv2d(in_channels, in_channels, kernel_size=kernel_size, groups=in_channels),
-                'point_conv': nn.Conv2d(in_channels, out_channels, kernel_size=1),
-                'relu': nn.ReLU(inplace=True),
-                'bn': nn.BatchNorm2d(in_channels),
+                ('depth_conv', nn.Conv2d(in_channels, in_channels,
+                 kernel_size=kernel_size, groups=in_channels)),
+                ('point_conv', nn.Conv2d(in_channels, out_channels, kernel_size=1)),
+                ('relu', nn.ReLU(inplace=True)),
+                ('bn', nn.BatchNorm2d(in_channels)),
                 # 'conv': nn.Conv2d(in_channels, out_channels, kernel_size)
-            }))
+            ]))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.causal_conv(x)
