@@ -1,11 +1,30 @@
-pidcur=$(ps aux | grep run.sh | grep -v grep | grep zhenghh | awk '{print $2}')
+opts=$(python exec/parseopt.py '{
+        "run":{
+            "type": "str",
+            "help": "Experiment names, split by ':'. Such as: \"rnnt-v1:rnnt-v2\"."
+        },
+        "--script":{
+            "type":"str",
+            "default": "run.sh",
+            "help": "Name of the current running script. Default: run.sh"
+        },
+        "--sleep":{
+            "type":"int",
+            "default": 120,
+            "help": "Sleep seconds between heart beats. Default: 120"
+        }
+    }' $0 $*) && eval $opts || exit 1
 
+pidcur=$(ps aux | grep $script | grep -v grep | grep zhenghh | awk '{print $2}')
+
+i=0
 while [[ $(ps aux | grep $pidcur | grep -v grep) ]]; do
-    echo "Heart beat."
-    sleep 300
+    echo "[$i] Heart beat."
+    sleep $sleep
+    i=$(($i + 1))
 done
 
-for id in 9; do
-    bash exp/rnnt-v$id/run.sh --sta 3 || exit 1
+for expid in $(echo $test_set | tr ':' '\n'); do
+    bash exp/expid/$script --sta 3 || exit 1
 done
 echo "Done."
