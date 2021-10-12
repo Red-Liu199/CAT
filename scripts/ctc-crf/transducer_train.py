@@ -198,6 +198,11 @@ class Transducer(nn.Module):
         self.decoder = decoder
         self.joint = jointnet
         self._compact = compact and isinstance(jointnet, JointNet)
+
+        if fused and not hasattr(self.joint, 'skip_softmax_forward'):
+            raise RuntimeError(
+                f"class {self.joint.__name__} doesn't have method \'skip_softmax_forward\' implemented.")
+
         self.isfused = fused
         if self.isfused and not self._compact:
             print(
@@ -275,6 +280,56 @@ class Transducer(nn.Module):
                                 reduction=reduction, gather=True, compact=self._compact)
 
         return loss
+
+
+class SimJointNet(nn.Module):
+    def __init__(self, dim_tn: int, dim_pn: int, num_classes: int):
+        super().__init__()
+        assert dim_tn > 0 and isinstance(dim_tn, int)
+        assert dim_pn > 0 and isinstance(dim_pn, int)
+        assert num_classes > 0 and isinstance(num_classes, int)
+
+        if dim_tn == num_classes:
+            self.fc_tn = None
+        else:
+            self.fc_tn = nn.Linear(dim_tn, num_classes)
+
+        if dim_pn == num_classes:
+            self.fc_pn = None
+        else:
+            self.fc_pn = nn.Linear(dim_pn, num_classes)
+
+    def forward(self, tn_out: Union[torch.Tensor, PackedSequence], pn_out: Union[torch.Tensor, PackedSequence]) -> torch.FloatTensor:
+        assert not (isinstance(tn_out, PackedSequence) ^
+                    isinstance(pn_out, PackedSequence))
+
+        if isinstance(tn_out, PackedSequence):
+            if self.fc_pn is not None:
+                pn_out = pn_out.set(self.fc_pn(pn_out.data))
+
+            if self.fc_tn is not None:
+                tn_out = tn_out.set(self.fc_tn(tn_out.data))
+
+            pn_out = pn_out.set(pn_out.data.softmax(dim=-1))
+            tn_out = tn_out.set(tn_out.data.softmax(dim=-1))
+
+        else:
+            if self.fc_pn is not None:
+                pn_out = self.fc_pn(pn_out)
+
+            if self.fc_tn is not None:
+                tn_out = self.fc_tn(tn_out)
+
+            if pn_out.dim() == 3:
+                pn_out = pn_out.unsqueeze(1)
+                tn_out = tn_out.unsqueeze(2)
+
+            pn_out = pn_out.softmax(dim=-1)
+            tn_out = tn_out.softmax(dim=-1)
+
+        expand_out = torch.log(0.5 * (pn_out+tn_out))
+
+        return expand_out
 
 
 class JointNet(nn.Module):
@@ -529,7 +584,7 @@ def build_model(args, configuration: dict, dist: bool = True, verbose: bool = Tr
         else:
             setattr(_model, 'freeze', False)
 
-        if args.rank == 0 and verbose:
+        if verbose and args.rank == 0:
             if 'pretrained' not in config:
                 _path = ''
             else:
