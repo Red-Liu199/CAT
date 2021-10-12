@@ -24,7 +24,8 @@ while [[ $(ps aux | grep $pidcur | grep -v grep) ]]; do
     i=$(($i + 1))
 done
 
-for expid in $(echo $test_set | tr ':' '\n'); do
-    bash exp/expid/$script --sta 3 || exit 1
+for expid in $(echo $run | tr ':' '\n'); do
+
+    bash exp/$expid/$script --sta 3 || exit 1
 done
 echo "Done."
