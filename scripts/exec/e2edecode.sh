@@ -40,12 +40,16 @@ opts=$(python exec/parseopt.py '{
             "action":"store_true",
             "help": "Use cpu to decode. Default: False"
         },
+        "--nj":{
+            "type":"int",
+            "default": -1,
+            "help": "Number of threads when using CPU. Default: -1 (all available)."
+        },
         "--cer":{
             "action":"store_true",
             "help": "Compute CER along with WER. Default: False"
         }
     }' $0 $*) && eval $opts || exit 1
-
 
 mode='beam'
 echo "> Settings: mode=$mode | beam-width=$beam_size | lm-weight=$lm_weight"
@@ -55,6 +59,10 @@ if [ $(echo "$lm_weight > 0.0" | bc -l) -eq 1 ]; then
     echo "  Ensure modeling unit of transducer is the same as that of extra LM."
 else
     prefix="ext_lm= "
+fi
+
+if [ $nj -eq "-1" ]; then
+    nj=$nproc
 fi
 
 if [ $cpu == "True" ]; then
@@ -82,6 +90,7 @@ unset md5
 for set in $(echo $test_set | tr ':' '\n'); do
     echo "> Decoding: $set"
     python3 ctc-crf/parallel_decode.py \
+        --dist-url="tcp://127.0.0.1:13245" \
         --resume=$checkpoint \
         --config=$dir/config.json \
         --input_scp=data/all_ark/$set.scp \
@@ -89,6 +98,7 @@ for set in $(echo $test_set | tr ':' '\n'); do
         --enc-out-dir=$dir/enc \
         --spmodel=$spmodel \
         --mode=$mode \
+        --nj=$nj \
         --beam_size=$beam_size \
         --ext-lm-config=$lmdir/lm_config.json \
         --ext-lm-check=$lmdir/checks/bestckpt.pt \

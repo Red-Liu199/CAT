@@ -191,6 +191,15 @@ class CorpusDataset(Dataset):
             self._pathbin = pickle.load(fi)
             self._seeks = pickle.load(fi)
 
+    def get_seq_len(self) -> List[int]:
+        _ls = []
+        for i in range(len(self)):
+            data = self[i]
+            _ls.append(data.size(0))
+        self.dataset.close()
+        self.dataset = None
+        return _ls
+
     def __len__(self):
         return len(self._seeks)
 

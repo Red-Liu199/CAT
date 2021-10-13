@@ -10,7 +10,7 @@ and is more non-hard-coding style.
 
 import coreutils
 from am_train import setPath, main_spawner
-from dataset import sortedPadCollateLM, CorpusDataset
+import dataset as datautils
 
 import argparse
 from typing import Tuple, Union, List
@@ -36,26 +36,13 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         backend=args.dist_backend, init_method=args.dist_url,
         world_size=args.world_size, rank=args.rank)
 
-    args.batch_size = args.batch_size // ngpus_per_node
-
-    test_set = CorpusDataset(args.devset)
-    tr_set = CorpusDataset(args.trset)
-
-    train_sampler = DistributedSampler(tr_set)
+    test_set = datautils.CorpusDataset(args.devset)
     test_sampler = DistributedSampler(test_set)
-    test_sampler.set_epoch(1)
-
-    trainloader = DataLoader(
-        tr_set, batch_size=args.batch_size, shuffle=(train_sampler is None),
-        num_workers=args.workers, pin_memory=True,
-        sampler=train_sampler, collate_fn=sortedPadCollateLM())
 
     testloader = DataLoader(
         test_set, batch_size=args.batch_size, shuffle=(test_sampler is None),
         num_workers=args.workers, pin_memory=True,
-        sampler=test_sampler, collate_fn=sortedPadCollateLM())
-
-    setattr(args, 'n_steps', len(trainloader)//args.grad_accum_fold)
+        sampler=test_sampler, collate_fn=datautils.sortedPadCollateLM())
 
     manager = coreutils.Manager(build_model, args)
     # lm training does not need specaug
@@ -90,6 +77,30 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         coreutils.distprint("PPL for {} sentences: {:.2f}".format(
             len(test_set), ppl/len(test_set)), args.gpu)
         return
+
+    tr_set = datautils.CorpusDataset(args.trset)
+    setattr(args, 'n_steps', 0)
+
+    if args.databalance:
+        coreutils.distprint(
+            "> Enable data balanced loading, it takes a while to initialize...", args.gpu)
+        train_sampler = datautils.BalancedDistributedSampler(
+            tr_set, args.batch_size, args.len_norm)
+        trainloader = DataLoader(
+            tr_set, batch_sampler=train_sampler,
+            num_workers=args.workers, pin_memory=True,
+            collate_fn=datautils.sortedPadCollateLM())
+        coreutils.distprint(
+            "> Seq length info for balanced loading generated.", args.gpu)
+        args.n_steps = train_sampler.total_size//args.batch_size//args.grad_accum_fold
+    else:
+        train_sampler = DistributedSampler(tr_set)
+
+        trainloader = DataLoader(
+            tr_set, batch_size=args.batch_size//ngpus_per_node, shuffle=(train_sampler is None),
+            num_workers=args.workers, pin_memory=True,
+            sampler=train_sampler, collate_fn=datautils.sortedPadCollateLM())
+        args.n_steps = len(trainloader)//args.grad_accum_fold
 
     # training
     manager.run(train_sampler, trainloader, testloader, args)
@@ -127,7 +138,7 @@ class LMTrainer(nn.Module):
     def forward(self, inputs: torch.FloatTensor, targets: torch.LongTensor, input_lengths: torch.LongTensor, target_lengths: torch.LongTensor) -> torch.FloatTensor:
 
         # preds: (N, S, C)
-        preds, _ = self.lm(inputs)
+        preds, _ = self.lm(inputs, input_lengths=input_lengths)
 
         # squeeze preds by concat all sentences
         logits = []
@@ -138,6 +149,9 @@ class LMTrainer(nn.Module):
         logits = torch.cat(logits, dim=0)
         # targets: (\sum{S_i})
         loss = self.criterion(logits, targets)
+
+        if not self.training:
+            loss *= logits.size(0)
 
         return loss
 

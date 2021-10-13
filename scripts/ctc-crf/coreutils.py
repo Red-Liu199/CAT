@@ -681,6 +681,10 @@ def BasicDDPParser(istraining: bool = True, prog: str = '') -> argparse.Argument
                             help="Location of dev data. Default: <data>/[pickle|hdf5]/cv.[pickle|hdf5]")
         parser.add_argument("--dir", type=str, default=None, metavar='PATH',
                             help="Directory to save the log and model files.")
+        parser.add_argument("--databalance", action="store_true",
+                            help="Load data batches according to sequence lenth.")
+        parser.add_argument("--len-norm", type=str, default=None,
+                            help="Normal expression to seq len. Useful with --databalance. E.g. 'L**1.3'")
 
     parser.add_argument("--config", type=str, default=None, metavar='PATH',
                         help="Path to configuration file of backbone.")

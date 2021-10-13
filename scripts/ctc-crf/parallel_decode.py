@@ -269,7 +269,7 @@ if __name__ == '__main__':
                         help="Config of external LM.")
     parser.add_argument("--ext-lm-check", type=str, default=None,
                         help="Checkpoint of external LM.")
-    parser.add_argument("--lm-weight", type=float, default=1.0,
+    parser.add_argument("--lm-weight", type=float, default=0.1,
                         help="Weight of external LM.")
 
     parser.add_argument("--input_scp", type=str, default=None)

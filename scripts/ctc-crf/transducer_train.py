@@ -94,8 +94,7 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
             args, manager, tr_set, datautils.sortedPadCollateTransducer(), True)
         return
 
-    test_sampler = DistributedSampler(test_set)
-    test_sampler.set_epoch(1)
+    test_sampler = DistributedSampler(test_set, shuffle=False)
     testloader = DataLoader(
         test_set, batch_size=args.batch_size//ngpus_per_node, shuffle=(test_sampler is None),
         num_workers=args.workers, pin_memory=True,
@@ -635,10 +634,6 @@ if __name__ == "__main__":
                         help="Test memory print with and exit.")
     parser.add_argument("--h5py", action="store_true",
                         help="Load data with H5py, defaultly use pickle (recommended).")
-    parser.add_argument("--databalance", action="store_true",
-                        help="Load data batches according to sequence lenth.")
-    parser.add_argument("--len-norm", type=str, default=None,
-                        help="Normal expression to seq len. Useful with --databalance. E.g. 'L**1.3'")
 
     args = parser.parse_args()
 
