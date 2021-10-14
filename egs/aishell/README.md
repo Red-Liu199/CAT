@@ -15,7 +15,9 @@ Results in `%WER/%WER on averaging model`
 | [v8](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/rnnt-v8)   | `v7` + attention dropout\: 0.2 -> 0.1                                          | 6.04/5.48     | last 10   | ↑            |
 | [v10](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/rnnt-v10) | `v5` + rm spaces in transcript                                                 | 5.91/5.21     | best 10   | ↑            |
 | [v11](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/rnnt-v11) | `v10` + disable time warp, stop epoch\: 100 -> 80                              | 5.91/5.24     | best 10   | ↑            |
-| [v12](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/rnnt-v12) | `v10` + PN mask, stop epoch\: 100 -> 80                                        | **5.48/4.85** | last 10   | ↑            |
+| [v12](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/rnnt-v12) | `v10` + PN mask, stop epoch\: 100 -> 80                                        | 5.48/4.85     | last 10   | ↑            |
+| [v13](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/rnnt-v13) | `v12` + PN mask ratio: 0.2 -> 0.3, No. PN mask: 4 -> 3, stop epochs: 80 -> 100 | 5.41/4.79     | best 10   | ↑            |
+| [v14](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/rnnt-v14) | `v12` + subsample: conv2d -> vgg2l, stop epochs: 80 -> 100                     | **5.31/4.77** | best 10   | 84.30        |
 
 - 特别要注意的是，使用BPE3500建模时，设置的SentencePiece覆盖率为0.9995，使用char建模时覆盖率设置为1
 - `v1`和`v2`是初步的实验，主要用于验证代码，数据处理和模型平均等；
