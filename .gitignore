@@ -2,6 +2,7 @@ egs/**/data/
 egs/**/exp/
 egs/**/sentencepiece
 .vscode/
+tools/CAT
 *.png
 *.jpg
 *.pt

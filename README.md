@@ -9,7 +9,11 @@
 
 1. Install main dependencies
    - PyTorch: `>=1.9.0` is recommended
-   - CAT: https://github.com/thu-spmi/CAT only for data preparation. After installing the CAT, please refers to the details in tools/README.md 
+   - CAT: https://github.com/thu-spmi/CAT only for data preparation. After installing the CAT, please refers to the details in tools/README.md
+   and link directory.
+      ```bash
+      ln -s <CAT> tools/
+      ```
 
 2. Python packages
 
