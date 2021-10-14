@@ -1,13 +1,10 @@
 egs/**/data/
 egs/**/exp/
-egs/**/fbank/
+egs/**/sentencepiece
 .vscode/
 *.png
 *.jpg
 *.pt
-*.ark
-*.scp
-src/ctc_crf/openfst/
 tmp/
 
 # tmp settings

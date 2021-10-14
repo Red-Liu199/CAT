@@ -9,7 +9,7 @@
 
 1. Install main dependencies
    - PyTorch: `>=1.9.0` is recommended
-   - Kaldi: only for data preparation.
+   - CAT: https://github.com/thu-spmi/CAT only for data preparation. After installing the CAT, please refers to the details in tools/README.md 
 
 2. Python packages
 
@@ -35,9 +35,5 @@
    cd torch-gather/
    python setup.py install
    cd ../
-   
-   # ctc_crf >= 0.1.0 [optional] only used for crf training.
-   cd ctc_crf/
-   make
    ```
 

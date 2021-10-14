@@ -31,7 +31,7 @@ if [ $stage -le 1 ] && [ $stop_stage -ge 1 ]; then
         # ...Note that bos_id is not used, it will be regarded as <blk> in CTC/RNN-T training.)
         # predefined_syms="<NOISE>"
         predefined_syms=""
-        python3 ctc-crf/spm_train.py --num_threads=20 --input=$text_dir/librispeech.txt --model_prefix=$spmdata/spm \
+        python3 utils/spm_train.py --num_threads=20 --input=$text_dir/librispeech.txt --model_prefix=$spmdata/spm \
             --bos_id=0 --eos_id=-1 --unk_id=1 --vocab_size=1024 --user_defined_symbols=$predefined_syms \
             --model_type=unigram  --input_sentence_size=1000000 --shuffle_input_sentence=true \
             > $spmdata/spm_training.log 2>&1 \
@@ -112,7 +112,7 @@ if [ $stage -le 3 ] && [ $stop_stage -ge 3 ]; then
     fi
 
     CUDA_VISIBLE_DEVICES="8,7,6,5,4"  \
-    python3 ctc-crf/lm_train.py --seed=0        \
+    python3 rnnt/lm_train.py --seed=0        \
         --world-size 1 --rank 0 -j 1            \
         --batch_size=1280                       \
         --dir=$dir                              \
