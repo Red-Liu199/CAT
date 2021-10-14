@@ -95,7 +95,7 @@ def main_worker(gpu: int, args: argparse.Namespace):
 
     writer = os.path.join(args.output_dir, f'decode.{gpu}.tmp')
     beamsearcher = TransducerBeamSearcher(
-        model.decoder, model.joint, 0, args.beam_size,
+        model.decoder, model.joint, 0, args.beam_size, algo='default',
         state_beam=2.3, expand_beam=2.3, lm_module=ext_lm, lm_weight=args.lm_weight)
 
     decode(args, beamsearcher, testloader,

@@ -294,9 +294,6 @@ class SpecAug(nn.Module):
             )
         super().__init__()
         self._lens_in_args_ = None
-        self.apply_time_warp = apply_time_warp
-        self.apply_freq_mask = apply_freq_mask
-        self.apply_time_mask = apply_time_mask
         self.delta_ = delta_feats
 
         if delta_feats:

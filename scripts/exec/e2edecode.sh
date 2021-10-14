@@ -62,7 +62,7 @@ else
 fi
 
 if [ $nj -eq "-1" ]; then
-    nj=$nproc
+    nj=$(nproc)
 fi
 
 if [ $cpu == "True" ]; then

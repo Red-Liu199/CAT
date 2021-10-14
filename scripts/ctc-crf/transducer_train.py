@@ -196,7 +196,7 @@ class Transducer(nn.Module):
         self.encoder = encoder
         self.decoder = decoder
         self.joint = jointnet
-        self._compact = compact and isinstance(jointnet, JointNet)
+        self._compact = compact
 
         if fused and not hasattr(self.joint, 'skip_softmax_forward'):
             raise RuntimeError(
@@ -288,6 +288,7 @@ class SimJointNet(nn.Module):
         assert dim_pn > 0 and isinstance(dim_pn, int)
         assert num_classes > 0 and isinstance(num_classes, int)
 
+        self._skip_softmax = False
         if dim_tn == num_classes:
             self.fc_tn = None
         else:
@@ -309,9 +310,6 @@ class SimJointNet(nn.Module):
             if self.fc_tn is not None:
                 tn_out = tn_out.set(self.fc_tn(tn_out.data))
 
-            pn_out = pn_out.set(pn_out.data.softmax(dim=-1))
-            tn_out = tn_out.set(tn_out.data.softmax(dim=-1))
-
         else:
             if self.fc_pn is not None:
                 pn_out = self.fc_pn(pn_out)
@@ -323,13 +321,18 @@ class SimJointNet(nn.Module):
                 pn_out = pn_out.unsqueeze(1)
                 tn_out = tn_out.unsqueeze(2)
 
-            pn_out = pn_out.softmax(dim=-1)
-            tn_out = tn_out.softmax(dim=-1)
+        if self._skip_softmax:
+            return pn_out + tn_out
+        else:
+            expand_out = (pn_out+tn_out).log_softmax(dim=-1)
+            return expand_out
 
-        expand_out = torch.log(0.5 * (pn_out+tn_out))
 
-        return expand_out
-
+    def skip_softmax_forward(self, *args, **kwargs):
+        self._skip_softmax = True
+        outs = self.forward(*args, **kwargs)
+        self._skip_softmax = False
+        return outs
 
 class JointNet(nn.Module):
     """
