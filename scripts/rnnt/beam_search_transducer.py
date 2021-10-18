@@ -16,9 +16,10 @@ class TransducerBeamSearcher(torch.nn.Module):
         self,
         decoder,
         joint,
-        blank_id,
-        beam_size=5,
-        nbest=1,
+        blank_id: int = 0,
+        bos_id: int = 0,
+        beam_size: int = 5,
+        nbest: int = 1,
         algo: Literal['default', 'espnet'] = 'default',
         lm_module=None,
         lm_weight=0.0,
@@ -30,6 +31,7 @@ class TransducerBeamSearcher(torch.nn.Module):
         self.decoder = decoder
         self.joint = joint
         self.blank_id = blank_id
+        self.bos_id = bos_id
         self.beam_size = beam_size
         self.nbest = nbest
         self.lm = lm_module
@@ -197,21 +199,17 @@ class TransducerBeamSearcher(torch.nn.Module):
         # min between beam and max_target_lent
         nbest_batch = []
         nbest_batch_score = []
+        dummy_tensor = torch.empty(
+            (1, 1), device=tn_output.device, dtype=torch.int32)
+        blank = self.blank_id * torch.ones_like(dummy_tensor)
         for i_batch in range(tn_output.size(0)):
             # if we use RNN LM keep there hiddens
             # prepare BOS = Blank for the Prediction Network (PN)
             # Prepare Blank prediction
-            blank = (
-                torch.ones((1, 1), device=tn_output.device, dtype=torch.int32)
-                * self.blank_id
-            )
-            input_PN = (
-                torch.ones((1, 1), device=tn_output.device, dtype=torch.int32)
-                * self.blank_id
-            )
+            input_PN = torch.ones_like(dummy_tensor) * self.bos_id
             # First forward-pass on PN
             hyp = {
-                "prediction": [self.blank_id],
+                "prediction": [self.bos_id],
                 "logp_score": 0.0,
                 "hidden_dec": None,
             }

@@ -186,9 +186,16 @@ class LSTMPredictNet(nn.Module):
                  variational_noise: Union[Tuple[float,
                                                 float], List[float]] = None,
                  classical: bool = True,
+                 padding_idx: int = -1,
                  *rnn_args, **rnn_kwargs):
         super().__init__()
-        self.embedding = nn.Embedding(num_classes, hdim)
+        if padding_idx == -1:
+            self.embedding = nn.Embedding(num_classes, hdim)
+        else:
+            assert isinstance(padding_idx, int)
+            assert padding_idx >= 0
+            self.embedding = nn.Embedding(
+                num_classes, hdim, padding_idx=padding_idx)
 
         rnn_kwargs['batch_first'] = True
         if norm:

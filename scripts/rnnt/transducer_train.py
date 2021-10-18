@@ -191,7 +191,8 @@ class Transducer(nn.Module):
                  fused: bool = False,
                  time_reduction: int = 1,
                  decoder_mask_range: float = 0.1,
-                 num_decoder_mask: int = -1):
+                 num_decoder_mask: int = -1,
+                 bos_id: int = 0):
         super().__init__()
         self.encoder = encoder
         self.decoder = decoder
@@ -219,6 +220,8 @@ class Transducer(nn.Module):
         else:
             self._pn_mask = None
 
+        self.bos_id = bos_id
+
     def impl_forward(self, inputs: torch.FloatTensor, targets: torch.LongTensor, input_lengths: torch.LongTensor, target_lengths: torch.LongTensor) -> torch.FloatTensor:
 
         targets = targets.to(inputs.device, non_blocking=True)
@@ -229,7 +232,7 @@ class Transducer(nn.Module):
             output_encoder, o_lens = self._t_reduction(output_encoder, o_lens)
 
         padded_targets = torch.cat(
-            [targets.new_zeros((targets.size(0), 1)), targets], dim=-1)
+            [targets.new_full((targets.size(0), 1), self.bos_id), targets], dim=-1)
         output_decoder, _ = self.decoder(padded_targets)
 
         if self._pn_mask is not None:
