@@ -1,0 +1,76 @@
+{
+    "decoder": {
+        "kwargs": {
+            "classical": false,
+            "hdim": 512,
+            "num_classes": 1024,
+            "num_layers": 1,
+            "variational_noise": [
+                0.0,
+                0.075
+            ]
+        },
+        "type": "LSTMPredictNet"
+    },
+    "encoder": {
+        "kwargs": {
+            "conv": "vgg2l",
+            "d_head": -1,
+            "dropout": 0.3,
+            "dropout_attn": 0.3,
+            "hdim": 512,
+            "idim": 80,
+            "kernel_size": 15,
+            "num_cells": 12,
+            "num_classes": 1024,
+            "num_heads": 4
+        },
+        "type": "ConformerNet"
+    },
+    "joint": {
+        "kwargs": {
+            "classical": false,
+            "hdim": 512,
+            "num_classes": 1024,
+            "odim_decoder": 512,
+            "odim_encoder": 512
+        },
+        "type": "JointNet"
+    },
+    "scheduler": {
+        "kwargs": {
+            "d_model": 512,
+            "epoch_max": 200,
+            "peak_factor": 1.0,
+            "reverse_metric_direc": true,
+            "warmup_steps": 25000
+        },
+        "optimizer": {
+            "kwargs": {
+                "betas": [
+                    0.9,
+                    0.98
+                ],
+                "lr": 0.0003,
+                "weight_decay": 1e-06
+            },
+            "type": "Adam",
+            "use_zero": true
+        },
+        "type": "SchedulerTransformer"
+    },
+    "specaug_config": {
+        "freq_mask_width_range": 0.34,
+        "num_freq_mask": 2,
+        "num_time_mask": 5,
+        "time_mask_width_range": 0.1,
+        "time_warp_window": 0.2
+    },
+    "transducer": {
+        "compact": true,
+        "decoder_mask_range": 0.2,
+        "fused": true,
+        "num_decoder_mask": 4,
+        "time_reduction": 2
+    }
+}

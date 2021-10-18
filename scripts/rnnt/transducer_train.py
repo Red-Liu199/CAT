@@ -350,17 +350,10 @@ class JointNet(nn.Module):
                  num_classes: int,
                  hdim: int = -1,
                  HAT: bool = False,
-                 act: Literal['tanh', 'relu'] = 'tanh',
-                 # NOTE: classical for compatiblity of old version, will be deprecated soon
-                 classical: bool = True):
+                 joint_mode: Literal['add', 'cat'] = 'add',
+                 act: Literal['tanh', 'relu'] = 'tanh'):
         super().__init__()
         self._skip_softmax = False
-        if classical:
-            in_features = odim_encoder+odim_decoder
-        else:
-            in_features = hdim
-        self.fc_enc = nn.Linear(odim_encoder, in_features)
-        self.fc_dec = nn.Linear(odim_decoder, in_features)
 
         self._isHAT = HAT
         if act == 'tanh':
@@ -370,10 +363,28 @@ class JointNet(nn.Module):
         else:
             raise NotImplementedError(f"Unknown activation layer type: {act}")
 
-        self.fc = nn.Sequential(
-            act_layer,
-            nn.Linear(in_features, num_classes)
-        )
+        if joint_mode == 'add':
+            if hdim == -1:
+                hdim = max(odim_decoder, odim_encoder)
+            self.fc_enc = nn.Linear(odim_encoder, hdim)
+            self.fc_dec = nn.Linear(odim_decoder, hdim)
+            self.fc = nn.Sequential(
+                act_layer,
+                nn.Linear(hdim, num_classes)
+            )
+        elif joint_mode == 'cat':
+            self.fc_enc = None
+            self.fc_dec = None
+            self.fc = nn.Sequential(
+                act_layer,
+                nn.Linear(odim_encoder + odim_decoder, num_classes)
+            )
+        else:
+            raise RuntimeError(f"Unknown mode for joint net: {joint_mode}")
+
+        self._mode = joint_mode
+        self._V = num_classes
+
         if HAT:
             """
             Implementation of Hybrid Autoregressive Transducer (HAT)
@@ -384,27 +395,44 @@ class JointNet(nn.Module):
     def forward(self, encoder_output: Union[torch.Tensor, PackedSequence], decoder_output: Union[torch.Tensor, PackedSequence]) -> torch.FloatTensor:
 
         if isinstance(encoder_output, PackedSequence) and isinstance(decoder_output, PackedSequence):
-            # compact memory mode, gather the tensors without padding
-            packed_encoder_output = encoder_output.set(
-                self.fc_enc(encoder_output.data))    # type:torch.Tensor
-            packed_decoder_output = decoder_output.set(
-                self.fc_dec(decoder_output.data))
+            if self._mode == 'add':
+                # compact memory mode, gather the tensors without padding
+                encoder_output.set(self.fc_enc(encoder_output.data))
+                decoder_output.set(self.fc_dec(decoder_output.data))
+            else:
+                dim_enc, dim_dec = encoder_output.data.size(
+                    -1), decoder_output.data.size(-1)
+                encoder_output.set(torch.nn.functional.pad(
+                    encoder_output.data, (0, dim_dec)))
+                decoder_output.set(torch.nn.functional.pad(
+                    decoder_output.data, (dim_enc, 0)))
 
             # shape: (\sum_{Ti(Ui+1)}, V)
-            expanded_out = packed_encoder_output + packed_decoder_output
+            expanded_out = encoder_output + decoder_output
+
         elif isinstance(encoder_output, torch.Tensor) and isinstance(decoder_output, torch.Tensor):
 
             assert (encoder_output.dim() == 3 and decoder_output.dim() == 3) or (
                 encoder_output.dim() == 1 and decoder_output.dim() == 1)
 
-            encoder_output = self.fc_enc(encoder_output)
-            decoder_output = self.fc_dec(decoder_output)
+            if self._mode == 'add':
+                encoder_output = self.fc_enc(encoder_output)
+                decoder_output = self.fc_dec(decoder_output)
 
             if encoder_output.dim() == 3:
+                _, T, _ = encoder_output.size()
+                _, Up, _ = decoder_output.size()
                 encoder_output = encoder_output.unsqueeze(2)
                 decoder_output = decoder_output.unsqueeze(1)
+                encoder_output = encoder_output.expand(-1, -1, Up, -1)
+                decoder_output = decoder_output.expand(-1, T, -1, -1)
 
-            expanded_out = encoder_output + decoder_output
+            if self._mode == 'add':
+                expanded_out = encoder_output + decoder_output
+            else:
+                expanded_out = torch.cat(
+                    [encoder_output, decoder_output], dim=-1)
+
         else:
             raise NotImplementedError(
                 "Output of encoder and decoder being fed into jointnet should be of same type. Expect (Tensor, Tensor) or (PackedSequence, PackedSequence), instead ({}, {})".format(type(encoder_output), type(decoder_output)))
