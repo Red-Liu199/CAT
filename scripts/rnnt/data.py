@@ -10,7 +10,8 @@ import h5py
 import coreutils
 import pickle
 import math
-from typing import Tuple, Sequence, List, Optional
+from multiprocessing import Pool
+from typing import Tuple, Sequence, List, Optional, Union
 
 import torch
 from torch.utils.data import Dataset
@@ -381,20 +382,38 @@ class BalancedDistributedSampler(DistributedSampler):
         assert len(indices) == self.total_size
 
         # Add implementation here
-        partial_indices = []
-        offset = self.rank
-        for idx_g_batch in range(0, self.total_size, self.g_batch):
-            batches = sorted(
-                indices[idx_g_batch:idx_g_batch+self.g_batch], key=lambda i: self._lens[i], reverse=True)
+        batched_indices = [indices[idx_g_batch:idx_g_batch+self.g_batch]
+                           for idx_g_batch in range(0, self.total_size, self.g_batch)]
 
-            # NOTE (Huahuan): L**1.3 is good for Conformer-S and batch size 240/5 for RTX 3090
-            batches = coreutils.group_by_lens(
-                batches, [self._lens[i] for i in batches], self.num_replicas, _norm=self._l_norm)
-            # make it more balanced with gradient accumulation
-            partial_indices.append(batches[offset])
-            # offset = (offset + 1) % self.num_replicas
+        num_threads = min(int(os.cpu_count()), len(batched_indices))
+        interval = len(batched_indices) // num_threads
+        process_idx = [interval * i for i in range(num_threads+1)]
+        if process_idx[-1] != len(batched_indices):
+            process_idx[-1] = len(batched_indices)
+
+        pool_args = [(batched_indices[process_idx[i]:process_idx[i+1]], self._lens, self._l_norm, self.num_replicas, i)
+                     for i in range(num_threads)]
+        with Pool(processes=num_threads) as pool:
+            gathered_groups = pool.map(group_indices, pool_args)
+
+        partial_indices = []
+        for g, _ in sorted(gathered_groups, key=lambda i: i[1]):
+            partial_indices += g
+        partial_indices = [x[self.rank] for x in partial_indices]
 
         return iter(partial_indices)
+
+
+def group_indices(args: Tuple[List[List[int]], List[int], Union[str, None], int, int]):
+    idx_groups, global_ls, l_norm, n_replicas, p_id = args
+    for k, g in enumerate(idx_groups):
+        g_sorted = sorted(g, key=lambda i: global_ls[i], reverse=True)
+
+        g_grouped = coreutils.group_by_lens(
+            g_sorted, [global_ls[i] for i in g_sorted], n_replicas, l_norm)
+        idx_groups[k] = g_grouped
+
+    return idx_groups, p_id
 
 
 class InferenceDistributedSampler(BalancedDistributedSampler):

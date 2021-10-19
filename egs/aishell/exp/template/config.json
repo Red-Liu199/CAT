@@ -16,7 +16,6 @@
     "joint": {
         "type": "JointNet",
         "kwargs": {
-            "classical": false,
             "hdim": 128,
             "num_classes": 4231,
             "odim_decoder": 128,

@@ -84,7 +84,7 @@ if [ $stage -le 1 ] && [ $stop_stage -ge 1 ]; then
 
     mkdir -p $dir/text
     curdata=$dir/text
-    for set in $trainset $devset $testset; do
+    for set in $trainset $devset; do
         src_text=${cat_recipe}/${set}/text
         # rm seq id to get pure text
         cat $src_text | cut -d ' ' -f 2- | sed 's/ //g' >$curdata/corpus.tmp
@@ -140,7 +140,6 @@ if [ $stage -le 3 ] && [ $stop_stage -ge 3 ]; then
 
     python3 rnnt/transducer_train.py --seed=0 \
         --world-size 1 --rank=0 \
-        --dist-url='tcp://127.0.0.1:13944' \
         --batch_size=256 \
         --dir=$dir \
         --config=$dir/config.json \
