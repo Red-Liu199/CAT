@@ -62,12 +62,13 @@ mkdir -p $textdir
 if [ $stage -le 1 ] && [ $stop_stage -ge 1 ]; then
 
     if [ ! -f $textdir/librispeech.txt ]; then
-        if [ ! -f $textdir/librispeech-lm-norm.txt.gz ]; then
+        archive=$textdir/librispeech-lm-norm.txt.gz
+        if [ ! -f $archive ]; then
             wget http://www.openslr.org/resources/11/librispeech-lm-norm.txt.gz -P $textdir || exit 1
         fi
 
-        gunzip -c $text >$textdir/librispeech.txt || exit 1
-        rm $textdir/librispeech-lm-norm.txt.gz
+        gunzip -c $archive >$textdir/librispeech.txt || exit 1
+        rm $archive
         echo "Fetched text corpus. At $textdir/librispeech.txt"
     fi
 
@@ -113,7 +114,7 @@ if [ $stage -le 3 ] && [ $stop_stage -ge 3 ]; then
 
     python3 rnnt/lm_train.py --seed=0 \
         --world-size 1 --rank 0 -j 1 \
-        --batch_size=1024 \
+        --batch_size=2048 \
         --dir=$dir \
         --config=$dir/config.json \
         --trset=$textdir/tr.pkl \
