@@ -385,7 +385,8 @@ class BalancedDistributedSampler(DistributedSampler):
         batched_indices = [indices[idx_g_batch:idx_g_batch+self.g_batch]
                            for idx_g_batch in range(0, self.total_size, self.g_batch)]
 
-        num_threads = min(int(os.cpu_count()), len(batched_indices))
+        num_threads = min(int(os.cpu_count()) //
+                          self.num_replicas, len(batched_indices))
         interval = len(batched_indices) // num_threads
         process_idx = [interval * i for i in range(num_threads+1)]
         if process_idx[-1] != len(batched_indices):

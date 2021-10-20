@@ -1,5 +1,6 @@
 # This script is expected to be executed as
 # /bin/bash <path to exp>/run.sh
+set -u
 opts=$(python utils/parseopt.py '{
         "--stage":{
             "type": "int",

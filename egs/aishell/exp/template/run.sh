@@ -1,5 +1,6 @@
 # This script is expected to be executed as
 # /bin/bash <path to exp>/run.sh
+set -u
 opts=$(python utils/parseopt.py '{
         "--stage":{
             "type": "int",
@@ -72,7 +73,7 @@ if [ $stage -le 1 ] && [ $stop_stage -ge 1 ]; then
     done | cut -d ' ' -f 2- | sed 's/ //g' >$SPdir/corpus.tmp || exit 1
 
     python3 utils/spm_train.py --num_threads=$(nproc) --input=$SPdir/corpus.tmp --model_prefix=$SPdir/spm \
-        --bos_id=-1 --eos_id=-1 --unk_id=0 --vocab_size=$n_units --user_defined_symbols="" \
+        --bos_id=0 --eos_id=-1 --unk_id=1 --vocab_size=$n_units --user_defined_symbols="" \
         --character_coverage=1 --model_type=$bpemode --unk_surface="<unk>" --add_dummy_prefix=False \
         >$SPdir/spm_training.log 2>&1 &&
         echo "SentenPiece training succeed." ||

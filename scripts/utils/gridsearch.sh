@@ -19,7 +19,7 @@ opts=$(python utils/parseopt.py '{
         },
         "lmdir":{
             "type": "str",
-            "help": "Language model directory. Supposed to include <lmdir>/lm_config.json and <lmdir>/checks/bestckpt.pt"
+            "help": "Language model directory. Supposed to include <lmdir>/config.json and <lmdir>/checks/bestckpt.pt"
         },
         "--beam_size":{
             "type":"int",

@@ -34,7 +34,7 @@ opts=$(python utils/parseopt.py '{
         },
         "--lmdir":{
             "type": "str",
-            "help": "Language model directory. Used at lm_weight > 0. Supposed to include <lmdir>/lm_config.json and <lmdir>/checks/bestckpt.pt"
+            "help": "Language model directory. Used at lm_weight > 0. Supposed to include <lmdir>/config.json and <lmdir>/checks/bestckpt.pt"
         },
         "--beam_size":{
             "type":"int",
@@ -119,7 +119,7 @@ for set in $test_set; do
         --mode=$mode \
         --nj=$nj \
         --beam_size=$beam_size \
-        --ext-lm-config=$lmdir/lm_config.json \
+        --ext-lm-config=$lmdir/config.json \
         --ext-lm-check=$lmdir/checks/bestckpt.pt \
         --lm-weight=$lm_weight ||
         exit 1

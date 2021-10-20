@@ -89,7 +89,7 @@ if [ $stage -le 3 ] && [ $stop_stage -ge 3 ]; then
         --world-size 1 --rank 0 -j 1 \
         --batch_size=1152 \
         --dir=$dir \
-        --config=$dir/lm_config.json \
+        --config=$dir/config.json \
         --trset=$textdir/tr.pkl \
         --devset=$textdir/dev.pkl ||
         exit 1
