@@ -8,12 +8,27 @@ import argparse
 import os
 import sys
 import re
+import pickle
 from multiprocessing import Pool
-from typing import List, Tuple
+from typing import List, Tuple, Callable, Union, Dict
 
 
-def multi_run_wrapper(args):
-   return WER(*args)
+class Processor():
+    def __init__(self) -> None:
+        self._process = []
+
+    def append(self, new_processing: Callable[[str], str]):
+        self._process.append(new_processing)
+        pass
+
+    def __call__(self, seqs: Union[List[str], str]) -> List[str]:
+        if isinstance(seqs, str):
+            seqs = [seqs]
+
+        o_seq = seqs
+        for processing in self._process:
+            o_seq = [processing(s) for s in o_seq]
+        return o_seq
 
 
 def WER(l_gt: List[str], l_hy: List[str]) -> Tuple[int, int, int, int]:
@@ -21,50 +36,113 @@ def WER(l_gt: List[str], l_hy: List[str]) -> Tuple[int, int, int, int]:
     return measures['substitutions'], measures['deletions'], measures['insertions'], measures['hits']
 
 
+def oracleWER(l_gt: List[Tuple[str, str]], l_hy: List[Tuple[str, List[str]]]) -> Tuple[int, int, int, int]:
+    """Computer oracle WER.
+
+    Take first col of l_gt as key
+    """
+
+    l_hy = {key: nbest for key, nbest in l_hy}
+    _sub, _del, _ins, _hit = 0, 0, 0, 0
+    for key, g_s in l_gt:
+        candidates = l_hy[key]
+        best_wer = 100.0
+        best_measure = {}
+
+        for can_seq in candidates:
+            part_ith_measure = jiwer.compute_measures(g_s, can_seq)
+            if part_ith_measure['wer'] < best_wer:
+                best_wer = part_ith_measure['wer']
+                best_measure = part_ith_measure
+
+        _sub += best_measure['substitutions']
+        _del += best_measure['deletions']
+        _ins += best_measure['insertions']
+        _hit += best_measure['hits']
+
+    return _sub, _del, _ins, _hit
+
+
+def run_wer_wrapper(args):
+    return WER(*args)
+
+
+def run_oracle_wer_wrapper(args):
+    return oracleWER(*args)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("gt", type=str, help="Ground truth sequences.")
     parser.add_argument("hy", type=str, help="Hypothesis of sequences.")
     parser.add_argument("--stripid", action="store_true", default=False,
-                        help="Tell whether the sequence start with a id or not. Default: False")
+                        help="Tell whether the sequence start with a id or not. When --oracle, this will be disable. Default: False")
     parser.add_argument("--cer", action="store_true", default=False,
                         help="Compute CER. Default: False")
+    parser.add_argument("--oracle", action="store_true", default=False,
+                        help="Compute Oracle WER/CER. This requires the `hy` to be N-best list instead of text. Default: False")
     args = parser.parse_args()
 
-    assert os.path.isfile(args.gt)
-    assert os.path.isfile(args.hy)
     ground_truth = args.gt  # type:str
     hypothesis = args.hy  # type:str
+    assert os.path.isfile(ground_truth), ground_truth
+    assert os.path.isfile(hypothesis), hypothesis
 
     with open(ground_truth, 'r') as f_gt:
         l_gt = f_gt.readlines()
+
+    if args.oracle:
+        # force to maintain ids
+        args.stripid = False
+        with open(hypothesis, 'rb') as f_hy:
+            # type: Dict[str, List[Tuple[float, str]]]
+            l_hy = pickle.load(f_hy)
+        l_hy = [(key, nbest) for key, nbest in l_hy.items()]
+    else:
         with open(hypothesis, 'r') as f_hy:
             l_hy = f_hy.readlines()
 
     num_lines = len(l_gt)
     assert num_lines == len(l_hy)
 
+    # Pre-processing
+    processor = Processor()
+
     # rm consecutive spaces
     pattern = re.compile(r' {2,}')
-    l_gt = [pattern.sub(' ', x) for x in l_gt]
+    processor.append(lambda s: pattern.sub(' ', s))
 
     # rm the '\n' and the last space
-    l_gt = [x.strip('\n ') for x in l_gt]
-    l_hy = [x.strip('\n ') for x in l_hy]
-
+    processor.append(lambda s: s.strip('\n '))
     if args.stripid:
         # rm id in the first place
-        l_gt = [' '.join(x.split()[1:]) for x in l_gt]
-        l_hy = [' '.join(x.split()[1:]) for x in l_hy]
+        processor.append(lambda s: ' '.join(s.split()[1:]))
 
     if args.cer:
+        # rm space the split by chars
         pattern = re.compile(r'\s+')
-        l_gt = [pattern.sub('', x) for x in l_gt]
-        l_hy = [pattern.sub('', x) for x in l_hy]
+        processor.append(lambda s: pattern.sub('', s))
+        processor.append(lambda s: ' '.join(list(s)))
 
-        l_gt = [' '.join(list(x)) for x in l_gt]
-        l_hy = [' '.join(list(x)) for x in l_hy]
+    l_gt = processor(l_gt)
 
+    if args.oracle:
+        for i, hypo in enumerate(l_hy):
+            key, nbest = hypo
+            seqs = processor([s for _, s in nbest])
+            l_hy[i] = (key, seqs)
+
+        for i, s in enumerate(l_gt):
+            sl = s.split(' ')
+            key, g_s = sl[0], ' '.join(sl[1:])
+            l_gt[i] = (key, g_s)
+
+        l_hy = sorted(l_hy, key=lambda item: item[0])
+        l_gt = sorted(l_gt, key=lambda item: item[0])
+    else:
+        l_hy = processor(l_hy)
+
+    # multi-processing compute
     num_threads = int(os.cpu_count())
 
     interval = num_lines // num_threads
@@ -75,8 +153,12 @@ if __name__ == "__main__":
                  for i in range(num_threads)]
 
     with Pool(processes=num_threads) as pool:
-        gathered_measures = pool.map(multi_run_wrapper, pool_args)
+        if args.oracle:
+            gathered_measures = pool.map(run_oracle_wer_wrapper, pool_args)
+        else:
+            gathered_measures = pool.map(run_wer_wrapper, pool_args)
 
+    # gather sub-processes results
     _sub, _del, _ins, _hits = 0, 0, 0, 0
     for p_sub, p_del, p_ins, p_hits in gathered_measures:
         _sub += p_sub

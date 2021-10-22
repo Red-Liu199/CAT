@@ -164,7 +164,7 @@ if [ $stage -le 4 ] && [ $stop_stage -ge 4 ]; then
     python utils/avgcheckpoint.py --inputs $(find $dir/checks/ -name checkpoint.* | sort -g | tail -n 10) \
         --output $dir/checks/avg_last_10.pt || exit 1
 
-    for checkpoint in bestckpt.pt avg_best_10.pt avg_last_10.pt; do
+    for checkpoint in bestckpt.pt avg_last_10.pt avg_best_10.pt; do
 
         utils/e2edecode.sh $dir $(echo $testset | tr ' ' ':') $SPmodel \
             --out_prefix=$(echo $checkpoint | cut -d '.' -f 1) \

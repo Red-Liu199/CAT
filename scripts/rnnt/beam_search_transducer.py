@@ -33,7 +33,7 @@ class TransducerBeamSearcher(torch.nn.Module):
         self.blank_id = blank_id
         self.bos_id = bos_id
         self.beam_size = beam_size
-        self.nbest = nbest
+        self.nbest = min(nbest, beam_size)
         self.lm = lm_module
         self.lm_weight = lm_weight
 
@@ -45,8 +45,6 @@ class TransducerBeamSearcher(torch.nn.Module):
 
         if algo == 'default':
             self.searcher = self.transducer_beam_search_decode
-        elif algo == 'espnet':
-            self.searcher = self.beam_search_espnet
         else:
             raise RuntimeError(f"Unknown beam search algorithm: {algo}.")
 
@@ -67,111 +65,6 @@ class TransducerBeamSearcher(torch.nn.Module):
 
         hyps = self.searcher(tn_output)
         return hyps
-
-    def beam_search_espnet(self, tn_output: torch.Tensor):
-        '''
-        tn_output : (N, T, D)
-        '''
-        raise NotImplementedError
-        beam = self.beam_size
-        beam_k = beam
-        nbest_batch = []
-        nbest_batch_score = []
-        # for each sequence
-        dummy_tensor = self.blank_id * \
-            tn_output.new_ones((1, 1), dtype=torch.int32)   # type:torch.Tensor
-        for tn_seq_i in tn_output:
-            input_PN = dummy_tensor.clone()
-            # First forward-pass on PN
-            kept_hyps = [{
-                "prediction": [self.blank_id],
-                "logp_score": 0.0,
-                "hidden_dec": None,
-                "hidden_lm": None
-            }]
-
-            # For each time step
-            for tn_seq_i_t in tn_seq_i:
-                # get hyps for extension
-                hyps = kept_hyps
-                kept_hyps = []
-                while True:
-                    max_hyp = max(hyps, key=lambda x: x["logp_score"])
-                    hyps.remove(max_hyp)
-
-                    # forward PN
-                    input_PN[0, 0] = max_hyp["prediction"][-1]
-                    out_PN, hidden = self._forward_PN(
-                        input_PN, max_hyp["hidden_dec"],)
-
-                    log_probs = self._joint_forward_step(tn_seq_i_t, out_PN)
-
-                    # Sort outputs at time
-                    top_k = log_probs[1:].topk(beam_k, dim=-1)
-
-                    kept_hyps.append({
-                        "prediction": max_hyp["prediction"][:],
-                        "logp_score": max_hyp["logp_score"]
-                        + log_probs[0],
-                        "hidden_dec": max_hyp["hidden_dec"],
-                        "hidden_lm": max_hyp["hidden_lm"]
-                    })
-
-                    if self.lm_weight > 0:
-                        log_probs_lm, hidden_lm = self._lm_forward_step(
-                            input_PN, max_hyp["hidden_lm"])
-                    else:
-                        hidden_lm = max_hyp["hidden_lm"]
-
-                    # Extend hyp by selection
-                    for logp, k in zip(*top_k):
-                        score = max_hyp["logp_score"] + logp
-
-                        if self.lm_weight > 0.0:
-                            score += self.lm_weight * log_probs_lm[0, 0, k+1]
-
-                        hyps.append({
-                            "prediction": max_hyp["prediction"][:] + [int(k+1)],
-                            "logp_score": score,
-                            "hidden_dec": max_hyp["hidden_dec"],
-                            "hidden_lm": hidden_lm
-                        })
-
-                    hyps_max = max(hyps, key=lambda x: x["logp_score"])[
-                        "logp_score"]
-                    # kept_most_prob = sorted(
-                    #     [hyp for hyp in kept_hyps if hyp["logp_score"] > hyps_max],
-                    #     key=lambda x: x["logp_score"],
-                    # )
-                    kept_most_prob = [
-                        hyp for hyp in kept_hyps if hyp["logp_score"] > hyps_max]
-                    if len(kept_most_prob) >= beam:
-                        kept_hyps = kept_most_prob
-                        break
-
-            # Add norm score
-            nbest_hyps = sorted(
-                kept_hyps,
-                key=lambda x: x["logp_score"] / len(x["prediction"]),
-                reverse=True,
-            )[: self.nbest]
-            all_predictions = []
-            all_scores = []
-            for hyp in nbest_hyps:
-                all_predictions.append(hyp["prediction"][1:])
-                all_scores.append(hyp["logp_score"] / len(hyp["prediction"]))
-            nbest_batch.append(all_predictions)
-            nbest_batch_score.append(all_scores)
-        return (
-            [nbest_utt[0] for nbest_utt in nbest_batch],
-            torch.Tensor(
-                [nbest_utt_score[0] for nbest_utt_score in nbest_batch_score]
-            )
-            .exp()
-            .mean(),
-            nbest_batch,
-            nbest_batch_score,
-        )
 
     def transducer_beam_search_decode(self, tn_output):
         """Transducer beam search decoder is a beam search decoder over batch which apply Transducer rules:

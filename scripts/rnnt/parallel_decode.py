@@ -12,6 +12,7 @@ from data import ScpDataset, TestPadCollate, InferenceDistributedSampler
 from transducer_train import build_model
 from beam_search_transducer import TransducerBeamSearcher
 
+import re
 import os
 import json
 import pickle
@@ -22,8 +23,9 @@ from typing import Union, List, Tuple
 
 import torch
 import torch.multiprocessing as mp
-from torch.utils.data import DataLoader
 import torch.distributed as dist
+from torch.utils.data import DataLoader
+from torch.cuda.amp import autocast
 
 
 def main(args):
@@ -57,6 +59,21 @@ def main(args):
     setattr(args, 'enc_lnk', link_enc)
 
     mp.spawn(main_worker, nprocs=world_size, args=(args,))
+
+    nbest_pattern = re.compile(r'[.]nbest$')
+    with open(os.path.join(args.output_dir, 'nbest.pkl'), 'wb') as fo:
+        all_nbest = {}
+        for nbest_f in os.listdir(args.output_dir):
+            if nbest_pattern.search(nbest_f) is None:
+                continue
+
+            partial_bin = os.path.join(args.output_dir, nbest_f)
+            with open(partial_bin, 'rb') as fi:
+                partial_nbest = pickle.load(fi)  # type: dict
+
+            all_nbest.update(partial_nbest)
+            os.remove(partial_bin)
+        pickle.dump(all_nbest, fo)
 
 
 def main_worker(gpu: int, args: argparse.Namespace):
@@ -95,7 +112,8 @@ def main_worker(gpu: int, args: argparse.Namespace):
 
     writer = os.path.join(args.output_dir, f'decode.{gpu}.tmp')
     beamsearcher = TransducerBeamSearcher(
-        model.decoder, model.joint, blank_id=0, bos_id=model.bos_id, beam_size=args.beam_size, algo='default',
+        model.decoder, model.joint, blank_id=0, bos_id=model.bos_id, beam_size=args.beam_size,
+        nbest=5, algo='default',
         state_beam=2.3, expand_beam=2.3, lm_module=ext_lm, lm_weight=args.lm_weight)
 
     decode(args, beamsearcher, testloader,
@@ -112,34 +130,37 @@ def decode(args, beamsearcher, testloader, device, local_writer):
 
     def _load_enc_mat(k: str):
         f_enc_hid.seek(f_enc_seeks[k])
-        return pickle.load(f_enc_hid)
+        return (pickle.load(f_enc_hid)).to(device, non_blocking=True)
 
     sp = spm.SentencePieceProcessor(model_file=args.spmodel)
-    results = []
 
     L = sum([1 for _ in testloader])
-    for i, batch in enumerate(testloader):
-        key, _, _ = batch
-        enc_o = _load_enc_mat(key[0])
-        enc_o = enc_o.to(device)
-        pred = beamsearcher(enc_o)
+    nbest = {}
+    with autocast(enabled=(True if device != 'cpu' else False)), open(local_writer, 'w') as fi:
+        for i, batch in enumerate(testloader):
+            key = batch[0][0]
+            enc_o = _load_enc_mat(key)
 
-        if isinstance(pred, tuple):
-            pred = pred[0]
+            best_hypo, score_best_hypo, nbest_list, scores_nbest = beamsearcher(
+                enc_o)
 
-        seq = sp.decode(pred)
-        results.append((key, seq))
-        print(
-            "\r|{:<60}|[{:>5}/{:<5}]".format(int((i+1)/L*60)*'#', i+1, L), end='')
-    print("\r|{0}|[{1:>5}/{1:<5}]".format(60*'#', L))
-    with open(local_writer, 'w') as fi:
-        for key, pred in results:
-            assert len(key) == 1
+            nbest[key] = [(score.item(), sp.decode(hypo))
+                          for hypo, score in zip(nbest_list[0], scores_nbest[0])]
+
+            _, best_seq = nbest[key][0]
+
             if args.lower:
-                seq = pred[0].lower()
+                seq = best_seq.lower()
             else:
-                seq = pred[0].upper()
-            fi.write("{} {}\n".format(key[0], seq))
+                seq = best_seq.upper()
+            fi.write("{} {}\n".format(key, seq))
+            print(
+                "\r|{:<60}|[{:>5}/{:<5}]".format(int((i+1)/L*60)*'#', i+1, L), end='')
+
+    print("\r|{0}|[{1:>5}/{1:<5}]".format(60*'#', L))
+
+    with open(f"{local_writer}.nbest", 'wb') as fi:
+        pickle.dump(nbest, fi)
 
     f_enc_hid.close()
 
@@ -233,13 +254,14 @@ def worker_compute_enc_out(gpu: int, world_size: int, suffix: str, usegpu: bool,
 
     output = []
     L = sum([1 for _ in testloader])
-    for i, batch in enumerate(testloader):
-        key, x, x_lens = batch
-        x = x.to(device)
-        encoder_o, _ = model.encoder(x, x_lens)
-        output.append((key[0], encoder_o.cpu()))
-        print(
-            "\r|{:<60}|[{:>5}/{:<5}]".format(int((i+1)/L*60)*'#', i+1, L), end='')
+    with autocast(enabled=(True if device != 'cpu' else False)):
+        for i, batch in enumerate(testloader):
+            key, x, x_lens = batch
+            x = x.to(device)
+            encoder_o, _ = model.encoder(x, x_lens)
+            output.append((key[0], encoder_o.cpu()))
+            print(
+                "\r|{:<60}|[{:>5}/{:<5}]".format(int((i+1)/L*60)*'#', i+1, L), end='')
     print("\r|{0:<60}|[{1:>5}/{1:<5}]".format(60*'#', L))
     with open(f'{suffix}.{gpu}', 'wb') as fo:
         pickle.dump(output, fo)

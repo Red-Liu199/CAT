@@ -128,6 +128,10 @@ for set in $test_set; do
         cat $dec_dir/decode.*.tmp | sort -k 1 >$dec_dir/${out_prefix}_${set}
         rm $dec_dir/*.tmp
     fi
+
+    if [ -f $dec_dir/nbest.pkl ]; then
+        mv $dec_dir/nbest.pkl $dec_dir/${out_prefix}_${set}.nbest.pkl
+    fi
 done
 
 if [ $check != "bestckpt.pt" ]; then
@@ -143,8 +147,12 @@ for set in $test_set; do
         echo -n "$set $prefix" >>$dec_dir/result
         if [ $cer == "True" ]; then
             python utils/wer.py $ground_truth $dec_dir/${out_prefix}_${set} --stripid --cer >>$dec_dir/result || exit 1
+            echo -n "    oracle " >>$dec_dir/result
+            python utils/wer.py $ground_truth $dec_dir/${out_prefix}_${set}.nbest.pkl --oracle --cer >>$dec_dir/result || exit 1
         else
             python utils/wer.py $ground_truth $dec_dir/${out_prefix}_${set} --stripid >>$dec_dir/result || exit 1
+            echo -n "    oracle " >>$dec_dir/result
+            python utils/wer.py $ground_truth $dec_dir/${out_prefix}_${set}.nbest.pkl --oracle >>$dec_dir/result || exit 1
         fi
     else
         echo "No decoded text found: $dec_dir/${out_prefix}_${set}"
