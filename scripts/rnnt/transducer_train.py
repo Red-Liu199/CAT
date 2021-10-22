@@ -12,8 +12,7 @@ import coreutils
 import model as model_zoo
 import lm_train as pn_zoo
 from am_train import setPath, main_spawner
-from beam_search_base import ConvMemBuffer
-from _layers import TimeReduction, CausalConv2d
+from _layers import TimeReduction
 from _specaug import SpecAug
 from data import BalancedDistributedSampler, SpeechDataset, SpeechDatasetPickle, sortedPadCollateTransducer
 
@@ -64,7 +63,7 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
     test_set = Dataset(args.devset)
     setattr(args, 'n_steps', 0)
 
-    if args.databalance and not args.test_mem:
+    if args.databalance:
         if args.debug:
             tr_set.dataset = tr_set.dataset[-int(len(tr_set)*0.1):]
 
@@ -88,11 +87,6 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
             num_workers=args.workers, pin_memory=True,
             sampler=train_sampler, collate_fn=sortedPadCollateTransducer())
         args.n_steps = len(trainloader)//args.grad_accum_fold
-
-    if args.test_mem:
-        coreutils.test_memory(
-            args, manager, tr_set, sortedPadCollateTransducer(), True)
-        return
 
     test_sampler = DistributedSampler(test_set, shuffle=False)
     testloader = DataLoader(
@@ -463,78 +457,6 @@ class JointNet(nn.Module):
         return outs
 
 
-class ConvJointNet(nn.Module):
-    def __init__(self, odim_encoder: int, odim_decoder: int, num_classes: int, kernel_size: Union[int, Tuple[int, int]] = (3, 3)):
-        super().__init__()
-        K = max(odim_encoder, odim_decoder)
-        self.fc_enc = nn.Linear(odim_encoder, K)
-        self.fc_dec = nn.Linear(odim_decoder, K)
-        self.act = nn.Tanh()
-
-        # kernel among (T, U)
-        if isinstance(kernel_size, int):
-            kernel_size = (kernel_size, kernel_size)
-        padding = [kernel_size[0] - 1, kernel_size[1] - 1]
-        '''
-        padding (int, tuple(int, int)): padding to the top of T and left of U,
-            which would be extended to (padding[0]+T, padding[1]+U)
-        '''
-        self.padding = nn.ConstantPad2d(
-            padding=(padding[1], 0, padding[0], 0), value=0.)
-        self.conv = CausalConv2d(K, num_classes, kernel_size, islast=True)
-
-    def forward(self, encoder_output: torch.FloatTensor, decoder_output: torch.FloatTensor, buffers: Sequence[ConvMemBuffer] = None, t: int = -1, u: int = -1) -> Tuple[torch.Tensor, Union[Sequence[ConvMemBuffer], None]]:
-
-        if encoder_output.dim() == 3:
-            encoder_output = self.fc_enc(encoder_output)
-            decoder_output = self.fc_dec(decoder_output)
-
-            # training, expand the outputs
-
-            # (N, T_max, K) -> (N, K, T_max)
-            encoder_output = encoder_output.transpose(1, 2).contiguous()
-            # (N, U_max, K) -> (N, K, U_max)
-            decoder_output = decoder_output.transpose(1, 2).contiguous()
-            # (N, K, T_max) -> (N, K, T_max, 1)
-            encoder_output = encoder_output.unsqueeze(3)
-            # (N, K, U_max) -> (N, K, 1, U_max)
-            decoder_output = decoder_output.unsqueeze(2)
-            # (N, K, T_max, U_max)
-            expanded_x = self.act(encoder_output + decoder_output)
-            # (N, K, T_max, U_max) -> (N, T_max, U_max, V) -> (N, T_max, U_max, V)
-            padded_x = self.padding(expanded_x)
-            conv_x = self.conv(padded_x).permute(
-                0, 2, 3, 1).contiguous()  # type: torch.Tensor
-
-            return conv_x.log_softmax(dim=-1), None
-
-        else:
-            # decoding
-            buffers = [x.replica() for x in buffers]
-            buffers[0].append(t, u, encoder_output, decoder_output)
-            encoder_output, decoder_output = buffers[0].mem
-
-            encoder_output = self.fc_enc(encoder_output)
-            decoder_output = self.fc_dec(decoder_output)
-
-            # (S_t, K) -> (K, S_t)
-            encoder_output = encoder_output.transpose(0, 1).contiguous()
-            # (S_u, K) -> (K, S_u)
-            decoder_output = decoder_output.transpose(0, 1).contiguous()
-            # (K, S_t) -> (K, S_t, 1)
-            encoder_output = encoder_output.unsqueeze(2)
-            # (K, S_u) -> (K, 1, S_u)
-            decoder_output = decoder_output.unsqueeze(1)
-
-            # (K, S_t, S_u)
-            expanded_x = self.act(encoder_output + decoder_output)
-
-            # (K, S_t, S_u) -> (1, K, S_t, S_u) -> (1, V, 1, 1)
-            conv_x = self.conv(expanded_x.unsqueeze(0))
-
-            return conv_x.view(-1).log_softmax(dim=-1), buffers
-
-
 @torch.no_grad()
 def build_model(args, configuration: dict, dist: bool = True, verbose: bool = True) -> Union[nn.Module, nn.parallel.DistributedDataParallel]:
     def _load_and_immigrate(orin_dict_path: str, str_src: str, str_dst: str) -> OrderedDict:
@@ -571,8 +493,7 @@ def build_model(args, configuration: dict, dist: bool = True, verbose: bool = Tr
             if 'type' not in config:
                 AbsNet = JointNet
             else:
-                # type: Union[JointNet, ConvJointNet]
-                AbsNet = eval(config['type'])
+                AbsNet = eval(config['type'])  # type: JointNet
             _model = AbsNet(**settings)
         else:
             raise ValueError(f"Unknow module: {module}")
@@ -664,8 +585,6 @@ def build_model(args, configuration: dict, dist: bool = True, verbose: bool = Tr
 
 if __name__ == "__main__":
     parser = coreutils.BasicDDPParser()
-    parser.add_argument("--test-mem", action="store_true",
-                        help="Test memory print with and exit.")
     parser.add_argument("--h5py", action="store_true",
                         help="Load data with H5py, defaultly use pickle (recommended).")
 

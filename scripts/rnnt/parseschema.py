@@ -174,11 +174,11 @@ schema['properties']['specaug_config'] = processing
 # ## Joint network
 
 # %%
-from transducer_train import JointNet, ConvJointNet, SimJointNet
+from transducer_train import JointNet, SimJointNet
 
 
 processing = gen_object(dict)  # type:OrderedDict
-parse_processing(processing, [JointNet, ConvJointNet, SimJointNet])
+parse_processing(processing, [JointNet, SimJointNet])
 
 processing['description'] = 'Configuration of Transducer joint network'
 schema['properties']['joint'] = processing
