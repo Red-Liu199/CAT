@@ -47,20 +47,21 @@ def main(args):
         world_size = torch.cuda.device_count()
     args.world_size = world_size
 
-    # generate encoder output first
-    prefix = os.path.basename(args.input_scp).split('.')[0]
-    binary_enc = os.path.join(
-        args.enc_out_dir, f"{prefix}.bin")
-    link_enc = os.path.join(
-        args.enc_out_dir, f"{prefix}.lnk")
-    if not os.path.isfile(binary_enc) or not os.path.isfile(link_enc):
-        print("> Encoder output file not found, generating...")
-        t_beg = time.time()
-        compute_encoder_output(args, enc_bin=binary_enc, enc_link=link_enc)
-        t_end = time.time()
-        print("Time of encoder computation: {:.2f}s".format(t_end-t_beg))
-    setattr(args, 'enc_bin', binary_enc)
-    setattr(args, 'enc_lnk', link_enc)
+    if args.save_logit:
+        # generate encoder output first
+        prefix = os.path.basename(args.input_scp).split('.')[0]
+        binary_enc = os.path.join(
+            args.enc_out_dir, f"{prefix}.bin")
+        link_enc = os.path.join(
+            args.enc_out_dir, f"{prefix}.lnk")
+        if not os.path.isfile(binary_enc) or not os.path.isfile(link_enc):
+            print("> Encoder output file not found, generating...")
+            t_beg = time.time()
+            compute_encoder_output(args, enc_bin=binary_enc, enc_link=link_enc)
+            t_end = time.time()
+            print("Time of encoder computation: {:.2f}s".format(t_end-t_beg))
+        setattr(args, 'enc_bin', binary_enc)
+        setattr(args, 'enc_lnk', link_enc)
 
     t_beg = time.time()
     if args.cpu:
@@ -129,32 +130,38 @@ def main_worker(gpu: int, args: argparse.Namespace, models=None):
         state_beam=2.3, expand_beam=2.3, temperature=1.0,
         lm_module=ext_lm, lm_weight=args.lm_weight)
 
-    decode(args, beamsearcher, testloader,
+    decode(args, model.encoder, beamsearcher, testloader,
            device=device, local_writer=writer)
 
     return None
 
 
 @torch.no_grad()
-def decode(args, beamsearcher, testloader, device, local_writer):
-    f_enc_hid = open(args.enc_bin, 'rb')
-    with open(args.enc_lnk, 'rb') as fi:
-        f_enc_seeks = pickle.load(fi)
+def decode(args, encoder, beamsearcher, testloader, device, local_writer):
+    if args.save_logit:
+        f_enc_hid = open(args.enc_bin, 'rb')
+        with open(args.enc_lnk, 'rb') as fi:
+            f_enc_seeks = pickle.load(fi)
 
     def _load_enc_mat(k: str):
         f_enc_hid.seek(f_enc_seeks[k])
         return (pickle.load(f_enc_hid)).to(device, non_blocking=True)
 
     sp = spm.SentencePieceProcessor(model_file=args.spmodel)
-
     L = sum([1 for _ in testloader])
     nbest = {}
     cnt_frame = 0
     t_beg = time.time()
     with autocast(enabled=(True if device != 'cpu' else False)), open(local_writer, 'w') as fi:
         for i, batch in enumerate(testloader):
-            key = batch[0][0]
-            enc_o = _load_enc_mat(key)
+            if args.save_logit:
+                key = batch[0][0]
+                enc_o = _load_enc_mat(key)
+            else:
+                key, x, x_lens = batch
+                key = key[0]
+                x = x.to(device)
+                enc_o, _ = encoder(x, x_lens)
 
             nbest_list, scores_nbest = beamsearcher(
                 enc_o)
@@ -180,7 +187,8 @@ def decode(args, beamsearcher, testloader, device, local_writer):
     with open(f"{local_writer}.nbest", 'wb') as fi:
         pickle.dump(nbest, fi)
 
-    f_enc_hid.close()
+    if args.save_logit:
+        f_enc_hid.close()
 
 
 def gen_model(args, device) -> Tuple[torch.nn.Module, Union[torch.nn.Module, None]]:
@@ -323,6 +331,8 @@ if __name__ == '__main__':
     parser.add_argument("--nj", type=int, default=None)
     parser.add_argument("--cpu", action='store_true', default=False)
     parser.add_argument("--lower", action='store_true', default=False)
+    parser.add_argument("--save-logit", action='store_true', default=False,
+                        help="Firstly generate encoder output and save in files, then do decoding.")
 
     args = parser.parse_args()
 
