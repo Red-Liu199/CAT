@@ -15,6 +15,7 @@ from beam_search_transducer import TransducerBeamSearcher
 import re
 import os
 import json
+import time
 import pickle
 import argparse
 import sentencepiece as spm
@@ -54,11 +55,26 @@ def main(args):
         args.enc_out_dir, f"{prefix}.lnk")
     if not os.path.isfile(binary_enc) or not os.path.isfile(link_enc):
         print("> Encoder output file not found, generating...")
+        t_beg = time.time()
         compute_encoder_output(args, enc_bin=binary_enc, enc_link=link_enc)
+        t_end = time.time()
+        print("Time of encoder computation: {:.2f}s".format(t_end-t_beg))
     setattr(args, 'enc_bin', binary_enc)
     setattr(args, 'enc_lnk', link_enc)
 
-    mp.spawn(main_worker, nprocs=world_size, args=(args,))
+    t_beg = time.time()
+    if args.cpu:
+        model, ext_lm = gen_model(args, 'cpu')
+        model.share_memory()
+        if ext_lm is not None:
+            ext_lm.share_memory()
+
+        mp.spawn(main_worker, nprocs=world_size, args=(args, (model, ext_lm)))
+    else:
+        mp.spawn(main_worker, nprocs=world_size, args=(args,))
+
+    t_end = time.time()
+    print("Time of searching: {:.2f}s".format(t_end-t_beg))
 
     nbest_pattern = re.compile(r'[.]nbest$')
     with open(os.path.join(args.output_dir, 'nbest.pkl'), 'wb') as fo:
@@ -76,7 +92,7 @@ def main(args):
         pickle.dump(all_nbest, fo)
 
 
-def main_worker(gpu: int, args: argparse.Namespace):
+def main_worker(gpu: int, args: argparse.Namespace, models=None):
 
     args.gpu = gpu
     # only support one node
@@ -89,20 +105,16 @@ def main_worker(gpu: int, args: argparse.Namespace):
         dist.init_process_group(
             backend='gloo', init_method=args.dist_url,
             world_size=world_size, rank=args.rank)
+
+        model, ext_lm = models
     else:
         device = gpu
+        torch.cuda.set_device(device)
         dist.init_process_group(
             backend='nccl', init_method=args.dist_url,
             world_size=world_size, rank=args.rank)
 
-    if device != 'cpu':
-        torch.cuda.set_device(device)
-
-    if args.lm_weight == 0.0 or args.ext_lm_config is None or args.ext_lm_check is None:
-        model = gen_model(args, device)
-        ext_lm = None
-    else:
-        model, ext_lm = gen_model(args, device, use_ext_lm=True)
+        model, ext_lm = gen_model(args, device)
 
     testset = ScpDataset(args.input_scp)
     data_sampler = InferenceDistributedSampler(testset)
@@ -114,7 +126,8 @@ def main_worker(gpu: int, args: argparse.Namespace):
     beamsearcher = TransducerBeamSearcher(
         model.decoder, model.joint, blank_id=0, bos_id=model.bos_id, beam_size=args.beam_size,
         nbest=args.beam_size, algo='default', prefix_merge=True,
-        state_beam=2.3, expand_beam=2.3, lm_module=ext_lm, lm_weight=args.lm_weight)
+        state_beam=2.3, expand_beam=2.3, temperature=1.0,
+        lm_module=ext_lm, lm_weight=args.lm_weight)
 
     decode(args, beamsearcher, testloader,
            device=device, local_writer=writer)
@@ -136,6 +149,8 @@ def decode(args, beamsearcher, testloader, device, local_writer):
 
     L = sum([1 for _ in testloader])
     nbest = {}
+    cnt_frame = 0
+    t_beg = time.time()
     with autocast(enabled=(True if device != 'cpu' else False)), open(local_writer, 'w') as fi:
         for i, batch in enumerate(testloader):
             key = batch[0][0]
@@ -143,6 +158,7 @@ def decode(args, beamsearcher, testloader, device, local_writer):
 
             nbest_list, scores_nbest = beamsearcher(
                 enc_o)
+            cnt_frame += enc_o.size(1)
 
             nbest[key] = [(score.item(), sp.decode(hypo))
                           for hypo, score in zip(nbest_list[0], scores_nbest[0])]
@@ -155,9 +171,11 @@ def decode(args, beamsearcher, testloader, device, local_writer):
                 seq = best_seq.upper()
             fi.write("{} {}\n".format(key, seq))
             print(
-                "\r|{:<60}|[{:>5}/{:<5}]".format(int((i+1)/L*60)*'#', i+1, L), end='')
+                "\r|{:<50}|[{:>5}/{:<5}]".format(int((i+1)/L*50)*'#', i+1, L), end='')
 
-    print("\r|{0}|[{1:>5}/{1:<5}]".format(60*'#', L))
+    t_total = time.time()-t_beg
+    print("\r|{0}|[{1:>5}/{1:<5}] {2:5.1f}ms/f".format(50 *
+          '#', L, 1000*t_total/cnt_frame))
 
     with open(f"{local_writer}.nbest", 'wb') as fi:
         pickle.dump(nbest, fi)
@@ -165,7 +183,7 @@ def decode(args, beamsearcher, testloader, device, local_writer):
     f_enc_hid.close()
 
 
-def gen_model(args, device, use_ext_lm=False) -> Union[Tuple[torch.nn.Module, torch.nn.Module], torch.nn.Module]:
+def gen_model(args, device) -> Tuple[torch.nn.Module, Union[torch.nn.Module, None]]:
     if isinstance(device, int):
         device = f'cuda:{device}'
 
@@ -179,7 +197,9 @@ def gen_model(args, device, use_ext_lm=False) -> Union[Tuple[torch.nn.Module, to
     model = load_checkpoint(model, args.resume)
     model.eval()
 
-    if use_ext_lm:
+    if args.lm_weight == 0.0 or args.ext_lm_config is None or args.ext_lm_check is None:
+        return model, None
+    else:
         assert args.ext_lm_check is not None
 
         with open(args.ext_lm_config, 'r') as fi:
@@ -190,8 +210,6 @@ def gen_model(args, device, use_ext_lm=False) -> Union[Tuple[torch.nn.Module, to
         ext_lm_model = ext_lm_model.lm
         ext_lm_model.eval()
         return model, ext_lm_model
-    else:
-        return model
 
 
 def compute_encoder_output(args, enc_bin: str, enc_link: str):
@@ -244,7 +262,7 @@ def worker_compute_enc_out(gpu: int, world_size: int, suffix: str, usegpu: bool,
     if device != 'cpu':
         torch.cuda.set_device(device)
 
-    model = gen_model(args, device)
+    model, _ = gen_model(args, device)
 
     testset = ScpDataset(args.input_scp)
     data_sampler = InferenceDistributedSampler(testset)
@@ -261,8 +279,8 @@ def worker_compute_enc_out(gpu: int, world_size: int, suffix: str, usegpu: bool,
             encoder_o, _ = model.encoder(x, x_lens)
             output.append((key[0], encoder_o.cpu()))
             print(
-                "\r|{:<60}|[{:>5}/{:<5}]".format(int((i+1)/L*60)*'#', i+1, L), end='')
-    print("\r|{0:<60}|[{1:>5}/{1:<5}]".format(60*'#', L))
+                "\r|{:<50}|[{:>5}/{:<5}]".format(int((i+1)/L*50)*'#', i+1, L), end='')
+    print("\r|{0}|[{1:>5}/{1:<5}]".format(50*'#', L))
     with open(f'{suffix}.{gpu}', 'wb') as fo:
         pickle.dump(output, fo)
 
