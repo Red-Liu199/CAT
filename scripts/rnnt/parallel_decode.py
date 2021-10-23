@@ -141,7 +141,7 @@ def decode(args, beamsearcher, testloader, device, local_writer):
             key = batch[0][0]
             enc_o = _load_enc_mat(key)
 
-            best_hypo, score_best_hypo, nbest_list, scores_nbest = beamsearcher(
+            nbest_list, scores_nbest = beamsearcher(
                 enc_o)
 
             nbest[key] = [(score.item(), sp.decode(hypo))

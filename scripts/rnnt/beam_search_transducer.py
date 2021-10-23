@@ -8,7 +8,8 @@ From speechbrain
 """
 import copy
 import yaml
-from typing import Dict, Union, List
+from typing import Dict, Union, List, Optional
+from transducer_train import JointNet
 
 import torch
 from typing import Literal
@@ -139,17 +140,17 @@ class TransducerBeamSearcher(torch.nn.Module):
     def __init__(
         self,
         decoder,
-        joint,
+        joint: JointNet,
         blank_id: int = 0,
         bos_id: int = 0,
         beam_size: int = 5,
         nbest: int = 1,
         algo: Literal['default', 'lc'] = 'default',
         prefix_merge: bool = True,
-        lm_module=None,
-        lm_weight=0.0,
-        state_beam=2.3,
-        expand_beam=2.3,
+        lm_module: Optional[torch.nn.Module] = None,
+        lm_weight: float = 0.0,
+        state_beam: float = 2.3,
+        expand_beam: float = 2.3,
         temperature: float = 1.0
     ):
         super(TransducerBeamSearcher, self).__init__()
@@ -196,7 +197,7 @@ class TransducerBeamSearcher(torch.nn.Module):
         hyps = self.searcher(tn_output)
         return hyps
 
-    def transducer_beam_search_decode(self, tn_output):
+    def transducer_beam_search_decode(self, tn_output: torch.Tensor):
         """Transducer beam search decoder is a beam search decoder over batch which apply Transducer rules:
             1- for each utterance:
                 2- for each time steps in the Transcription Network (TN) output:
@@ -211,12 +212,6 @@ class TransducerBeamSearcher(torch.nn.Module):
         tn_output : torch.tensor
             Output from transcription network with shape
             [batch, time_len, hiddens].
-
-        Returns
-        -------
-        torch.tensor
-            Outputs a logits tensor [B,T,1,Output_Dim]; padding
-            has not been removed.
         """
 
         # min between beam and max_target_lent
@@ -226,23 +221,23 @@ class TransducerBeamSearcher(torch.nn.Module):
             (1, 1), device=tn_output.device, dtype=torch.int32)
         blank = self.blank_id * torch.ones_like(dummy_tensor)
 
-        for i_batch in range(tn_output.size(0)):
+        for tn_i in tn_output:
             input_PN = torch.ones_like(dummy_tensor) * self.bos_id
             # First forward-pass on PN
             hyp = Hypothesis(
                 pred=[self.bos_id],
                 score=0.0,
-                cache={'hidden_dec': None}
+                cache={'dec': None}
             )
             if self.lm_weight > 0:
-                hyp.cache.update({"hidden_lm": None})
+                hyp.cache.update({"lm": None})
 
             beam_hyps = [hyp]
             prefix_cache = PrefixCacheDict()  # PrefixCacheTree()
             t_cache = {'out_pn': None, 'out_lm': None}
 
             # For each time step
-            for t_step in range(tn_output.size(1)):
+            for tn_i_t in tn_i:
                 prefix_cache.pruneAllBut([hypo.pred for hypo in beam_hyps])
 
                 # get hyps for extension
@@ -269,22 +264,21 @@ class TransducerBeamSearcher(torch.nn.Module):
                     hypo_cache = prefix_cache.getCache(t_best_pref)
                     if hypo_cache is None:
                         input_PN[0, 0] = t_best_pref[-1]
-                        out_PN, hidden = self._forward_PN(
-                            input_PN, a_best_hyp.cache["hidden_dec"])
-                        t_cache['out_pn'] = (out_PN, hidden)
+                        pn_out, hidden = self._pn_step(
+                            input_PN, a_best_hyp.cache["dec"])
+                        t_cache['out_pn'] = (pn_out, hidden)
                         if self.lm_weight > 0:
-                            log_probs_lm, hidden_lm = self._lm_forward_step(
-                                input_PN, a_best_hyp.cache["hidden_lm"])
+                            log_probs_lm, hidden_lm = self._lm_step(
+                                input_PN, a_best_hyp.cache["lm"])
                             t_cache['out_lm'] = (log_probs_lm, hidden_lm)
                         prefix_cache.update(t_best_pref, t_cache)
                     else:
-                        out_PN, hidden = hypo_cache['out_pn']
+                        pn_out, hidden = hypo_cache['out_pn']
                         if self.lm_weight > 0:
                             log_probs_lm, hidden_lm = hypo_cache['out_lm']
 
                     # forward jointnet
-                    log_probs = self._joint_forward_step(
-                        tn_output[i_batch, t_step, :], out_PN)
+                    log_probs = self._joint_step(tn_i_t, pn_out)
 
                     # Sort outputs at time
                     logp_targets, positions = torch.topk(
@@ -322,14 +316,14 @@ class TransducerBeamSearcher(torch.nn.Module):
 
                         if (not self.is_latency_control) or (self.is_latency_control and log_p >= best_logp - self.expand_beam):
                             topk_hyp.pred.append(tok.item())
-                            topk_hyp.cache["hidden_dec"] = hidden
+                            topk_hyp.cache["dec"] = hidden
                             if self.lm_weight > 0:
-                                topk_hyp.cache["hidden_lm"] = hidden_lm
+                                topk_hyp.cache["lm"] = hidden_lm
 
                                 topk_hyp.score += (
                                     self.lm_weight
-                                    * log_probs_lm[0, 0, positions[j]]
-                                )
+                                    * log_probs_lm[0, 0, tok])
+
                             process_hyps.append(topk_hyp)
 
             del prefix_cache
@@ -339,30 +333,26 @@ class TransducerBeamSearcher(torch.nn.Module):
                 key=lambda x: x.score/len(x.pred),
                 reverse=True,
             )[: self.nbest]
-            all_predictions = []
-            all_scores = []
-            for hyp in nbest_hyps:
-                all_predictions.append(hyp.pred[1:])
-                all_scores.append(hyp.score / len(hyp.pred))
-            nbest_batch.append(all_predictions)
-            nbest_batch_score.append(all_scores)
-        return (
-            [nbest_utt[0] for nbest_utt in nbest_batch],
-            torch.Tensor(
-                [nbest_utt_score[0] for nbest_utt_score in nbest_batch_score]
-            )
-            .exp()
-            .mean(),
-            nbest_batch,
-            nbest_batch_score,
-        )
+            nbest_batch.append([hyp.pred[1:] for hyp in nbest_hyps])
+            nbest_batch_score.append([hyp.score/len(hyp.pred)
+                                     for hyp in nbest_hyps])
 
-    def _joint_forward_step(self, out_TN, out_PN):
+        return (nbest_batch, nbest_batch_score)
+
+    def _joint_step(self, tn_out: torch.Tensor, pn_out: torch.Tensor):
         """Join predictions (TN & PN)."""
 
-        return self.joint(out_TN.view(-1), out_PN.view(-1))
+        tn_out = tn_out.view(-1)
+        pn_out = pn_out.view(-1)
 
-    def _lm_forward_step(self, inp_tokens, memory):
+        if self.temp == 1.0:
+            return self.joint(tn_out, pn_out)
+        else:
+            logits = self.joint.skip_softmax_forward(
+                tn_out, pn_out)
+            return torch.log_softmax(logits/self.temp, dim=-1)
+
+    def _lm_step(self, inp_tokens, memory):
         """This method should implement one step of
         forwarding operation for language model.
 
@@ -387,6 +377,6 @@ class TransducerBeamSearcher(torch.nn.Module):
         log_probs = torch.log_softmax(logits, dim=-1)
         return log_probs, hs
 
-    def _forward_PN(self, input_PN, hidden=None):
+    def _pn_step(self, input_PN, hidden=None):
 
         return self.decoder(input_PN, hidden)

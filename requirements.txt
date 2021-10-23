@@ -6,3 +6,4 @@ sentencepiece
 kaldiio
 tensorboard
 jiwer
+pyyaml
