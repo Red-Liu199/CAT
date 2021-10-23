@@ -22,9 +22,7 @@ opts=$(python utils/parseopt.py '{
         }
     }' $0 $*) && eval $opts || exit 1
 
-if [ $ngpu -eq "-1" ]; then
-    unset CUDA_VISIBLE_DEVICES
-else
+if [ $ngpu -ne "-1" ]; then
     export CUDA_VISIBLE_DEVICES=$(seq 0 1 $(($ngpu - 1)) | xargs | tr ' ' ',')
 fi
 unset ngpu
@@ -102,34 +100,9 @@ if [ $stage -le 1 ] && [ $stop_stage -ge 1 ]; then
 fi
 
 if [ $stage -le 2 ] && [ $stop_stage -ge 2 ]; then
-    for set in $trainset $devset $testset; do
-        python utils/checkfile.py -f ${cat_recipe}/all_ark/${set}.scp || exit 1
-    done
-    # Convert to pickle
-    mkdir -p $dir/pkl
 
-    for set in $trainset; do
-        python3 utils/convert_to.py -f=pickle --filer 2000 \
-            ${cat_recipe}/all_ark/$set.scp $dir/text/${set}.id \
-            $dir/pkl/$set.pkl.tmp || exit 1
-    done
+    bash exp/template/run.sh --sta 2 --sto 2 --dir=$dir --SP=$SPdir || exit 1
 
-    for set in $devset; do
-        python3 utils/convert_to.py -f=pickle \
-            ${cat_recipe}/all_ark/$set.scp $dir/text/${set}.id \
-            $dir/pkl/$set.pkl.tmp || exit 1
-    done
-    echo "Convert data to pickle done."
-
-    echo "$trainset -> train"
-    python3 utils/combinepkl.py -i $(echo $trainset | tr ' ' '\n' | sed "s|^|$dir/pkl/|g" | sed 's|$|\.pkl\.tmp|g') \
-        -o $dir/pkl/tr.pkl || exit 1
-
-    echo "$devset -> dev"
-    python3 utils/combinepkl.py -i $(echo $devset | tr ' ' '\n' | sed "s|^|$dir/pkl/|g" | sed 's|$|\.pkl\.tmp|g') \
-        -o $dir/pkl/cv.pkl || exit 1
-
-    rm $dir/pkl/*.tmp
 fi
 
 if [ $stage -le 3 ] && [ $stop_stage -ge 3 ]; then
@@ -155,18 +128,7 @@ if [ $stage -le 3 ] && [ $stop_stage -ge 3 ]; then
 fi
 
 if [ $stage -le 4 ] && [ $stop_stage -ge 4 ]; then
-    SPmodel=$SPdir/spm.model
-    python utils/checkfile.py -f $SPmodel -d $dir || exit 1
 
-    # generate averaging models
-    python utils/avgcheckpoint.py --inputs=$dir/checks --num-best 10 || exit 1
-    python utils/avgcheckpoint.py --inputs $(find $dir/checks/ -name checkpoint.* | sort -g | tail -n 10) \
-        --output $dir/checks/avg_last_10.pt || exit 1
+    bash exp/template/run.sh --sta 4 --sto 4 --dir=$dir --SP=$SPdir || exit 1
 
-    for checkpoint in bestckpt.pt avg_best_10.pt avg_last_10.pt; do
-
-        utils/e2edecode.sh $dir $(echo $testset | tr ' ' ':') $SPmodel \
-            --out_prefix=$(echo $checkpoint | cut -d '.' -f 1) \
-            --check=$checkpoint || exit 1
-    done
 fi

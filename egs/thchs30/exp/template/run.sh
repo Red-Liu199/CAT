@@ -9,7 +9,7 @@ opts=$(python utils/parseopt.py '{
         },
         "--dir":{
             "type": "str",
-            "help": "SentencePiece directory path."
+            "help": "Experiment directory path."
         },
         "--stop_stage":{
             "type": "int",
@@ -20,12 +20,14 @@ opts=$(python utils/parseopt.py '{
             "type": "int",
             "default": -1,
             "help": "Number of GPUs to used. Default: -1 (all available GPUs)"
+        },
+        "--SP":{
+            "type": "str",
+            "help": "Optional: SentencePiece directory path. Default: use the path in the script."
         }
     }' $0 $*) && eval $opts || exit 1
 
-if [ $ngpu -eq "-1" ]; then
-    unset CUDA_VISIBLE_DEVICES
-else
+if [ $ngpu -ne "-1" ]; then
     export CUDA_VISIBLE_DEVICES=$(seq 0 1 $(($ngpu - 1)) | xargs | tr ' ' ',')
 fi
 unset ngpu
@@ -35,15 +37,13 @@ unset ngpu
 
 recipe=$(basename $PWD)
 cat_recipe="../../tools/CAT/egs/$recipe/data"
-# cp current script to $dir
+
 if [ $dir == "None" ]; then
     dir=$(dirname $0)
-else
-    python utils/checkfile.py -d $dir || exit 1
-    cp $0 $dir || exit 1
 fi
-############################ DON'T MODIFY CONTENTS ABOVE ############################
+python utils/checkfile.py -d $dir $cat_recipe || exit 1
 
+############################ DON'T MODIFY CONTENTS ABOVE ############################
 # Setup train/dev/test set here. If there're multiple sets, split them with space
 trainset="train_sp"
 devset="dev_sp"
@@ -53,13 +53,19 @@ testset="test"
 char=true
 n_units=5000
 #########################################
-if [ $char == "true" ]; then
-    bpemode=char
-    n_units=100000
-    SPdir=sentencepiece/${recipe}_char
+if [ $SP == "None" ]; then
+    if [ $char == "true" ]; then
+        bpemode=char
+        n_units=100000
+        SPdir=sentencepiece/${recipe}_char
+    else
+        bpemode=unigram
+        SPdir=sentencepiece/${recipe}_${n_units}
+    fi
 else
-    bpemode=unigram
-    SPdir=sentencepiece/${recipe}_${n_units}
+    # overwrite settings
+    export SPdir=$SP
+    unset SP
 fi
 mkdir -p $SPdir
 
@@ -160,12 +166,15 @@ if [ $stage -le 4 ] && [ $stop_stage -ge 4 ]; then
     python utils/checkfile.py -f $SPmodel -d $dir || exit 1
 
     # generate averaging models
-    python utils/avgcheckpoint.py --inputs=$dir/checks --num-best 10 || exit 1
-    python utils/avgcheckpoint.py --inputs $(find $dir/checks/ -name checkpoint.* | sort -g | tail -n 10) \
-        --output $dir/checks/avg_last_10.pt || exit 1
+    if [ ! -f $dir/checks/avg_best_10.pt ]; then
+        python utils/avgcheckpoint.py --inputs=$dir/checks --num-best 10 || exit 1
+    fi
+    if [ ! -f $dir/checks/avg_last_10.pt ]; then
+        python utils/avgcheckpoint.py --inputs $(find $dir/checks/ -name checkpoint.* | sort -g | tail -n 10) \
+            --output $dir/checks/avg_last_10.pt || exit 1
+    fi
 
-    for checkpoint in bestckpt.pt avg_best_10.pt avg_last_10.pt; do
-
+    for checkpoint in bestckpt.pt avg_last_10.pt avg_best_10.pt; do
         utils/e2edecode.sh $dir $(echo $testset | tr ' ' ':') $SPmodel \
             --out_prefix=$(echo $checkpoint | cut -d '.' -f 1) \
             --check=$checkpoint --cer || exit 1

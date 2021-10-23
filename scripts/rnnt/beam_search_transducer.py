@@ -176,6 +176,7 @@ class TransducerBeamSearcher(torch.nn.Module):
         elif algo == 'lc':
             # latency controlled beam search
             self.is_latency_control = True
+            self.searcher = self.transducer_beam_search_decode
         else:
             raise RuntimeError(f"Unknown beam search algorithm: {algo}.")
 
