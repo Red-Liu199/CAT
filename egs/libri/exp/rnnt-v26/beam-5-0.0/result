@@ -1,0 +1,19 @@
+Use CPU = False
+test_clean ext_lm= %WER 2.88 [1515 / 52576, 184 ins, 97 del, 1234 sub ]
+    oracle %WER 2.12 [1117 / 52576, 130 ins, 69 del, 918 sub ]
+test_other ext_lm= %WER 6.86 [3593 / 52343, 448 ins, 275 del, 2870 sub ]
+    oracle %WER 5.67 [2967 / 52343, 354 ins, 224 del, 2389 sub ]
+
+Custom checkpoint: avg_best_10.pt
+Use CPU = False
+test_clean ext_lm= %WER 2.68 [1407 / 52576, 182 ins, 88 del, 1137 sub ]
+    oracle %WER 1.99 [1048 / 52576, 128 ins, 69 del, 851 sub ]
+test_other ext_lm= %WER 6.28 [3288 / 52343, 395 ins, 240 del, 2653 sub ]
+    oracle %WER 5.22 [2734 / 52343, 323 ins, 190 del, 2221 sub ]
+
+Custom checkpoint: avg_last_10.pt
+Use CPU = False
+test_clean ext_lm= %WER 2.64 [1390 / 52576, 179 ins, 103 del, 1108 sub ]
+    oracle %WER 1.97 [1037 / 52576, 129 ins, 72 del, 836 sub ]
+test_other ext_lm= %WER 6.28 [3286 / 52343, 399 ins, 247 del, 2640 sub ]
+    oracle %WER 5.12 [2682 / 52343, 308 ins, 196 del, 2178 sub ]
