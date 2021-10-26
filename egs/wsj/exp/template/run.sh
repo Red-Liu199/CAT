@@ -177,6 +177,6 @@ if [ $stage -le 4 ] && [ $stop_stage -ge 4 ]; then
     for checkpoint in avg_last_10.pt avg_best_10.pt; do
         utils/e2edecode.sh $dir $(echo $testset | tr ' ' ':') $SPmodel \
             --out_prefix=$(echo $checkpoint | cut -d '.' -f 1) \
-            --check=$checkpoint || exit 1
+            --check=$checkpoint --cpu || exit 1
     done
 fi

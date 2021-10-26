@@ -47,8 +47,7 @@
             "odim_encoder": 512,
             "odim_decoder": 512,
             "hdim": 512,
-            "num_classes": 4231,
-            "classical": false
+            "num_classes": 4231
         }
     },
     "scheduler": {

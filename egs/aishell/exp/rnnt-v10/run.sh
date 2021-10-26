@@ -1,5 +1,5 @@
 # This script is expected to be executed as
-opts=$(python exec/parseopt.py '{
+opts=$(python utils/parseopt.py '{
         "--stage":{
             "type": "int",
             "default": '3',
@@ -54,7 +54,7 @@ if [ $stage -le 1 ] && [ $stop_stage -ge 1 ]; then
     # ...Note that bos_id is not used, it will be regarded as <blk> in CTC/RNN-T training.)
     # predefined_syms="<NOISE>"
     predefined_syms=""
-    python3 exec/spm_train.py --num_threads=$nj --input=$spmdata/corpus.tmp --model_prefix=$spmdata/spm \
+    python3 utils/spm_train.py --num_threads=$nj --input=$spmdata/corpus.tmp --model_prefix=$spmdata/spm \
         --bos_id=-1 --eos_id=-1 --unk_id=0 --vocab_size=10000 --user_defined_symbols=$predefined_syms \
         --character_coverage=1 --model_type=char --unk_surface="<unk>" --add_dummy_prefix=False \
         >$spmdata/spm_training.log 2>&1 &&
@@ -77,7 +77,7 @@ if [ $stage -le 1 ] && [ $stop_stage -ge 1 ]; then
         cat $src_text | cut -d ' ' -f 2- | sed 's/ //g' >$curdata/corpus.tmp
 
         # encode text to token ids
-        cat $curdata/corpus.tmp | python3 exec/spm_encode.py --model=$spmdata/spm.model >$curdata/text_id.tmp || exit 1
+        cat $curdata/corpus.tmp | python3 utils/spm_encode.py --model=$spmdata/spm.model >$curdata/text_id.tmp || exit 1
 
         # combine seq id with token ids
         cat $src_text | cut -d ' ' -f 1 >$curdata/seq_id.tmp
@@ -94,13 +94,13 @@ if [ $stage -le 2 ] && [ $stop_stage -ge 2 ]; then
     ln -snf $(readlink -f data/all_ark/cv.scp) data/all_ark/$devset.scp
 
     for set in $trainset; do
-        python3 exec/convert_to.py -f=pickle --filer 2000 \
+        python3 utils/convert_to.py -f=pickle --filer 2000 \
             data/all_ark/$set.scp $dir/text/${set}.id \
             data/$set/weight $dir/pkl/$set.pkl.tmp || exit 1
     done
 
     for set in $devset; do
-        python3 exec/convert_to.py -f=pickle \
+        python3 utils/convert_to.py -f=pickle \
             data/all_ark/$set.scp $dir/text/${set}.id \
             data/$set/weight $dir/pkl/$set.pkl.tmp || exit 1
     done
@@ -108,9 +108,9 @@ if [ $stage -le 2 ] && [ $stop_stage -ge 2 ]; then
     echo "Convert data to pickle done."
 
     echo "$trainset -> tr"
-    python3 exec/combinepkl.py -i $dir/pkl/$trainset.pkl.tmp -o $dir/pkl/tr.pkl || exit 1
+    python3 utils/combinepkl.py -i $dir/pkl/$trainset.pkl.tmp -o $dir/pkl/tr.pkl || exit 1
     echo "$devset -> cv"
-    python3 exec/combinepkl.py -i $dir/pkl/$devset.pkl.tmp -o $dir/pkl/cv.pkl || exit 1
+    python3 utils/combinepkl.py -i $dir/pkl/$devset.pkl.tmp -o $dir/pkl/cv.pkl || exit 1
 
     rm $dir/pkl/*.tmp
 fi
@@ -118,7 +118,7 @@ fi
 if [ $stage -le 3 ] && [ $stop_stage -ge 3 ]; then
     echo "NN training"
 
-    python3 ctc-crf/transducer_train.py --seed=0 \
+    python3 rnnt/transducer_train.py --seed=0 \
         --world-size 1 --rank 0 \
         --dist-url='tcp://127.0.0.1:13944' \
         --batch_size=512 \
@@ -135,15 +135,15 @@ fi
 
 if [ $stage -le 4 ] && [ $stop_stage -ge 4 ]; then
     spmodel=$spmdata/spm.model
-    exec/e2edecode.sh $dir "test" $spmodel --cer || exit 1
+    utils/e2edecode.sh $dir "test" $spmodel --cer || exit 1
     mv $dir/beam-5-0.0/decode_test.txt $dir/beam-5-0.0/default_test
 
-    python exec/avgcheckpoint.py --inputs=$dir/checks --num-best 10 || exit 1
-    exec/e2edecode.sh $dir "test" $spmodel --check avg_best_10.pt --cer || exit 1
+    python utils/avgcheckpoint.py --inputs=$dir/checks --num-best 10 || exit 1
+    utils/e2edecode.sh $dir "test" $spmodel --check avg_best_10.pt --cer || exit 1
     mv $dir/beam-5-0.0/decode_test.txt $dir/beam-5-0.0/test_best_10
 
-    python exec/avgcheckpoint.py --inputs $(find $dir/checks/ -name checkpoint.* | sort -g | tail -n 10) \
+    python utils/avgcheckpoint.py --inputs $(find $dir/checks/ -name checkpoint.* | sort -g | tail -n 10) \
         --output $dir/checks/avg_last_10.pt || exit 1
-    exec/e2edecode.sh $dir "test" $spmodel --check avg_last_10.pt --cer || exit 1
+    utils/e2edecode.sh $dir "test" $spmodel --check avg_last_10.pt --cer || exit 1
     mv $dir/beam-5-0.0/decode_test.txt $dir/beam-5-0.0/test_last_10
 fi

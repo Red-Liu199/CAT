@@ -1,5 +1,5 @@
 #!/bin/bash
-
+set -u
 opts=$(python utils/parseopt.py '{
         "dir":{
             "type": "str",
@@ -38,12 +38,18 @@ opts=$(python utils/parseopt.py '{
         },
         "--beam_size":{
             "type":"int",
-            "default": 5,
-            "help": "Beam search width. Default: 5"
+            "default": 10,
+            "help": "Beam search width. Default: 10"
         },
         "--dec-dir":{
             "type":"str",
             "help": "Decode output directory. Default: beam-{beam_size}-{lm_weight}"
+        },
+        "--algo":{
+            "type":"str",
+            "default": "lc",
+            "choices": ["default", "lc"],
+            "help": "Decode algorithm. Default: latency control beam search"
         },
         "--cpu":{
             "action":"store_true",
@@ -63,8 +69,7 @@ opts=$(python utils/parseopt.py '{
 recipe=$(basename $PWD)
 cat_recipe="../../tools/CAT/egs/$recipe/data/"
 cat_ark="$cat_recipe/all_ark"
-mode='beam'
-echo "> Settings: mode=$mode | beam-width=$beam_size | lm-weight=$lm_weight"
+echo "> Settings: algorithm=$algo | beam-width=$beam_size | lm-weight=$lm_weight"
 
 if [ $(echo "$lm_weight > 0.0" | bc -l) -eq 1 ]; then
     prefix="ext_lm=$lm_weight "
@@ -72,7 +77,10 @@ if [ $(echo "$lm_weight > 0.0" | bc -l) -eq 1 ]; then
 else
     prefix="ext_lm= "
 fi
-
+if [ -d $spmodel ]; then
+    export spmodel=$spmodel/spm.model
+    python utils/checkfile.py -f $spmodel || exit 1
+fi
 if [ $nj -eq "-1" ]; then
     nj=$(nproc)
 fi
@@ -86,7 +94,7 @@ if [ $text_dir == "None" ]; then
 fi
 
 if [ $dec_dir == "None" ]; then
-    dec_dir=$dir/${mode}-${beam_size}-$lm_weight
+    dec_dir=$dir/beam-${beam_size}-${lm_weight}
 fi
 mkdir -p $dec_dir
 mkdir -p $dir/enc
@@ -116,7 +124,7 @@ for set in $test_set; do
         --output_dir=$dec_dir \
         --enc-out-dir=$dir/enc \
         --spmodel=$spmodel \
-        --mode=$mode \
+        --algo=$algo \
         --nj=$nj \
         --beam_size=$beam_size \
         --ext-lm-config=$lmdir/config.json \
@@ -135,7 +143,7 @@ for set in $test_set; do
 done
 
 if [ $check != "bestckpt.pt" ]; then
-    echo "Custom checkpoint: $check" >>$dec_dir/result
+    echo -n "Custom checkpoint: $check | " >>$dec_dir/result
 fi
 
 echo "Use CPU = $cpu" >>$dec_dir/result

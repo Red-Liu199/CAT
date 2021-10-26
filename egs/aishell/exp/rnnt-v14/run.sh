@@ -1,5 +1,5 @@
 # This script is expected to be executed as
-opts=$(python exec/parseopt.py '{
+opts=$(python utils/parseopt.py '{
         "--stage":{
             "type": "int",
             "default": '3',
@@ -55,7 +55,7 @@ fi
 if [ $stage -le 3 ] && [ $stop_stage -ge 3 ]; then
     echo "NN training"
 
-    python3 ctc-crf/transducer_train.py --seed=1 \
+    python3 rnnt/transducer_train.py --seed=1 \
         --world-size 1 --rank 0 \
         --dist-url='tcp://127.0.0.1:13944' \
         --batch_size=512 \
@@ -73,15 +73,15 @@ fi
 
 if [ $stage -le 4 ] && [ $stop_stage -ge 4 ]; then
     spmodel=$spmdata/spm.model
-    exec/e2edecode.sh $dir "test" $spmodel --cer || exit 1
+    utils/e2edecode.sh $dir "test" $spmodel --cer || exit 1
     mv $dir/beam-5-0.0/decode_test.txt $dir/beam-5-0.0/default_test
 
-    python exec/avgcheckpoint.py --inputs=$dir/checks --num-best 10 || exit 1
-    exec/e2edecode.sh $dir "test" $spmodel --check avg_best_10.pt --cer || exit 1
+    python utils/avgcheckpoint.py --inputs=$dir/checks --num-best 10 || exit 1
+    utils/e2edecode.sh $dir "test" $spmodel --check avg_best_10.pt --cer || exit 1
     mv $dir/beam-5-0.0/decode_test.txt $dir/beam-5-0.0/test_best_10
 
-    python exec/avgcheckpoint.py --inputs $(find $dir/checks/ -name checkpoint.* | sort -g | tail -n 10) \
+    python utils/avgcheckpoint.py --inputs $(find $dir/checks/ -name checkpoint.* | sort -g | tail -n 10) \
         --output $dir/checks/avg_last_10.pt || exit 1
-    exec/e2edecode.sh $dir "test" $spmodel --check avg_last_10.pt --cer || exit 1
+    utils/e2edecode.sh $dir "test" $spmodel --check avg_last_10.pt --cer || exit 1
     mv $dir/beam-5-0.0/decode_test.txt $dir/beam-5-0.0/test_last_10
 fi

@@ -102,7 +102,7 @@ def main_worker(gpu: int, args: argparse.Namespace, models=None):
 
     if args.cpu:
         device = 'cpu'
-        torch.set_num_threads((os.cpu_count() * 2)//world_size)
+        torch.set_num_threads(os.cpu_count()//world_size)
         dist.init_process_group(
             backend='gloo', init_method=args.dist_url,
             world_size=world_size, rank=args.rank)
@@ -126,7 +126,7 @@ def main_worker(gpu: int, args: argparse.Namespace, models=None):
     writer = os.path.join(args.output_dir, f'decode.{gpu}.tmp')
     beamsearcher = TransducerBeamSearcher(
         model.decoder, model.joint, blank_id=0, bos_id=model.bos_id, beam_size=args.beam_size,
-        nbest=args.beam_size, algo='default', prefix_merge=True,
+        nbest=args.beam_size, algo=args.algo, prefix_merge=True,
         state_beam=2.3, expand_beam=2.3, temperature=1.0,
         lm_module=ext_lm, lm_weight=args.lm_weight)
 
@@ -323,8 +323,8 @@ if __name__ == '__main__':
     parser.add_argument("--input_scp", type=str, default=None)
     parser.add_argument("--output_dir", type=str, default=None)
     parser.add_argument("--enc-out-dir", type=str, default=None)
-    parser.add_argument("--mode", type=str,
-                        choices=['greedy', 'beam'], default='beam')
+    parser.add_argument("--algo", type=str,
+                        choices=['default', 'lc'], default='default')
     parser.add_argument("--beam_size", type=int, default=3)
     parser.add_argument("--spmodel", type=str, default='',
                         help="SPM model location.")
