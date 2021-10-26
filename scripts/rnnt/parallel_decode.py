@@ -102,7 +102,7 @@ def main_worker(gpu: int, args: argparse.Namespace, models=None):
 
     if args.cpu:
         device = 'cpu'
-        torch.set_num_threads(os.cpu_count()//world_size)
+        torch.set_num_threads(1)
         dist.init_process_group(
             backend='gloo', init_method=args.dist_url,
             world_size=world_size, rank=args.rank)
