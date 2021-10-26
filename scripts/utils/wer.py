@@ -21,14 +21,17 @@ class Processor():
         self._process.append(new_processing)
         pass
 
-    def __call__(self, seqs: Union[List[str], str]) -> List[str]:
-        if isinstance(seqs, str):
-            seqs = [seqs]
+    def __call__(self, seqs: Union[List[str], str]) -> Union[List[str], str]:
 
-        o_seq = seqs
-        for processing in self._process:
-            o_seq = [processing(s) for s in o_seq]
-        return o_seq
+        if isinstance(seqs, str):
+            for processing in self._process:
+                seqs = processing(seqs)
+            return seqs
+        else:
+            o_seq = seqs
+            for processing in self._process:
+                o_seq = [processing(s) for s in o_seq]
+            return o_seq
 
 
 def WER(l_gt: List[str], l_hy: List[str]) -> Tuple[int, int, int, int]:
@@ -119,12 +122,10 @@ if __name__ == "__main__":
         processor.append(lambda s: ' '.join(s.split()[1:]))
 
     if args.cer:
-        # rm space the split by chars
+        # rm space then split by char
         pattern = re.compile(r'\s+')
         processor.append(lambda s: pattern.sub('', s))
         processor.append(lambda s: ' '.join(list(s)))
-
-    l_gt = processor(l_gt)
 
     if args.oracle:
         for i, hypo in enumerate(l_hy):
@@ -135,12 +136,13 @@ if __name__ == "__main__":
         for i, s in enumerate(l_gt):
             sl = s.split(' ')
             key, g_s = sl[0], ' '.join(sl[1:])
-            l_gt[i] = (key, g_s)
+            l_gt[i] = (key, processor(g_s))
 
         l_hy = sorted(l_hy, key=lambda item: item[0])
         l_gt = sorted(l_gt, key=lambda item: item[0])
     else:
         l_hy = processor(l_hy)
+        l_gt = processor(l_gt)
 
     # multi-processing compute
     num_threads = int(os.cpu_count())
