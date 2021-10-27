@@ -59,7 +59,7 @@ textdir=data/corpus
 mkdir -p $textdir
 if [ $stage -le 1 ] && [ $stop_stage -ge 1 ]; then
     for set in $trainset $devset $testset; do
-        python utils/checkfile.py -f $set || exit 1
+        python utils/checkfile.py -f ${cat_recipe}/$set/text || exit 1
     done
 
     if [ ! -f $textdir/librispeech.txt ]; then
@@ -117,6 +117,8 @@ if [ $stage -le 3 ] && [ $stop_stage -ge 3 ]; then
         --world-size 1 --rank 0 -j 1 \
         --batch_size=2048 \
         --dir=$dir \
+        --databalance \
+        --amp \
         --config=$dir/config.json \
         --trset=$textdir/tr.pkl \
         --devset=$textdir/dev.pkl ||

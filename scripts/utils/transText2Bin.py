@@ -23,8 +23,47 @@ def text2bin(arguments: Tuple[argparse.Namespace, int, int, int]) -> Tuple[str, 
     postfix = []
     cnt_process = 0
     tot_line = 0
-    with open(args.intext, 'r') as fi:
-        with open(binfile, 'wb') as fo:
+    with open(args.intext, 'r') as fi, open(binfile, 'wb') as fo:
+        if norm_len != -1:
+            for i, line in (enumerate(fi)):
+                if i < idx_beg or i >= idx_end:
+                    continue
+                tot_line += 1
+                if args.strip:
+                    data = [int(x) for x in line.split()[1:]]
+                else:
+                    data = [int(x) for x in line.split()]
+
+                data = postfix + data
+                while len(data) >= norm_len:
+                    dataset.append(fo.tell())
+                    pickle.dump(data[:norm_len], fo)
+                    data = data[norm_len:]
+                    cnt_process += 1
+                if len(data) > 0:
+                    postfix = data
+                    postfix.append(args.sos_id)
+        elif args.truncate != -1:
+            for i, line in (enumerate(fi)):
+                if i < idx_beg or i >= idx_end:
+                    continue
+                tot_line += 1
+                if args.strip:
+                    data = [int(x) for x in line.split()[1:]]
+                else:
+                    data = [int(x) for x in line.split()]
+
+                while len(data) >= args.truncate:
+                    dataset.append(fo.tell())
+                    pickle.dump(data[:args.truncate], fo)
+                    data = data[args.truncate:]
+                    cnt_process += 1
+
+                if len(data) > 0:
+                    dataset.append(fo.tell())
+                    pickle.dump(data, fo)
+                    cnt_process += 1
+        else:
             for i, line in (enumerate(fi)):
                 if i < idx_beg or i >= idx_end:
                     continue
@@ -34,24 +73,16 @@ def text2bin(arguments: Tuple[argparse.Namespace, int, int, int]) -> Tuple[str, 
                     data = [int(x) for x in line.split()[1:]]
                 else:
                     data = [int(x) for x in line.split()]
-
-                if norm_len != -1:
-                    data = postfix + data
-                    while len(data) >= norm_len:
-                        dataset.append(fo.tell())
-                        pickle.dump(data[:norm_len], fo)
-                        data = data[norm_len:]
-                        cnt_process += 1
-                    if len(data) > 0:
-                        postfix = data
-                        postfix.append(args.sos_id)
-                else:
-                    dataset.append(fo.tell())
-                    pickle.dump(data, fo)
+                dataset.append(fo.tell())
+                pickle.dump(data, fo)
 
     if norm_len != -1:
         print("[{:2}] Concat by len {}, # {} -> {}".format(pool_id,
               norm_len, tot_line, cnt_process))
+        return pool_id, binfile, cnt_process
+    elif args.truncate != -1:
+        print("[{:2}] Truncate by len {}, # {} -> {}".format(pool_id,
+              args.truncate, tot_line, cnt_process))
         return pool_id, binfile, cnt_process
     else:
         return pool_id, binfile, tot_line
@@ -67,10 +98,14 @@ if __name__ == "__main__":
     parser.add_argument("--strip", action="store_true", default=False)
     parser.add_argument("--concat", type=int, default=-1,
                         help="Use concat mode instead valid mode with given length. Default: -1 (disable)")
+    parser.add_argument("--truncate", type=int, default=-1, metavar="trunc",
+                        help="Truncate the seq longer than trunc and take res of it as new seq. Default: -1 (disable)")
     parser.add_argument("--sos_id", type=int, default=0,
                         help="Begin of sequence index, available in concat > 1. Default: 0")
 
     args = parser.parse_args()
+    assert args.truncate == -1 or args.concat == - \
+        1, "--concat is conflict with --truncate"
 
     num_threads = args.nj
     if num_threads < 1:

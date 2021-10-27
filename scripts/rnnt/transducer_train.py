@@ -64,9 +64,6 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
     setattr(args, 'n_steps', 0)
 
     if args.databalance:
-        if args.debug:
-            tr_set.dataset = tr_set.dataset[-int(len(tr_set)*0.1):]
-
         coreutils.distprint(
             "> Enable data balanced loading.\n  It takes a while to initialize...", args.gpu)
         train_sampler = BalancedDistributedSampler(

@@ -10,6 +10,7 @@ import h5py
 import coreutils
 import pickle
 import math
+import hashlib
 from multiprocessing import Pool
 from typing import Tuple, Sequence, List, Optional, Union
 
@@ -17,6 +18,19 @@ import torch
 from torch.utils.data import Dataset
 import torch.distributed as dist
 from torch.utils.data.distributed import DistributedSampler
+
+
+def get_sha256(file: str) -> str:
+    '''Get sha256 has of a file.
+    '''
+    assert os.path.isfile(file), f"{file} not found."
+    sha256_hash = hashlib.sha256()
+    with open(file, "rb") as f:
+        # Read and update hash string value in blocks of 4K
+        for byte_block in iter(lambda: f.read(4096), b""):
+            sha256_hash.update(byte_block)
+
+    return sha256_hash.hexdigest()
 
 
 class FeatureReader:
@@ -32,9 +46,33 @@ class FeatureReader:
         del self._opened_fd
 
 
-class SpeechDataset(Dataset):
+class AbsDataset(Dataset):
+    def __init__(self, path: str) -> None:
+        super().__init__()
+        self.f_path = path
+        assert os.path.isfile(
+            path), f"{self.__class__.__name__}: {path} is not a valid file."
+
+    def impl_get_len(self):
+        raise NotImplementedError
+
+    def get_seq_len(self) -> List[int]:
+        cache_f = os.path.join('.cache/', get_sha256(self.f_path)+".pkl")
+        if os.path.isfile(cache_f):
+            with open(cache_f, 'rb') as fi:
+                return pickle.load(fi)
+        else:
+            ls = self.impl_get_len()
+
+            os.makedirs('.cache', exist_ok=True)
+            with open(cache_f, 'wb') as fo:
+                pickle.dump(ls, fo)
+            return ls
+
+
+class SpeechDataset(AbsDataset):
     def __init__(self, h5py_path):
-        self.h5py_path = h5py_path
+        super().__init__(h5py_path)
         self.dataset = None
         hdf5_file = h5py.File(h5py_path, 'r')
         self.keys = list(hdf5_file.keys())
@@ -44,7 +82,7 @@ class SpeechDataset(Dataset):
 
     def __getitem__(self, idx):
         if self.dataset is None:
-            self.dataset = h5py.File(self.h5py_path, 'r')
+            self.dataset = h5py.File(self.f_path, 'r')
 
         dataset = self.dataset[self.keys[idx]]
         mat = dataset[:]
@@ -53,8 +91,9 @@ class SpeechDataset(Dataset):
         return torch.tensor(mat, dtype=torch.float), torch.IntTensor(label)
 
 
-class SpeechDatasetMem(Dataset):
+class SpeechDatasetMem(AbsDataset):
     def __init__(self, h5py_path):
+        super().__init__(h5py_path)
         hdf5_file = h5py.File(h5py_path, 'r')
         keys = hdf5_file.keys()
         self.data_batch = []
@@ -75,13 +114,14 @@ class SpeechDatasetMem(Dataset):
         return self.data_batch[idx]
 
 
-class SpeechDatasetPickle(Dataset):
+class SpeechDatasetPickle(AbsDataset):
     def __init__(self, pickle_path):
+        super().__init__(pickle_path)
         with open(pickle_path, 'rb') as f:
             self.dataset = pickle.load(f)
         self.freader = FeatureReader()
 
-    def get_seq_len(self) -> List[int]:
+    def impl_get_len(self):
         _ls = []
         for _, feature_path, _ in self.dataset:
             mat = self.freader(feature_path)
@@ -105,8 +145,9 @@ class SpeechDatasetPickle(Dataset):
         return torch.tensor(mat, dtype=torch.float), torch.IntTensor(label)
 
 
-class SpeechDatasetMemPickle(Dataset):
+class SpeechDatasetMemPickle(AbsDataset):
     def __init__(self, pickle_path):
+        super().__init__(pickle_path)
         with open(pickle_path, 'rb') as f:
             self.dataset = pickle.load(f)
 
@@ -126,9 +167,9 @@ class SpeechDatasetMemPickle(Dataset):
         return self.data_batch[idx]
 
 
-class InferDataset(Dataset):
+class InferDataset(AbsDataset):
     def __init__(self, scp_path) -> None:
-        super().__init__()
+        super().__init__(scp_path)
         with open(scp_path, 'r') as fi:
             lines = fi.readlines()
         self.dataset = [x.split() for x in lines]
@@ -143,13 +184,13 @@ class InferDataset(Dataset):
         return key, torch.tensor(mat, dtype=torch.float), torch.LongTensor([mat.shape[0]])
 
 
-class ScpDataset(Dataset):
+class ScpDataset(AbsDataset):
     """
     Read data from scp file ranging [idx_beg, idx_end)
     """
 
     def __init__(self, scp_file: str) -> None:
-        super().__init__()
+        super().__init__(scp_file)
 
         if not os.path.isfile(scp_file):
             raise FileNotFoundError(f"{scp_file} is not a valid file.")
@@ -164,7 +205,7 @@ class ScpDataset(Dataset):
     def __len__(self) -> int:
         return len(self._dataset)
 
-    def get_seq_len(self) -> List[int]:
+    def impl_get_len(self):
         _ls = []
         for _, fpath in self._dataset:
             mat = self.freader(fpath)
@@ -180,9 +221,9 @@ class ScpDataset(Dataset):
         return [key, torch.tensor(mat, dtype=torch.float)]
 
 
-class CorpusDataset(Dataset):
+class CorpusDataset(AbsDataset):
     def __init__(self, pickle_path: str) -> None:
-        super().__init__()
+        super().__init__(pickle_path)
         assert os.path.isfile(pickle_path)
 
         self.dataset = None
@@ -190,13 +231,11 @@ class CorpusDataset(Dataset):
             self._pathbin = pickle.load(fi)
             self._seeks = pickle.load(fi)
 
-    def get_seq_len(self) -> List[int]:
+    def impl_get_len(self):
         _ls = []
-        for i in range(len(self)):
-            data = self[i]
-            _ls.append(data.size(0))
-        self.dataset.close()
-        self.dataset = None
+        with open(self._pathbin, 'rb') as fi:
+            for _ in range(len(self)):
+                _ls.append(len(pickle.load(fi)))
         return _ls
 
     def __len__(self):
@@ -346,12 +385,15 @@ class BalancedDistributedSampler(DistributedSampler):
         # scan data length, this might take a while
         if rank is None:
             rank = dist.get_rank()
-        if rank == 0:
-            seq_lens = dataset.get_seq_len()
-        else:
-            seq_lens = [0 for _ in range(len(self.dataset))]
-        dist.broadcast_object_list(seq_lens)
 
+        if rank == 0:
+            # save length info into cache file
+            dataset.get_seq_len()
+
+        dist.barrier()
+
+        # read from cached file
+        seq_lens = dataset.get_seq_len()
         self._lens = seq_lens
 
         self.g_batch = int(global_batch_size)
@@ -385,21 +427,23 @@ class BalancedDistributedSampler(DistributedSampler):
         batched_indices = [indices[idx_g_batch:idx_g_batch+self.g_batch]
                            for idx_g_batch in range(0, self.total_size, self.g_batch)]
 
-        num_threads = min(int(os.cpu_count()) //
-                          self.num_replicas, len(batched_indices))
-        interval = len(batched_indices) // num_threads
-        process_idx = [interval * i for i in range(num_threads+1)]
-        if process_idx[-1] != len(batched_indices):
-            process_idx[-1] = len(batched_indices)
+        # num_threads = min(int(os.cpu_count()) //
+        #                   self.num_replicas, len(batched_indices))
+        # interval = len(batched_indices) // num_threads
+        # process_idx = [interval * i for i in range(num_threads+1)]
+        # if process_idx[-1] != len(batched_indices):
+        #     process_idx[-1] = len(batched_indices)
+        # pool_args = [(batched_indices[process_idx[i]:process_idx[i+1]], self._lens, self._l_norm, self.num_replicas, i)
+        #              for i in range(num_threads)]
+        # with Pool(processes=num_threads) as pool:
+        #     gathered_groups = pool.map(group_indices, pool_args)
+        # partial_indices = []
+        # for g, _ in sorted(gathered_groups, key=lambda i: i[1]):
+        #     partial_indices += g
 
-        pool_args = [(batched_indices[process_idx[i]:process_idx[i+1]], self._lens, self._l_norm, self.num_replicas, i)
-                     for i in range(num_threads)]
-        with Pool(processes=num_threads) as pool:
-            gathered_groups = pool.map(group_indices, pool_args)
+        partial_indices, _ = group_indices(
+            (batched_indices, self._lens, self._l_norm, self.num_replicas, 0))
 
-        partial_indices = []
-        for g, _ in sorted(gathered_groups, key=lambda i: i[1]):
-            partial_indices += g
         partial_indices = [x[self.rank] for x in partial_indices]
 
         return iter(partial_indices)

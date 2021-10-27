@@ -10,9 +10,6 @@ and is more non-hard-coding style.
 
 import coreutils
 import model as model_zoo
-from ctc_crf import CRFContext
-from ctc_crf import CTC_CRF_LOSS as CRFLoss
-from ctc_crf import WARP_CTC_LOSS as CTCLoss
 from data import SpeechDatasetPickle, SpeechDataset, sortedPadCollate
 
 import os
@@ -39,6 +36,8 @@ def main_spawner(args, _main_worker: Callable[[int, int, argparse.Namespace], No
 
 
 def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
+    from ctc_crf import CRFContext
+
     coreutils.SetRandomSeed(args.seed)
     args.gpu = gpu
     torch.cuda.set_device(gpu)
@@ -133,6 +132,8 @@ class AMTrainer(nn.Module):
 
 def build_model(args, configuration, train=True) -> nn.Module:
 
+    from ctc_crf import CTC_CRF_LOSS as CRFLoss
+    from ctc_crf import WARP_CTC_LOSS as CTCLoss
     netconfigs = configuration['net']
     net_kwargs = netconfigs['kwargs']   # type:dict
     net = getattr(model_zoo, netconfigs['type'])

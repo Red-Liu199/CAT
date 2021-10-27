@@ -131,6 +131,7 @@ class LMTrainer(nn.Module):
     def __init__(self, lm: AbsDecoder = None):
         super().__init__()
         self.lm = lm    # type: AbsDecoder
+        self.logsoftmax = nn.LogSoftmax(dim=-1)
         self.criterion = nn.NLLLoss()
 
     def forward(self, inputs: torch.FloatTensor, targets: torch.LongTensor, input_lengths: torch.LongTensor, *args, **kwargs) -> torch.FloatTensor:
@@ -147,7 +148,7 @@ class LMTrainer(nn.Module):
         logits = torch.cat(logits, dim=0)
 
         # targets: (\sum{S_i})
-        loss = self.criterion(logits, targets)
+        loss = self.criterion(self.logsoftmax(logits), targets)
         return loss
 
 
@@ -284,21 +285,25 @@ class Transformer(AbsDecoder):
             encoder_layers, num_layers)
         self.ninp = dim_hid
 
-    def forward(self, src: torch.Tensor, lens: Optional[torch.Tensor] = None, *args, **kwargs):
-        if lens is None:
-            mask = torch.arange(src.size(1), device=src.device)[
-                :, None] >= lens[None, :].to(src.device)
-            mask = mask.float().masked_fill_(mask == 0, float(
-                '-inf')).masked_fill_(mask == 1, float(0.0))
+    def forward(self, src: torch.Tensor, input_lengths: Optional[torch.Tensor] = None, *args, **kwargs):
+        if input_lengths is None:
+            src_mask = None
+            src_key_padding_mask = None
         else:
-            mask = None
+            src_mask = (torch.triu(src.new_ones(
+                src.size(1), src.size(1), dtype=torch.bool))).transpose(0, 1)
+            src_mask = src_mask.float().masked_fill(src_mask == 0, float('-inf')
+                                                    ).masked_fill(src_mask == 1, float(0.0))
+
+            src_key_padding_mask = torch.arange(src.size(1), device=src.device)[
+                None, :] >= input_lengths[:, None].to(src.device)
 
         src = self.embedding(src) * math.sqrt(self.ninp)
         pos_embedding = self.pos_encoder(src).unsqueeze(0)
         src = pos_embedding + src
-        output = self.transformer_encoder(src, mask)
+        output = self.transformer_encoder(src, src_mask, src_key_padding_mask)
         output = self.classifier(output)
-        return output.log_softmax(dim=-1)
+        return output, None
 
 
 @torch.no_grad()
@@ -314,7 +319,6 @@ def evaluate(testloader: DataLoader, args: argparse.Namespace, manager: coreutil
         prefix='Test: ')
 
     beg = time.time()
-    end = time.time()
     cnt_batch = 0
     total_loss = 0.
     for i, minibatch in enumerate(testloader):
@@ -334,7 +338,6 @@ def evaluate(testloader: DataLoader, args: argparse.Namespace, manager: coreutil
         cnt_batch += n_batch.item()
         total_loss += batch_sum_loss.item()
 
-        end = time.time()
         if ((i+1) % args.print_freq == 0 or args.debug) and args.gpu == 0:
             progress.display(i+1)
 
