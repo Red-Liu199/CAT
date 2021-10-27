@@ -11,9 +11,12 @@ and is more non-hard-coding style.
 import coreutils
 from am_train import setPath, main_spawner
 from data import BalancedDistributedSampler, CorpusDataset, sortedPadCollateLM
+from _layers import PositionalEncoding
 
+import time
+import math
 import argparse
-from typing import Tuple, Union, List
+from typing import Tuple, Union, List, Optional
 from collections import OrderedDict
 
 import torch
@@ -44,7 +47,7 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         num_workers=args.workers, pin_memory=True,
         sampler=test_sampler, collate_fn=sortedPadCollateLM())
 
-    manager = coreutils.Manager(build_model, args)
+    manager = coreutils.Manager(build_model, args, func_eval=evaluate)
     # lm training does not need specaug
     manager.specaug = None
 
@@ -57,26 +60,6 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
     if args.rank == 0 and not args.debug:
         coreutils.gen_readme(args.dir+'/readme.md',
                              model=manager.model, gpu_info=gpu_info)
-
-    if args.evaluate:
-        if args.resume is None:
-            raise RuntimeError("--evaluate option must be with --resume")
-
-        manager.model.eval()
-
-        ppl = 0.
-        for minibatch in testloader:
-            logits, input_lengths, labels, label_lengths, _ = minibatch
-            logits, labels, input_lengths, label_lengths = logits.cuda(
-                args.gpu, non_blocking=True), labels, input_lengths, label_lengths
-
-            ppl_i = manager.model.module.test(logits, labels, input_lengths)
-            dist.all_reduce(ppl_i)
-            ppl += ppl_i
-
-        coreutils.distprint("PPL for {} sentences: {:.2f}".format(
-            len(test_set), ppl/len(test_set)), args.gpu)
-        return
 
     tr_set = CorpusDataset(args.trset)
     setattr(args, 'n_steps', 0)
@@ -106,36 +89,51 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
     manager.run(train_sampler, trainloader, testloader, args)
 
 
-class LMTrainer(nn.Module):
-    def __init__(self, lm: nn.Module = None):
+class AbsDecoder(nn.Module):
+    """Abstract decoder class
+
+    Args:
+        num_classes (int): number of classes of tokens. a.k.a. the vocabulary size.
+        n_emb (int): embedding hidden size.
+        n_hid (int, optional): hidden size of decoder, also the dimension of input features of the classifier.
+            if -1, will set `n_hid=n_emb`
+        padding_idx (int, optional): index of padding lable, -1 to disable it.
+        tied (bool, optional): flag of whether the embedding layer and the classifier layer share the weight. Default: False
+
+    """
+
+    def __init__(self, num_classes: int, n_emb: int, n_hid: int = -1, padding_idx: int = -1, tied: bool = False) -> None:
         super().__init__()
-        self.lm = lm    # type: LSTMPredictNet
-        self.criterion = nn.CrossEntropyLoss()
+        if n_hid == -1:
+            n_hid = n_emb
 
-    @torch.no_grad()
-    def test(self, inputs: torch.LongTensor, targets: torch.LongTensor, input_lengths: torch.LongTensor):
-        targets = targets.to(inputs.device)
-        # preds: (N, S, C)
-        preds, _ = self.lm(inputs)
-        log_p = torch.log_softmax(preds, dim=-1)
-        # squeeze log_p by concat all sentences
-        # log_p: (\sum{S_i}, C)
-        log_p = torch.cat([log_p[i, :l]
-                          for i, l in enumerate(input_lengths)], dim=0)
+        assert n_emb > 0 and isinstance(
+            n_emb, int), f"{self.__class__.__name__}: Invalid embedding size: {n_emb}"
+        assert n_hid > 0 and isinstance(
+            n_hid, int), f"{self.__class__.__name__}: Invalid hidden size: {n_hid}"
+        assert (tied and (n_hid == n_emb)) or (
+            not tied), f"{self.__class__.__name__}: tied=True is conflict with n_emb!=n_hid: {n_emb}!={n_hid}"
+        assert padding_idx == -1 or (padding_idx > 0 and isinstance(padding_idx, -1) and padding_idx <
+                                     num_classes), f"{self.__class__.__name__}: Invalid padding idx: {padding_idx}"
 
-        # target_mask: (\sum{S_i}, C)
-        target_mask = torch.arange(log_p.size(1), device=log_p.device)[
-            None, :] == targets[:, None]
-        # log_p: (\sum{S_i}, )
-        log_p = torch.sum(log_p * target_mask, dim=-1)
+        if padding_idx == -1:
+            self.embedding = nn.Embedding(num_classes, n_emb)
+        else:
+            self.embedding = nn.Embedding(
+                num_classes, n_emb, padding_idx=padding_idx)
 
-        ppl = [-1./input_lengths[i]*torch.sum(log_p[input_lengths[:i].sum(
-        ):input_lengths[:(i+1)].sum()]) for i in range(input_lengths.size(0))]
-        ppl = torch.stack(ppl)
+        self.classifier = nn.Linear(n_hid, num_classes)
+        if tied:
+            self.classifier.weight = self.embedding.weight
 
-        return torch.sum(torch.exp(ppl))
 
-    def forward(self, inputs: torch.FloatTensor, targets: torch.LongTensor, input_lengths: torch.LongTensor, target_lengths: torch.LongTensor) -> torch.FloatTensor:
+class LMTrainer(nn.Module):
+    def __init__(self, lm: AbsDecoder = None):
+        super().__init__()
+        self.lm = lm    # type: AbsDecoder
+        self.criterion = nn.NLLLoss()
+
+    def forward(self, inputs: torch.FloatTensor, targets: torch.LongTensor, input_lengths: torch.LongTensor, *args, **kwargs) -> torch.FloatTensor:
 
         # preds: (N, S, C)
         preds, _ = self.lm(inputs, input_lengths=input_lengths)
@@ -147,16 +145,13 @@ class LMTrainer(nn.Module):
 
         # logits: (\sum{S_i}, C)
         logits = torch.cat(logits, dim=0)
+
         # targets: (\sum{S_i})
         loss = self.criterion(logits, targets)
-
-        if not self.training:
-            loss *= logits.size(0)
-
         return loss
 
 
-class LSTMPredictNet(nn.Module):
+class LSTMPredictNet(AbsDecoder):
     """
     RNN Decoder of Transducer
     Args:
@@ -188,14 +183,7 @@ class LSTMPredictNet(nn.Module):
                  classical: bool = True,
                  padding_idx: int = -1,
                  *rnn_args, **rnn_kwargs):
-        super().__init__()
-        if padding_idx == -1:
-            self.embedding = nn.Embedding(num_classes, hdim)
-        else:
-            assert isinstance(padding_idx, int)
-            assert padding_idx >= 0
-            self.embedding = nn.Embedding(
-                num_classes, hdim, padding_idx=padding_idx)
+        super().__init__(num_classes, hdim, padding_idx=padding_idx)
 
         rnn_kwargs['batch_first'] = True
         if norm:
@@ -222,19 +210,12 @@ class LSTMPredictNet(nn.Module):
                         param.data), persistent=False)
                     self._noise.append((n_noise, param))
 
-        if 'bidirectional' in rnn_kwargs and rnn_kwargs['bidirectional']:
-            odim = hdim*2
-        else:
-            odim = hdim
-
         if classical:
             self.classifier = nn.Sequential(OrderedDict([
-                ('proj', nn.Linear(odim, odim)),
+                ('proj', nn.Linear(hdim, hdim)),
                 ('act', nn.ReLU()),
-                ('linear', nn.Linear(odim, num_classes))
+                ('linear', nn.Linear(hdim, num_classes))
             ]))
-        else:
-            self.classifier = nn.Linear(odim, num_classes)
 
     def forward(self, inputs: torch.LongTensor, hidden: torch.FloatTensor = None, input_lengths: torch.LongTensor = None) -> Tuple[torch.FloatTensor, Union[torch.FloatTensor, None]]:
 
@@ -280,13 +261,89 @@ class LSTMPredictNet(nn.Module):
             param.data -= noise
 
 
-class PlainPN(nn.Module):
+class PlainPN(AbsDecoder):
     def __init__(self, num_classes: int, hdim: int, *args, **kwargs):
-        super().__init__()
-        self.embedding = nn.Embedding(num_classes, hdim)
+        super().__init__(num_classes, hdim)
+        self.act = nn.ReLU()
 
-    def forward(self, x: torch.Tensor, *args):
-        return self.embedding(x), None
+    def forward(self, x: torch.Tensor, *args, **kwargs):
+        embed_x = self.embedding(x)
+        out = self.classifier(self.act(embed_x))
+        return out, None
+
+
+class Transformer(AbsDecoder):
+    def __init__(self, num_classes: int, dim_hid: int, num_head: int, num_layers: int, dropout: float = 0.1, padding_idx: int = -1) -> None:
+        super().__init__(num_classes, dim_hid, padding_idx=padding_idx)
+        self.src_mask = None
+        self.pos_encoder = PositionalEncoding(dim_hid, max_len=5000)
+
+        encoder_layers = nn.TransformerEncoderLayer(
+            dim_hid, num_head, dropout=dropout, batch_first=True)
+        self.transformer_encoder = nn.TransformerEncoder(
+            encoder_layers, num_layers)
+        self.ninp = dim_hid
+
+    def forward(self, src: torch.Tensor, lens: Optional[torch.Tensor] = None, *args, **kwargs):
+        if lens is None:
+            mask = torch.arange(src.size(1), device=src.device)[
+                :, None] >= lens[None, :].to(src.device)
+            mask = mask.float().masked_fill_(mask == 0, float(
+                '-inf')).masked_fill_(mask == 1, float(0.0))
+        else:
+            mask = None
+
+        src = self.embedding(src) * math.sqrt(self.ninp)
+        pos_embedding = self.pos_encoder(src).unsqueeze(0)
+        src = pos_embedding + src
+        output = self.transformer_encoder(src, mask)
+        output = self.classifier(output)
+        return output.log_softmax(dim=-1)
+
+
+@torch.no_grad()
+def evaluate(testloader: DataLoader, args: argparse.Namespace, manager: coreutils.Manager):
+
+    model = manager.model
+
+    batch_time = coreutils.AverageMeter('Time', ':6.3f')
+    losses = coreutils.AverageMeter('Loss', ':.3e')
+    progress = coreutils.ProgressMeter(
+        len(testloader),
+        [batch_time, losses],
+        prefix='Test: ')
+
+    beg = time.time()
+    end = time.time()
+    cnt_batch = 0
+    total_loss = 0.
+    for i, minibatch in enumerate(testloader):
+        logits, input_lengths, labels, label_lengths = minibatch
+        logits, labels, input_lengths, label_lengths = logits.cuda(
+            args.gpu, non_blocking=True), labels, input_lengths, label_lengths
+
+        loss = model(logits, labels, input_lengths, label_lengths)
+        batch_sum_loss = loss * logits.size(0)  # type: torch.Tensor
+        n_batch = batch_sum_loss.new_tensor(logits.size(0), dtype=torch.long)
+
+        dist.all_reduce(batch_sum_loss, dist.ReduceOp.SUM)
+        dist.all_reduce(n_batch, dist.ReduceOp.SUM)
+
+        # measure accuracy and record loss
+        losses.update((batch_sum_loss/n_batch).item())
+        cnt_batch += n_batch.item()
+        total_loss += batch_sum_loss.item()
+
+        end = time.time()
+        if ((i+1) % args.print_freq == 0 or args.debug) and args.gpu == 0:
+            progress.display(i+1)
+
+    avgloss = total_loss / cnt_batch
+    manager.log_update(
+        [avgloss, time.time() - beg], loc='log_eval')
+
+    # use ppl as evalution metric
+    return math.exp(avgloss)
 
 
 def build_model(args, configuration, dist=True, wrapper=True) -> LMTrainer:
@@ -307,6 +364,9 @@ def build_model(args, configuration, dist=True, wrapper=True) -> LMTrainer:
     if not dist:
         return model
 
+    # make batchnorm synced across all processes
+    model = coreutils.convert_syncBatchNorm(model)
+
     model.cuda(args.gpu)
     model = torch.nn.parallel.DistributedDataParallel(
         model, device_ids=[args.gpu])
@@ -316,7 +376,6 @@ def build_model(args, configuration, dist=True, wrapper=True) -> LMTrainer:
 
 if __name__ == "__main__":
     parser = coreutils.BasicDDPParser()
-    parser.add_argument("--evaluate", action="store_true", default=False)
 
     args = parser.parse_args()
 

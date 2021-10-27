@@ -14,7 +14,7 @@ import numpy as np
 from collections import OrderedDict
 from monitor import plot_monitor
 from _specaug import SpecAug
-from typing import Callable, Union, Sequence, Iterable, List, Any
+from typing import Callable, Union, Sequence, Iterable, List, Any, Optional
 from datetime import datetime
 
 import torch
@@ -28,13 +28,27 @@ if torch.__version__ >= '1.8.0':
 
 
 class Manager(object):
-    def __init__(self, func_build_model: Callable[[argparse.Namespace, dict], Union[nn.Module, nn.parallel.DistributedDataParallel]], args: argparse.Namespace):
+    def __init__(
+            self,
+            func_build_model: Callable[[argparse.Namespace, dict], Union[nn.Module, nn.parallel.DistributedDataParallel]],
+            args: argparse.Namespace,
+            func_train: Optional[Callable] = None,
+            func_eval: Optional[Callable] = None):
         super().__init__()
 
         with open(args.config, 'r') as fi:
             configures = json.load(fi)  # type: dict
 
         self.model = func_build_model(args, configures)
+        if func_train is None:
+            self.train = train
+        else:
+            self.train = func_train
+
+        if func_eval is None:
+            self.evaluate = evaluate
+        else:
+            self.evaluate = func_eval
 
         # Initial specaug module
         if 'specaug_config' not in configures:
@@ -98,10 +112,10 @@ class Manager(object):
             self.epoch += 1
             train_sampler.set_epoch(self.epoch)
 
-            train(trainloader, args, self)
+            self.train(trainloader, args, self)
 
             self.model.eval()
-            metrics = test(testloader, args, self)
+            metrics = self.evaluate(testloader, args, self)
             if isinstance(metrics, tuple):
                 # defaultly use the first one to evaluate
                 metrics = metrics[0]
@@ -558,7 +572,7 @@ def update_bn(trainloader, args: argparse.Namespace, manager: Manager):
 
     for i, minibatch in enumerate(trainloader):
         # measure data loading time
-        logits, input_lengths, labels, label_lengths, _ = minibatch
+        logits, input_lengths, labels, label_lengths = minibatch
         logits, labels, input_lengths, label_lengths = logits.cuda(
             args.gpu, non_blocking=True), labels, input_lengths, label_lengths
 
@@ -577,7 +591,7 @@ def update_bn(trainloader, args: argparse.Namespace, manager: Manager):
 
 
 @torch.no_grad()
-def test(testloader, args: argparse.Namespace, manager: Manager) -> float:
+def evaluate(testloader, args: argparse.Namespace, manager: Manager) -> float:
 
     model = manager.model
 

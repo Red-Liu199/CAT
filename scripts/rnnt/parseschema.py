@@ -2,6 +2,16 @@
 This script is used for parsing the json schema for experiment settings.
 '''
 # %%
+from scheduler import Scheduler
+import scheduler
+import torch
+from torch.optim import Optimizer
+from transducer_train import JointNet, SimJointNet
+from _specaug import SpecAug
+from lm_train import AbsDecoder
+import lm_train as lm_zoo
+import model as am_zoo
+from transducer_train import Transducer
 import sys
 import inspect
 import torch.nn as nn
@@ -105,6 +115,7 @@ def parse_processing(processing: typing.Union[dict, OrderedDict], module_list: l
 # %% [markdown]
 # # Overall setting
 
+
 # %%
 schema = gen_object(dict)
 schema['description'] = 'Settings of NN training.'
@@ -114,7 +125,6 @@ schema['required'] = ['transducer', 'encoder', 'decoder', 'joint', 'scheduler']
 # ## Transducer
 
 # %%
-from transducer_train import Transducer
 
 processing = gen_object(dict)
 parse_processing(processing, [Transducer])
@@ -125,7 +135,6 @@ schema['properties']['transducer'] = processing
 # ## Encoder
 
 # %%
-import model as am_zoo
 
 processing = gen_object(dict)  # type:OrderedDict
 modules = []
@@ -144,12 +153,11 @@ schema['properties']['encoder'] = processing
 # ## Decoder
 
 # %%
-import lm_train as lm_zoo
 processing = gen_object(dict)  # type:OrderedDict
 modules = []
 for m in dir(lm_zoo):
-    if m in ['LSTMPredictNet', 'PlainPN']:
-        _m = getattr(lm_zoo, m)
+    _m = getattr(lm_zoo, m)
+    if inspect.isclass(_m) and issubclass(_m, AbsDecoder):
         modules.append(_m)
 
 parse_processing(processing, modules)
@@ -162,7 +170,6 @@ schema['properties']['decoder'] = processing
 # ## SpecAug
 
 # %%
-from _specaug import SpecAug
 
 processing = gen_object(dict)  # type:OrderedDict
 parse_processing(processing, [SpecAug])
@@ -174,7 +181,6 @@ schema['properties']['specaug_config'] = processing
 # ## Joint network
 
 # %%
-from transducer_train import JointNet, SimJointNet
 
 
 processing = gen_object(dict)  # type:OrderedDict
@@ -187,10 +193,6 @@ schema['properties']['joint'] = processing
 # ## Scheduler
 
 # %%
-from torch.optim import Optimizer
-import torch
-import scheduler
-from scheduler import Scheduler
 
 processing = gen_object(dict)  # type:OrderedDict
 modules = []
@@ -223,5 +225,3 @@ schema['properties']['scheduler'] = processing
 schema = post_process(schema)
 with open('.vscode/schemas.json', 'w') as fo:
     json.dump(schema, fo, indent=4)
-
-
