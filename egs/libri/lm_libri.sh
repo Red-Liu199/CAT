@@ -31,15 +31,10 @@ opts=$(python utils/parseopt.py '{
         }
     }' $0 $*) && eval $opts || exit 1
 
-if [ $ngpu -eq "-1" ]; then
-    unset CUDA_VISIBLE_DEVICES
-else
+if [ $ngpu -ne "-1" ]; then
     export CUDA_VISIBLE_DEVICES=$(seq 0 1 $(($ngpu - 1)) | xargs | tr ' ' ',')
 fi
 unset ngpu
-
-# manually set is OK.
-# export CUDA_VISIBLE_DEVICES="8,7,6,5,4"
 
 recipe=$(basename $PWD)
 cat_recipe="../../tools/CAT/egs/$recipe/data"
@@ -52,6 +47,9 @@ else
 fi
 ############################ DON'T MODIFY CONTENTS ABOVE ############################
 
+# You can manually set GPUs to be used:
+# export CUDA_VISIBLE_DEVICES="8,7,6,5,4"
+
 # Setup train/dev/test set here. If there're multiple sets, split them with space
 trainset="train_960"
 devset="dev_clean dev_other"
@@ -60,6 +58,9 @@ testset="test_clean test_other"
 textdir=data/corpus
 mkdir -p $textdir
 if [ $stage -le 1 ] && [ $stop_stage -ge 1 ]; then
+    for set in $trainset $devset $testset; do
+        python utils/checkfile.py -f $set || exit 1
+    done
 
     if [ ! -f $textdir/librispeech.txt ]; then
         archive=$textdir/librispeech-lm-norm.txt.gz

@@ -32,9 +32,6 @@ if [ $ngpu -ne "-1" ]; then
 fi
 unset ngpu
 
-# manually set is OK.
-# export CUDA_VISIBLE_DEVICES="8,7,6,5,4"
-
 recipe=$(basename $PWD)
 cat_recipe="../../tools/CAT/egs/$recipe/data"
 
@@ -44,6 +41,10 @@ fi
 python utils/checkfile.py -d $dir $cat_recipe || exit 1
 
 ############################ DON'T MODIFY CONTENTS ABOVE ############################
+
+# You can manually set GPUs to be used:
+# export CUDA_VISIBLE_DEVICES="8,7,6,5,4"
+
 # Setup train/dev/test set here. If there're multiple sets, split them with space
 trainset="train_sp"
 devset="dev_sp"
