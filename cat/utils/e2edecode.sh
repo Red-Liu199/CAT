@@ -116,7 +116,7 @@ for set in $test_set; do
     python utils/checkfile.py -f $cat_ark/$set.scp $checkpoint || exit 1
 
     echo "> Decoding: $set"
-    python3 rnnt/parallel_decode.py \
+    python3 -m cat.rnnt.decode \
         --dist-url="tcp://127.0.0.1:13245" \
         --resume=$checkpoint \
         --config=$dir/config.json \

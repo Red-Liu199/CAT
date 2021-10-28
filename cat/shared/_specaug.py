@@ -2,15 +2,43 @@
 Copyright to espnet
 https://github.com/espnet/espnet/blob/master/espnet2/asr/specaug/specaug.py
 
-Modified into spec aug with masking by ratio by Huahuan Zheng (zhh20@mails.tsinghua.edu.cn) in 2021.
+Modified into spec aug with masking by ratio by Huahuan Zheng (maxwellzh@outlook.com) in 2021.
 """
 
-from _layers import StackDelta, UnStackDelta
+from .layer import StackDelta, UnStackDelta
 from typing import Union, Sequence
-import coreutils
 
 import torch
 import torch.nn as nn
+from torch.nn.utils.rnn import pad_sequence
+
+
+def pad_list(xs: torch.Tensor, pad_value=0, dim=0) -> torch.Tensor:
+    """Perform padding for the list of tensors.
+
+    Args:
+        xs (`list`): List of Tensors [(T_1, `*`), (T_2, `*`), ..., (T_B, `*`)].
+        pad_value (float): Value for padding.
+
+    Returns:
+        Tensor: Padded tensor (B, Tmax, `*`).
+
+    Examples:
+        >>> x = [torch.ones(4), torch.ones(2), torch.ones(1)]
+        >>> x
+        [tensor([1., 1., 1., 1.]), tensor([1., 1.]), tensor([1.])]
+        >>> pad_list(x, 0)
+        tensor([[1., 1., 1., 1.],
+                [1., 1., 0., 0.],
+                [1., 0., 0., 0.]])
+
+    """
+    if dim == 0:
+        return pad_sequence(xs, batch_first=True, padding_value=pad_value)
+    else:
+        xs = [x.transpose(0, dim) for x in xs]
+        padded = pad_sequence(xs, batch_first=True, padding_value=pad_value)
+        return padded.transpose(1, dim+1).contiguous()
 
 
 class MaskFreq(nn.Module):
@@ -171,7 +199,7 @@ class MaskTime(nn.Module):
                     _out = self.mask_by_batch(
                         spec[i*ch+j][None, :spec_length[i], :])
                     outs.append(_out)
-            out = coreutils.pad_list(outs, 0.0, dim=1)
+            out = pad_list(outs, 0.0, dim=1)
             out = out.view(*org_size)
         return out
 
@@ -255,7 +283,7 @@ class TimeWarp(torch.nn.Module):
                 _y = time_warp(spec[i*ch:i*ch+ch][:, :spec_lengths[i], :],
                                window=int(spec_lengths[i]*self.window))
                 ys.append(_y)
-            y = coreutils.pad_list(ys, 0.0, dim=1)
+            y = pad_list(ys, 0.0, dim=1)
 
         y = y.view(*org_size)
 

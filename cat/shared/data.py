@@ -1,18 +1,21 @@
+# Copyright 2021 Tsinghua University
+# Apache 2.0.
+# Author: Hongyu Xiang,
+#         Keyu An,
+#         Zheng Huahuan (maxwellzh@outlook.com)
+
+"""Data loading module
 """
-Copyright 2021 Tsinghua University
-Apache 2.0.
-Author: Hongyu Xiang, Keyu An, Zheng Huahuan (zhh20@mails.tsinghua.edu.cn)
-"""
+
+from . import coreutils as utils
 
 import os
 import kaldiio
 import h5py
-import coreutils
 import pickle
 import math
 import hashlib
-from multiprocessing import Pool
-from typing import Tuple, Sequence, List, Optional, Union, Dict
+from typing import Tuple, Sequence, List, Optional, Union
 
 import torch
 from torch.utils.data import Dataset
@@ -303,13 +306,13 @@ class NbestListCollate():
             texts += t
 
         if self.isgpt:
-            # NOTE (huahuan): GPT-2 is cased. 
+            # NOTE (huahuan): GPT-2 is cased.
             texts = [t.lower() for t in texts]
             tokens = self._tokenizer(texts, return_tensors='pt', padding=True)
         else:
             tokens = {'input_ids': None, 'attention_mask': None}
             ids = [self._tokenizer.encode(seqs) for seqs in texts]
-            tokens['input_ids'] = coreutils.pad_list(
+            tokens['input_ids'] = utils.pad_list(
                 [torch.LongTensor(i) for i in ids])
             lens = torch.LongTensor([len(x) for x in ids])
             tokens['attention_mask'] = torch.arange(
@@ -335,7 +338,7 @@ class sortedPadCollate():
                    for mat, label in batch]
         batch_sorted = sorted(batches, key=lambda item: item[2], reverse=True)
 
-        mats = coreutils.pad_list([x[0] for x in batch_sorted])
+        mats = utils.pad_list([x[0] for x in batch_sorted])
 
         labels = torch.cat([x[1] for x in batch_sorted])
 
@@ -363,9 +366,9 @@ class sortedPadCollateTransducer():
                    for mat, label in batch]
         batch_sorted = sorted(batches, key=lambda item: item[2], reverse=True)
 
-        mats = coreutils.pad_list([x[0] for x in batch_sorted])
+        mats = utils.pad_list([x[0] for x in batch_sorted])
 
-        labels = coreutils.pad_list(
+        labels = utils.pad_list(
             [x[1] for x in batch_sorted]).to(torch.long)
 
         input_lengths = torch.LongTensor([x[2] for x in batch_sorted])
@@ -391,7 +394,7 @@ class TestPadCollate():
 
         keys = [key for key, _ in batch]
 
-        mats = coreutils.pad_list([feature for _, feature in batch])
+        mats = utils.pad_list([feature for _, feature in batch])
 
         lengths = torch.LongTensor([feature.size(0) for _, feature in batch])
 
@@ -414,8 +417,8 @@ class sortedPadCollateLM():
 
         batch_sorted = sorted(batches, key=lambda item: item[1], reverse=True)
 
-        xs = coreutils.pad_list([x[0] for x in batch_sorted]
-                                )   # type: torch.Tensor
+        xs = utils.pad_list([x[0] for x in batch_sorted]
+                            )   # type: torch.Tensor
         # xs -> <s> + xs
         xs = torch.cat([xs.new_zeros(xs.size(0), 1), xs], dim=1)
 
@@ -523,7 +526,7 @@ def group_indices(args: Tuple[List[List[int]], List[int], Union[str, None], int,
     for k, g in enumerate(idx_groups):
         g_sorted = sorted(g, key=lambda i: global_ls[i], reverse=True)
 
-        g_grouped = coreutils.group_by_lens(
+        g_grouped = utils.group_by_lens(
             g_sorted, [global_ls[i] for i in g_sorted], n_replicas, l_norm)
         idx_groups[k] = g_grouped
 
@@ -552,7 +555,7 @@ class InferenceDistributedSampler(BalancedDistributedSampler):
         partial_indices = []
 
         batches = sorted(indices, key=lambda i: self._lens[i], reverse=True)
-        batches = coreutils.group_by_lens(
+        batches = utils.group_by_lens(
             batches, [self._lens[i] for i in batches],
             self.num_replicas, self._l_norm, False)
 

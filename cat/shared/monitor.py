@@ -1,10 +1,12 @@
-"""
-Copyright 2021 Tsinghua University
-Apache 2.0.
-Author: Zheng Huahuan (zhh20@mails.tsinghua.edu.cn)
+# Copyright 2021 Tsinghua University
+# Apache 2.0.
+# Author: Zheng Huahuan (maxwellzh@outlook.com)
 
-Directly execute: (in working directory)
-    python3 rnnt/monitor.py <path to my checkpoint>
+"""Monitor figure plotting module.
+
+Usage:
+    in working directory:
+    python3 cat/shared/monitor.py <path to my checkpoint>
 """
 
 import os

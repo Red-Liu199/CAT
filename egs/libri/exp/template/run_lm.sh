@@ -142,16 +142,17 @@ if [ $stage -le 3 ] && [ $stop_stage -ge 3 ]; then
     # parse the number of classes in configuration file
     python3 utils/parseunits.py $SPdir/spm.vocab $dir/config.json || exit 1
 
-    python3 rnnt/lm_train.py --seed=0 \
+    python3 -m cat.lm --seed=0 \
         --world-size 1 --rank 0 -j 1 \
-        --batch_size=2048 \
         --dir=$dir \
-        --databalance \
-        --amp \
-        --grad-norm=5.0 \
-        --config=$dir/config.json \
         --trset=$textdir/tr.pkl \
-        --devset=$textdir/dev.pkl ||
+        --devset=$textdir/dev.pkl \
+        --config=$dir/config.json \
+        --batch_size=2048 \
+        --grad-norm=5.0 \
+        --databalance \
+        --checkall \
+        --amp ||
         exit 1
 
     echo -e "\ncommit: \`$(git log -n 1 --pretty=format:"%H")\`" >>$dir/readme.md

@@ -1,16 +1,20 @@
-"""
-Copyright 2021 Tsinghua University
-Apache 2.0.
-Author: Zheng Huahuan (zhh20@mails.tsinghua.edu.cn)
+# Copyright 2021 Tsinghua University
+# Apache 2.0.
+# Author: Zheng Huahuan (maxwellzh@outlook.com)
 
-Parallel decode with multi-gpu and single-gpu-multi-process support 
+"""
+Parallel decode with distributed GPU/CPU support 
 """
 
-import coreutils
-from lm_train import build_model as lm_build
-from data import ScpDataset, TestPadCollate, InferenceDistributedSampler
-from transducer_train import build_model
-from beam_search_transducer import TransducerBeamSearcher
+from ..lm import lm_builder
+from . import rnnt_builder
+from .beam_search_transducer import TransducerBeamSearcher
+from ..shared import coreutils as utils
+from ..shared.data import (
+    ScpDataset,
+    TestPadCollate,
+    InferenceDistributedSampler
+)
 
 import re
 import os
@@ -19,8 +23,7 @@ import time
 import pickle
 import argparse
 import sentencepiece as spm
-from collections import OrderedDict
-from typing import Union, List, Tuple
+from typing import Union, Tuple
 
 import torch
 import torch.multiprocessing as mp
@@ -198,11 +201,11 @@ def gen_model(args, device) -> Tuple[torch.nn.Module, Union[torch.nn.Module, Non
     with open(args.config, 'r') as fi:
         configures = json.load(fi)
 
-    model = build_model(args, configures, dist=False, verbose=False)
+    model = rnnt_builder(args, configures, dist=False, verbose=False)
     model = model.to(device)
     assert args.resume is not None, "Trying to decode with uninitialized parameters. Add --resume"
 
-    model = load_checkpoint(model, args.resume)
+    model = utils.load_checkpoint(model, args.resume)
     model.eval()
 
     if args.lm_weight == 0.0 or args.ext_lm_config is None or args.ext_lm_check is None:
@@ -212,8 +215,8 @@ def gen_model(args, device) -> Tuple[torch.nn.Module, Union[torch.nn.Module, Non
 
         with open(args.ext_lm_config, 'r') as fi:
             lm_configures = json.load(fi)
-        ext_lm_model = lm_build(args, lm_configures, dist=False)
-        ext_lm_model = load_checkpoint(
+        ext_lm_model = lm_builder(args, lm_configures, dist=False)
+        ext_lm_model = utils.load_checkpoint(
             ext_lm_model.to(device), args.ext_lm_check)
         ext_lm_model = ext_lm_model.lm
         ext_lm_model.eval()
@@ -293,25 +296,9 @@ def worker_compute_enc_out(gpu: int, world_size: int, suffix: str, usegpu: bool,
         pickle.dump(output, fo)
 
 
-def load_checkpoint(model: Union[torch.nn.Module, torch.nn.parallel.DistributedDataParallel], path_ckpt: str) -> torch.nn.Module:
-
-    checkpoint = torch.load(
-        path_ckpt, map_location=next(model.parameters()).device)
-    if isinstance(model, torch.nn.parallel.DistributedDataParallel):
-        state_dict = checkpoint['model']
-    else:
-        new_state_dict = OrderedDict()
-        for k, v in checkpoint['model'].items():
-            # remove the 'module.'
-            new_state_dict[k[7:]] = v
-        state_dict = new_state_dict
-    model.load_state_dict(state_dict)
-    return model
-
-
 if __name__ == '__main__':
 
-    parser = coreutils.BasicDDPParser(istraining=False)
+    parser = utils.BasicDDPParser(istraining=False)
 
     parser.add_argument("--ext-lm-config", type=str, default=None,
                         help="Config of external LM.")

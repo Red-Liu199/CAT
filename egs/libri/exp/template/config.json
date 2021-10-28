@@ -54,7 +54,7 @@
         "type": "SchedulerTransformer",
         "kwargs": {
             "d_model": 128,
-            "epoch_max": 200,
+            "epoch_max": 40,
             "peak_factor": 1.0,
             "reverse_metric_direc": true,
             "warmup_steps": 8000

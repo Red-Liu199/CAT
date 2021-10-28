@@ -1,10 +1,8 @@
-"""
-Copyright 2021 Tsinghua University
-Apache 2.0.
-Author: Zheng Huahuan (zhh20@mails.tsinghua.edu.cn)
+# Copyright 2021 Tsinghua University
+# Apache 2.0.
+# Author: Zheng Huahuan (maxwellzh@outlook.com)
 
-This is the script implementing all schedulers
-"""
+"""Optimizer scheduler impl"""
 
 import math
 import torch

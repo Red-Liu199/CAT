@@ -1,44 +1,31 @@
-"""
-Copyright 2021 Tsinghua University
-Apache 2.0.
-Author: Zheng Huahuan (zhh20@mails.tsinghua.edu.cn)
+# Copyright 2021 Tsinghua University
+# Apache 2.0.
+# Author: Zheng Huahuan (maxwellzh@outlook.com)
 
+"""
 This script uses DistributedDataParallel (DDP) to train model within framework of CAT.
 Differed from `train_dist.py`, this one supports read configurations from json file
 and is more non-hard-coding style.
 """
 
-import coreutils
-import model as model_zoo
-from data import SpeechDatasetPickle, SpeechDataset, sortedPadCollate
+from ..shared import coreutils as utils
+from ..shared import encoder as model_zoo
+from ..shared.data import SpeechDatasetPickle, SpeechDataset, sortedPadCollate
 
 import os
 import argparse
-from typing import Callable
 
 import torch
 import torch.nn as nn
 import torch.distributed as dist
-import torch.multiprocessing as mp
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
-
-
-def main_spawner(args, _main_worker: Callable[[int, int, argparse.Namespace], None]):
-    if not torch.cuda.is_available():
-        coreutils.highlight_msg("CPU only training is unsupported")
-        return None
-
-    ngpus_per_node = torch.cuda.device_count()
-    args.world_size = ngpus_per_node * args.world_size
-    print(f"Global number of GPUs: {args.world_size}")
-    mp.spawn(_main_worker, nprocs=ngpus_per_node, args=(ngpus_per_node, args))
 
 
 def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
     from ctc_crf import CRFContext
 
-    coreutils.SetRandomSeed(args.seed)
+    utils.SetRandomSeed(args.seed)
     args.gpu = gpu
     torch.cuda.set_device(gpu)
 
@@ -51,10 +38,10 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
 
     args.batch_size = args.batch_size // ngpus_per_node
 
-    coreutils.distprint("> Data prepare", args.gpu)
+    utils.distprint("> Data prepare", args.gpu)
     if args.h5py:
         data_format = "hdf5"
-        coreutils.highlight_msg(
+        utils.highlight_msg(
             "H5py reading might cause error with Multi-GPUs")
         Dataset = SpeechDataset
         if args.trset is None or args.devset is None:
@@ -72,7 +59,7 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
 
     tr_set = Dataset(args.trset)
     test_set = Dataset(args.devset)
-    coreutils.distprint("  Data prepared.", args.gpu)
+    utils.distprint("  Data prepared.", args.gpu)
 
     train_sampler = DistributedSampler(tr_set)
     test_sampler = DistributedSampler(test_set)
@@ -88,18 +75,18 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         num_workers=args.workers, pin_memory=True,
         sampler=test_sampler, collate_fn=sortedPadCollate())
 
-    manager = coreutils.Manager(build_model, args)
+    manager = utils.Manager(build_model, args)
 
     # get GPU info
-    gpu_info = coreutils.gather_all_gpu_info(args.gpu)
+    gpu_info = utils.gather_all_gpu_info(args.gpu)
 
-    coreutils.distprint("> Model built.", args.gpu)
-    coreutils.distprint("  Model size:{:.2f}M".format(
-        coreutils.count_parameters(manager.model)/1e6), args.gpu)
+    utils.distprint("> Model built.", args.gpu)
+    utils.distprint("  Model size:{:.2f}M".format(
+        utils.count_parameters(manager.model)/1e6), args.gpu)
 
     if args.rank == 0 and not args.debug:
-        coreutils.gen_readme(args.dir+'/readme.md',
-                             model=manager.model, gpu_info=gpu_info)
+        utils.gen_readme(args.dir+'/readme.md',
+                         model=manager.model, gpu_info=gpu_info)
 
     # init ctc-crf, args.iscrf is set in build_model
     if args.iscrf:
@@ -144,7 +131,7 @@ def build_model(args, configuration, train=True) -> nn.Module:
 
     if 'lossfn' not in netconfigs:
         lossfn = 'crf'
-        coreutils.highlight_msg([
+        utils.highlight_msg([
             "Warning: not specified \'lossfn\' in configuration",
             "Defaultly set to \'crf\'"
         ])
@@ -154,7 +141,7 @@ def build_model(args, configuration, train=True) -> nn.Module:
     if lossfn == 'crf':
         if 'lamb' not in netconfigs:
             lamb = 0.01
-            coreutils.highlight_msg([
+            utils.highlight_msg([
                 "Warning: not specified \'lamb\' in configuration",
                 "Defaultly set to 0.01"
             ])
@@ -175,39 +162,8 @@ def build_model(args, configuration, train=True) -> nn.Module:
     return model
 
 
-def setPath(args: argparse.Namespace):
-    """
-    Set args.checksdir and args.logsdir
-    """
-
-    # set checkpoint path and log files path
-    if not args.debug:
-        if not os.path.isdir(args.dir):
-            raise RuntimeError(
-                f"--dir={args.dir} is not a valid directory.")
-        # ckpt -> checks
-        checksdir = os.path.join(args.dir, 'checks')
-        logsdir = os.path.join(args.dir, 'logs')
-        os.makedirs(checksdir, exist_ok=True)
-        os.makedirs(logsdir, exist_ok=True)
-    else:
-        coreutils.highlight_msg("Debugging")
-        # This is a hack, we won't read/write anything in debug mode.
-        checksdir = '/'
-        logsdir = os.path.join('./', 'tmp-tensorboard-logdir')
-
-    # ckptpath -> checksdir
-    setattr(args, 'checksdir', checksdir)
-    setattr(args, 'logsdir', logsdir)
-    if os.listdir(checksdir) != [] and not args.debug and args.resume is None:
-        raise FileExistsError(
-            f"{args.checksdir} is not empty! Refuse to run.")
-
-    pass
-
-
-if __name__ == "__main__":
-    parser = coreutils.BasicDDPParser()
+def main():
+    parser = utils.BasicDDPParser()
     parser.add_argument("--h5py", action="store_true",
                         help="Load data with H5py, defaultly use pickle (recommended).")
     parser.add_argument("--data", type=str, default=None,
@@ -215,6 +171,6 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    setPath(args)
+    utils.setPath(args)
 
-    main_spawner(args, main_worker)
+    utils.main_spawner(args, main_worker)

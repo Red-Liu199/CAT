@@ -1,3 +1,7 @@
+# Copyright 2021 Tsinghua University
+# Apache 2.0.
+# Author: Zheng Huahuan (maxwellzh@outlook.com)
+
 """Rescoring with pre-trained GPT-2 model or custom LM.
 NOTE (huahuan):
     For GPT-2 rescoring:
@@ -8,10 +12,9 @@ NOTE (huahuan):
         https://huggingface.co/gpt2
 """
 
-import coreutils
-from lm_train import build_model as lm_build
-from data import NbestListDataset, NbestListCollate, InferenceDistributedSampler
-from parallel_decode import load_checkpoint
+from ..shared import coreutils as utils
+from . import lm_builder
+from ..shared.data import NbestListDataset, NbestListCollate, InferenceDistributedSampler
 
 import re
 import os
@@ -178,8 +181,8 @@ def build_lm(args, device='cuda'):
     else:
         with open(args.lm_config, 'r') as fi:
             configures = json.load(fi)
-        model = lm_build(None, configures, dist=False)
-        model = load_checkpoint(model.to(device), args.lm_check)
+        model = lm_builder(None, configures, dist=False)
+        model = utils.load_checkpoint(model.to(device), args.lm_check)
         model = model.lm
 
     model.eval()
@@ -187,7 +190,7 @@ def build_lm(args, device='cuda'):
 
 
 if __name__ == "__main__":
-    parser = coreutils.BasicDDPParser(istraining=False)
+    parser = utils.BasicDDPParser(istraining=False)
 
     parser.add_argument("nbest", type=str, help="N-best list files.")
     parser.add_argument("output", type=str, help="The output text file. ")

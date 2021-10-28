@@ -1,13 +1,13 @@
-"""
-Copyright 2021 Tsinghua University
-Apache 2.0.
-Author: Keyu An, Huahuan Zheng
+# Copyright 2021 Tsinghua University
+# Apache 2.0.
+# Author: Keyu An,
+#         Zheng Huahuan (maxwellzh@outlook.com)
 
-In this file, we define universal models 
+"""Decoder modules impl
 """
+from . import layer as c_layers
 
 import numpy as np
-import _layers
 from collections import OrderedDict
 from typing import Literal
 
@@ -31,7 +31,7 @@ class LSTM(nn.Module):
                  dropout: float,
                  bidirectional: bool = False):
         super().__init__()
-        self.lstm = _layers._LSTM(
+        self.lstm = c_layers._LSTM(
             idim, hdim, n_layers, dropout, bidirectional=bidirectional)
 
         if bidirectional:
@@ -55,7 +55,7 @@ class VGGLSTM(LSTM):
         super().__init__(get_vgg2l_odim(idim, in_channel=in_channel), hdim,
                          n_layers, num_classes, dropout, bidirectional=bidirectional)
 
-        self.VGG = _layers.VGG2L(in_channel)
+        self.VGG = c_layers.VGG2L(in_channel)
 
     def forward(self, x: torch.Tensor, ilens: torch.Tensor):
         vgg_o, vgg_lens = self.VGG(x, ilens)
@@ -72,8 +72,8 @@ class LSTMrowCONV(nn.Module):
     def __init__(self, idim: int, hdim: int, n_layers: int, num_classes: int, dropout: float):
         super().__init__()
 
-        self.lstm = _layers._LSTM(idim, hdim, n_layers, dropout)
-        self.lookahead = _layers.Lookahead(hdim, context=5)
+        self.lstm = c_layers._LSTM(idim, hdim, n_layers, dropout)
+        self.lookahead = c_layers.Lookahead(hdim, context=5)
         self.linear = nn.Linear(hdim, num_classes)
 
     def forward(self, x: torch.Tensor, ilens: torch.Tensor, hidden=None):
@@ -88,13 +88,13 @@ class TDNN_NAS(torch.nn.Module):
 
         self.dropout = nn.Dropout(dropout)
         self.tdnns = nn.ModuleDict(OrderedDict([
-            ('tdnn0', _layers.TDNN(idim, hdim, half_context=2, dilation=1)),
-            ('tdnn1', _layers.TDNN(idim, hdim, half_context=2, dilation=2)),
-            ('tdnn2', _layers.TDNN(idim, hdim, half_context=2, dilation=1)),
-            ('tdnn3', _layers.TDNN(idim, hdim, stride=3)),
-            ('tdnn4', _layers.TDNN(idim, hdim, half_context=2, dilation=2)),
-            ('tdnn5', _layers.TDNN(idim, hdim, half_context=2, dilation=1)),
-            ('tdnn6', _layers.TDNN(idim, hdim, half_context=2, dilation=2))
+            ('tdnn0', c_layers.TDNN(idim, hdim, half_context=2, dilation=1)),
+            ('tdnn1', c_layers.TDNN(idim, hdim, half_context=2, dilation=2)),
+            ('tdnn2', c_layers.TDNN(idim, hdim, half_context=2, dilation=1)),
+            ('tdnn3', c_layers.TDNN(idim, hdim, stride=3)),
+            ('tdnn4', c_layers.TDNN(idim, hdim, half_context=2, dilation=2)),
+            ('tdnn5', c_layers.TDNN(idim, hdim, half_context=2, dilation=1)),
+            ('tdnn6', c_layers.TDNN(idim, hdim, half_context=2, dilation=2))
         ]))
 
         self.linear = nn.Linear(hdim, num_classes)
@@ -113,15 +113,15 @@ class TDNN_LSTM(torch.nn.Module):
     def __init__(self, idim: int, hdim: int, n_layers: int, num_classes: int,  dropout: float):
         super().__init__()
 
-        self.tdnn_init = _layers.TDNN(idim, hdim)
+        self.tdnn_init = c_layers.TDNN(idim, hdim)
         assert n_layers > 0
         self.n_layers = n_layers
         self.cells = nn.ModuleDict()
         for i in range(n_layers):
-            self.cells[f"tdnn{i}-0"] = _layers.TDNN(hdim, hdim)
-            self.cells[f"tdnn{i}-1"] = _layers.TDNN(hdim, hdim)
-            self.cells[f"lstm{i}"] = _layers._LSTM(hdim, hdim, 1)
-            self.cells[f"bn{i}"] = _layers.MaskedBatchNorm1d(
+            self.cells[f"tdnn{i}-0"] = c_layers.TDNN(hdim, hdim)
+            self.cells[f"tdnn{i}-1"] = c_layers.TDNN(hdim, hdim)
+            self.cells[f"lstm{i}"] = c_layers._LSTM(hdim, hdim, 1)
+            self.cells[f"bn{i}"] = c_layers.MaskedBatchNorm1d(
                 hdim, eps=1e-5, affine=True)
             self.cells[f"dropout{i}"] = nn.Dropout(dropout)
 
@@ -152,9 +152,9 @@ class BLSTMN(torch.nn.Module):
                 inputdim = idim
             else:
                 inputdim = hdim * 2
-            self.cells[f"lstm{i}"] = _layers._LSTM(
+            self.cells[f"lstm{i}"] = c_layers._LSTM(
                 inputdim, hdim, 1, bidirectional=True)
-            self.cells[f"bn{i}"] = _layers.MaskedBatchNorm1d(
+            self.cells[f"bn{i}"] = c_layers.MaskedBatchNorm1d(
                 hdim*2, eps=1e-5, affine=True)
             self.cells[f"dropout{i}"] = nn.Dropout(dropout)
 
@@ -215,12 +215,12 @@ class ConformerNet(nn.Module):
             in_channel = 1
 
         if conv == 'vgg2l':
-            self.conv_subsampling = _layers.VGG2LSubsampling(in_channel)
+            self.conv_subsampling = c_layers.VGG2LSubsampling(in_channel)
             conv_dim = 128 * (idim//in_channel//4)
         elif conv == 'conv2d':
             if conv_multiplier is None:
                 conv_multiplier = hdim
-            self.conv_subsampling = _layers.Conv2dSubdampling(
+            self.conv_subsampling = c_layers.Conv2dSubdampling(
                 conv_multiplier, norm=subsample_norm, stacksup=delta_feats)
             conv_dim = conv_multiplier * (idim//in_channel//4)
         else:
@@ -232,9 +232,9 @@ class ConformerNet(nn.Module):
         ]))
 
         self.cells = nn.ModuleList()
-        pe = _layers.PositionalEncoding(hdim)
+        pe = c_layers.PositionalEncoding(hdim)
         for _ in range(num_cells):
-            cell = _layers.ConformerCell(
+            cell = c_layers.ConformerCell(
                 hdim, pe, res_factor, d_head, num_heads, kernel_size, multiplier, dropout, dropout_attn)
             self.cells.append(cell)
 
@@ -260,7 +260,7 @@ class ConformerLSTM(ConformerNet):
 
         super().__init__(*args, **kwargs)
 
-        self.lstm = _layers._LSTM(idim=self.linear_drop.linear.out_channels,
+        self.lstm = c_layers._LSTM(idim=self.linear_drop.linear.out_channels,
                                    hdim=hdim_lstm, n_layers=num_lstm_layers, dropout=dropout_lstm)
 
     def forward(self, x: torch.Tensor, lens: torch.Tensor):

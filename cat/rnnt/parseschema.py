@@ -2,22 +2,22 @@
 This script is used for parsing the json schema for experiment settings.
 '''
 # %%
-from scheduler import Scheduler
-import scheduler
-import torch
-from torch.optim import Optimizer
-from transducer_train import JointNet, SimJointNet
-from _specaug import SpecAug
-from lm_train import AbsDecoder
-import lm_train as lm_zoo
-import model as am_zoo
-from transducer_train import Transducer
-import sys
+from ..shared.scheduler import Scheduler
+from ..shared.decoder import AbsDecoder
+from ..shared import scheduler, SpecAug
+from ..shared import decoder as pn_zoo
+from ..shared import encoder as tn_zoo
+from . import JointNet, SimJointNet
+from .train import TransducerTrainer
+
 import inspect
-import torch.nn as nn
 import json
-from collections import OrderedDict
 import typing
+from collections import OrderedDict
+
+import torch
+import torch.nn as nn
+from torch.optim import Optimizer
 
 
 # %%
@@ -127,7 +127,7 @@ schema['required'] = ['transducer', 'encoder', 'decoder', 'joint', 'scheduler']
 # %%
 
 processing = gen_object(dict)
-parse_processing(processing, [Transducer])
+parse_processing(processing, [TransducerTrainer])
 processing['description'] = 'Configuration of Transducer'
 schema['properties']['transducer'] = processing
 
@@ -138,8 +138,8 @@ schema['properties']['transducer'] = processing
 
 processing = gen_object(dict)  # type:OrderedDict
 modules = []
-for m in dir(am_zoo):
-    _m = getattr(am_zoo, m)
+for m in dir(tn_zoo):
+    _m = getattr(tn_zoo, m)
     if inspect.isclass(_m) and issubclass(_m, nn.Module):
         modules.append(_m)
 
@@ -155,8 +155,8 @@ schema['properties']['encoder'] = processing
 # %%
 processing = gen_object(dict)  # type:OrderedDict
 modules = []
-for m in dir(lm_zoo):
-    _m = getattr(lm_zoo, m)
+for m in dir(pn_zoo):
+    _m = getattr(pn_zoo, m)
     if inspect.isclass(_m) and issubclass(_m, AbsDecoder):
         modules.append(_m)
 

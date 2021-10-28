@@ -1,25 +1,27 @@
-"""
-Copyright 2021 Tsinghua University
-Apache 2.0.
-Author: Zheng Huahuan (zhh20@mails.tsinghua.edu.cn)
-"""
+# Copyright 2021 Tsinghua University
+# Apache 2.0.
+# Author: Zheng Huahuan (maxwellzh@outlook.com)
+
+"""core functions impl"""
+
+from . import scheduler
+from . import SpecAug
+from .monitor import plot_monitor
 
 import os
 import argparse
 import time
 import json
 import shutil
-import scheduler
 import numpy as np
 from collections import OrderedDict
-from monitor import plot_monitor
-from _specaug import SpecAug
 from typing import Callable, Union, Sequence, Iterable, List, Any, Optional
 from datetime import datetime
 
 import torch
 import torch.nn as nn
 import torch.distributed as dist
+import torch.multiprocessing as mp
 from torch.cuda.amp import autocast, GradScaler
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.tensorboard import SummaryWriter
@@ -799,3 +801,59 @@ def group_by_lens(src_l: List[Any], linfo: List[int], N: int, _norm: Union[None,
     indices = indices_fwd[:-1]+indices_bwd[::-1]
 
     return [src_l[indices[i]:indices[i+1]] for i in range(N)]
+
+
+def main_spawner(args, _main_worker: Callable[[int, int, argparse.Namespace], None]):
+    if not torch.cuda.is_available():
+        highlight_msg("CPU only training is unsupported")
+        return None
+
+    ngpus_per_node = torch.cuda.device_count()
+    args.world_size = ngpus_per_node * args.world_size
+    print(f"Global number of GPUs: {args.world_size}")
+    mp.spawn(_main_worker, nprocs=ngpus_per_node, args=(ngpus_per_node, args))
+
+
+def setPath(args: argparse.Namespace):
+    """
+    Set args.checksdir and args.logsdir
+    """
+
+    # set checkpoint path and log files path
+    if not args.debug:
+        if not os.path.isdir(args.dir):
+            raise RuntimeError(
+                f"--dir={args.dir} is not a valid directory.")
+        # ckpt -> checks
+        checksdir = os.path.join(args.dir, 'checks')
+        logsdir = os.path.join(args.dir, 'logs')
+        os.makedirs(checksdir, exist_ok=True)
+        os.makedirs(logsdir, exist_ok=True)
+    else:
+        highlight_msg("Debugging")
+        # This is a hack, we won't read/write anything in debug mode.
+        checksdir = '/'
+        logsdir = os.path.join('./', 'tmp-tensorboard-logdir')
+
+    # ckptpath -> checksdir
+    setattr(args, 'checksdir', checksdir)
+    setattr(args, 'logsdir', logsdir)
+    if os.listdir(checksdir) != [] and not args.debug and args.resume is None:
+        raise FileExistsError(
+            f"{args.checksdir} is not empty! Refuse to run.")
+
+
+def load_checkpoint(model: Union[torch.nn.Module, torch.nn.parallel.DistributedDataParallel], path_ckpt: str) -> torch.nn.Module:
+    """Load parameters across distributed model and its checkpoint, resolve the prefix 'module.'"""
+    checkpoint = torch.load(
+        path_ckpt, map_location=next(model.parameters()).device)
+    if isinstance(model, torch.nn.parallel.DistributedDataParallel):
+        state_dict = checkpoint['model']
+    else:
+        new_state_dict = OrderedDict()
+        for k, v in checkpoint['model'].items():
+            # remove the 'module.'
+            new_state_dict[k[7:]] = v
+        state_dict = new_state_dict
+    model.load_state_dict(state_dict)
+    return model

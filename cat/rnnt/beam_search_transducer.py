@@ -1,18 +1,19 @@
-"""Decoders and output normalization for Transducer sequence.
+"""Beam search for Transducer sequence.
 
 Author:
     Abdelwahab HEBA 2020
     Sung-Lin Yeh 2020
 
-From speechbrain
+From speechbrain, modify by Zheng Huahuan (maxwellzh@outlook.com)
 """
+
+from . import JointNet
+
 import copy
 import yaml
-from typing import Dict, Union, List, Optional
-from transducer_train import JointNet
+from typing import Dict, Union, List, Optional, Literal
 
 import torch
-from typing import Literal
 
 
 class Hypothesis():
