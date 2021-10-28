@@ -6,6 +6,7 @@ tools/CAT
 *.png
 *.jpg
 *.pt
+*.tmp
 tmp/
 
 # tmp settings

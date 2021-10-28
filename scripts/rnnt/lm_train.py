@@ -12,6 +12,7 @@ import coreutils
 from am_train import setPath, main_spawner
 from data import BalancedDistributedSampler, CorpusDataset, sortedPadCollateLM
 
+import gather
 import time
 import math
 import argparse
@@ -130,8 +131,7 @@ class LMTrainer(nn.Module):
     def __init__(self, lm: AbsDecoder = None):
         super().__init__()
         self.lm = lm    # type: AbsDecoder
-        self.logsoftmax = nn.LogSoftmax(dim=-1)
-        self.criterion = nn.NLLLoss()
+        self.criterion = nn.CrossEntropyLoss()
 
     def forward(self, inputs: torch.FloatTensor, targets: torch.LongTensor, input_lengths: torch.LongTensor, *args, **kwargs) -> torch.FloatTensor:
 
@@ -139,15 +139,11 @@ class LMTrainer(nn.Module):
         preds, _ = self.lm(inputs, input_lengths=input_lengths)
 
         # squeeze preds by concat all sentences
-        logits = []
-        for i, l in enumerate(input_lengths):
-            logits.append(preds[i, :l])
-
         # logits: (\sum{S_i}, C)
-        logits = torch.cat(logits, dim=0)
+        logits = gather.cat(preds, input_lengths)
 
         # targets: (\sum{S_i})
-        loss = self.criterion(self.logsoftmax(logits), targets)
+        loss = self.criterion(logits, targets)
         return loss
 
 
@@ -311,12 +307,11 @@ class Transformer(AbsDecoder):
         # (N, S) -> (S, N)
         src = src.transpose(0, 1)
         T = src.size(0)
+        src_mask = torch.triu(src.new_ones(
+            T, T, dtype=torch.bool), diagonal=1)
         if input_lengths is None:
-            src_mask = None
             src_key_padding_mask = None
         else:
-            src_mask = torch.triu(src.new_ones(
-                T, T, dtype=torch.bool), diagonal=1)
             src_key_padding_mask = torch.arange(T, device=src.device)[
                 None, :] >= input_lengths[:, None].to(src.device)
 

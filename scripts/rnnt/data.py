@@ -12,7 +12,7 @@ import pickle
 import math
 import hashlib
 from multiprocessing import Pool
-from typing import Tuple, Sequence, List, Optional, Union
+from typing import Tuple, Sequence, List, Optional, Union, Dict
 
 import torch
 from torch.utils.data import Dataset
@@ -248,6 +248,75 @@ class CorpusDataset(AbsDataset):
         self.dataset.seek(self._seeks[index], 0)
         data = pickle.load(self.dataset)    # type: Sequence[int]
         return torch.LongTensor(data)
+
+
+class NbestListDataset(AbsDataset):
+    def __init__(self, path: str) -> None:
+        super().__init__(path)
+        with open(self.f_path, 'rb') as fi:
+            # type: Dict[str, List[Tuple[float, str]]]
+            self._dataset = pickle.load(fi)
+        self._dataset = [(key, hypo) for key, hypo in self._dataset.items()]
+
+    def impl_get_len(self):
+        return [sum([len(hyp) for _, hyp in hypos]) for _, hypos in self._dataset]
+
+    def __len__(self):
+        return len(self._dataset)
+
+    def __getitem__(self, index: int) -> Tuple[str, List[float], List[str]]:
+        key, hypos = self._dataset[index]
+        scores, texts = list(zip(*hypos))
+        return [key]*len(scores), list(scores), list(texts)
+
+
+class NbestListCollate():
+    def __init__(self, tokenizer, isGPT: bool = False) -> None:
+        self._tokenizer = tokenizer
+        if isGPT:
+            self.isgpt = True
+        else:
+            # sentencepiece model
+            self.isgpt = False
+
+    def __call__(self, batches: List[Tuple[str, List[float], List[str]]]):
+        """
+        Args:
+            batches : [([key, key, ...], [score1, score2, ...], ["hypo1", "hypo2",...]), ...], length B
+
+        Returns:
+            (keys, texts, scores, tokens)
+            keys (List[str]): (B * N-best, )
+            texts (List[str]): (B * N-best, )
+            scores (torch.FloatTensor): (B * N-best, )
+            tokens :
+            {
+                'input_ids' (torch.LongTensor): (B * N-best, L_max)
+                'attention_mask' (torch.LongTensor, torch.BoolTensor): (B * N-best, L_max)
+            }
+        """
+
+        keys, scores, texts = batches[0]
+        for k, s, t in batches[1:]:
+            keys += k
+            scores += s
+            texts += t
+
+        if self.isgpt:
+            # NOTE (huahuan): GPT-2 is cased. 
+            texts = [t.lower() for t in texts]
+            tokens = self._tokenizer(texts, return_tensors='pt', padding=True)
+        else:
+            tokens = {'input_ids': None, 'attention_mask': None}
+            ids = [self._tokenizer.encode(seqs) for seqs in texts]
+            tokens['input_ids'] = coreutils.pad_list(
+                [torch.LongTensor(i) for i in ids])
+            lens = torch.LongTensor([len(x) for x in ids])
+            tokens['attention_mask'] = torch.arange(
+                lens.max())[None, :] >= lens[:, None]
+
+        scores = torch.FloatTensor(scores)
+        return keys, texts, scores, tokens
 
 
 class sortedPadCollate():
