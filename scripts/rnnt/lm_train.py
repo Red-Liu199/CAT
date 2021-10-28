@@ -197,8 +197,7 @@ class LSTMPredictNet(AbsDecoder):
         else:
             assert isinstance(variational_noise, tuple) or isinstance(
                 variational_noise, list)
-            assert isinstance(variational_noise[0], float) and isinstance(
-                variational_noise[1], float)
+            variational_noise = [float(x) for x in variational_noise]
             assert variational_noise[1] > 0.
 
             self._mean_std = variational_noise
