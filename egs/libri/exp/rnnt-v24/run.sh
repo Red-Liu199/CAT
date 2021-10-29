@@ -37,9 +37,6 @@ cat_recipe="../../tools/CAT/egs/$recipe/data"
 # cp current script to $dir
 if [ $dir == "None" ]; then
     dir=$(dirname $0)
-else
-    python utils/checkfile.py -d $dir || exit 1
-    cp $0 $dir || exit 1
 fi
 ############################ DON'T MODIFY CONTENTS ABOVE ############################
 

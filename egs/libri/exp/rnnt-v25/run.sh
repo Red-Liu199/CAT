@@ -35,9 +35,6 @@ cat_recipe="../../tools/CAT/egs/$recipe/data"
 # cp current script to $dir
 if [ $dir == "None" ]; then
     dir=$(dirname $0)
-else
-    python utils/checkfile.py -d $dir || exit 1
-    cp $0 $dir || exit 1
 fi
 ############################ DON'T MODIFY CONTENTS ABOVE ############################
 
@@ -101,7 +98,7 @@ fi
 
 if [ $stage -le 2 ] && [ $stop_stage -ge 2 ]; then
 
-    bash exp/template/run.sh --sta 2 --sto 2 --dir=$dir --SP=$SPdir || exit 1
+    bash exp/template/run_rnnt.sh --sta 2 --sto 2 --dir=$dir --SP=$SPdir || exit 1
 
 fi
 
@@ -129,6 +126,6 @@ fi
 
 if [ $stage -le 4 ] && [ $stop_stage -ge 4 ]; then
 
-    bash exp/template/run.sh --sta 4 --sto 4 --dir=$dir --SP=$SPdir || exit 1
+    bash exp/template/run_rnnt.sh --sta 4 --sto 4 --dir=$dir --SP=$SPdir || exit 1
 
 fi

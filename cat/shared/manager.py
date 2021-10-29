@@ -253,7 +253,7 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
     detach_loss = 0.0
     n_batch = 0
     for i, minibatch in tqdm(enumerate(trainloader), desc=f'Epoch {manager.epoch} | train',
-                             unit='batch', total=args.n_steps, disable=(args.gpu != 0), leave=False):
+                             unit='batch', total=fold*args.n_steps, disable=(args.gpu != 0), leave=False):
 
         logits, input_lengths, labels, label_lengths = minibatch
         logits, labels, input_lengths, label_lengths = logits.cuda(
