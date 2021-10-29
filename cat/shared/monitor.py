@@ -8,15 +8,189 @@ Usage:
     in working directory:
     python3 cat/shared/monitor.py <path to my checkpoint>
 """
+from . import FILE_WRITER
 
+import time
+import pickle
 import os
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
-from collections import OrderedDict
-from typing import Union, Tuple
+from typing import Union, Tuple, Any, Dict, List
 
 import torch
+
+
+class BaseSummary():
+    def __init__(self) -> None:
+        self._values = []
+        self._time = []
+        self._cnt = 0
+
+    def update(self, value: Any):
+        self._values.append(value)
+        self._time.append(time.time())
+        self._cnt += 1
+
+    def merge(self, appd_summary):
+        if self._cnt > 0 and appd_summary._cnt > 0:
+            if self._time[-1] > appd_summary._time[0]:
+                raise RuntimeError(
+                    f"Trying to merge conflict Summary: s0_end > s1_beg: {self._time[-1]} > {appd_summary._time[0]}")
+
+        self._time += appd_summary._time
+        self._values += appd_summary._values
+        self._cnt += appd_summary._cnt
+
+
+class MonitorWriter():
+    def __init__(self, path: str = './') -> None:
+        if os.path.isdir(path):
+            path = os.path.join(path, FILE_WRITER)
+        else:
+            # assume path is file-like
+            pass
+
+        self._default_path = path
+        self.summaries = {}   # type: Dict[str, BaseSummary]
+
+    def __getitem__(self, index):
+        return self.summaries[index]
+
+    def addWriter(self, names: Union[List[str], str]):
+        if isinstance(names, str):
+            names = [names]
+
+        for m in names:
+            assert isinstance(
+                m, str), f"expect metric type to be str, instead of {type(m)}"
+            if m in self.summaries:
+                continue
+            self.summaries[m] = BaseSummary()
+
+    def update(self, name: Union[str, dict], value: Any = None):
+        """update summary writer
+
+        Example:
+            >>> writer.update('loss', 0.1)  # one per invoking
+            >>> writer.update({'loss': 0.1, 'acc': 0.5})    # update a batch of values
+        """
+        if value is None:
+            assert isinstance(
+                name, dict), f"update a batch of values only accept dict as argument, instead {name}"
+            toupdate = name
+        else:
+            toupdate = {name: value}
+
+        for metric, val in toupdate.items():
+            assert isinstance(
+                metric, str), f"expect metric type to be str, instead of {type(metric)}"
+            assert metric in self.summaries, f"try to update {metric}, but expected one of {list(self.summaries.keys())}"
+            self.summaries[metric].update(val)
+
+    def empty(self):
+        metrics = list(self.summaries.keys())
+        del self.summaries
+        self.summaries = {}
+        for m in metrics:
+            self.addWriter(m)
+
+    def export(self, path: str = None):
+        """export writer, if path is None, export to self._default_path"""
+
+        if path is None:
+            path = self._default_path
+        elif os.path.isdir(path):
+            path = os.path.join(path, FILE_WRITER)
+
+        if os.path.isfile(path):
+            prev_writer = MonitorWriter()
+            prev_writer.load(path)
+            prev_writer.merge(self)
+            writer = prev_writer
+        else:
+            writer = self
+            prev_writer = None
+
+        with open(path, 'wb') as fo:
+            pickle.dump(vars(writer), fo)
+
+        del prev_writer
+        self.empty()
+
+    def load(self, path: str = None):
+        """load writer, if path is None, load from self._default_path"""
+
+        if path is None:
+            path = self._default_path
+        elif os.path.isdir(path):
+            path = os.path.join(path, FILE_WRITER)
+
+        assert os.path.isfile(
+            path), f"{self.__class__.__name__}: trying to load from invalid file {path}"
+        with open(path, 'rb') as fi:
+            check = pickle.load(fi)
+            for attr, value in check.items():
+                assert hasattr(
+                    self, attr), f"{self.__class__.__name__}: trying to load non-attribute '{attr}'"
+                setattr(self, attr, value)
+
+    def merge(self, appd_writer):
+
+        assert list(self.summaries.keys()) == list(appd_writer.summaries.keys(
+        )), f"{self.__class__.__name__}: merge failed due to mismatch keys {list(self.summaries.keys())} {list(appd_writer.summaries.keys())}"
+
+        for m in self.summaries:
+            self.summaries[m].merge(appd_writer[m])
+
+    def visualize(self, fig_path: str = None) -> str:
+        self.export()
+        return plot_monitor(self._default_path, o_path=fig_path, pt_like=False)
+
+
+def read_from_check(path: str, pt_like: bool = False) -> Tuple[np.array, np.array, int, int]:
+    if pt_like:
+        # FIXME (huahuan): deprecated in the next release
+        check = torch.load(path, map_location='cpu')['log']
+
+        '''
+        check: OrderedDict({
+                'log_train': ['epoch,loss,loss_real,net_lr,time'],
+                'log_eval': ['loss_real,time']
+            })
+        '''
+
+        df_train = np.array(check['log_train'][1:])
+        df_train = {
+            'loss': df_train[:, 2],
+            'lr': df_train[:, 3],
+            'time': df_train[:, 4],
+        }
+        df_eval = np.array(check['log_eval'][1:])
+        df_eval = {
+            'loss': df_eval[:, 0],
+            'time': df_eval[:, 1]
+        }
+        num_batches = df_train['loss'].shape[0]
+        num_epochs = df_eval['loss'].shape[0]
+        return df_train, df_eval, num_batches, num_epochs
+    else:
+        tmp_monitor = MonitorWriter()
+        tmp_monitor.load(path)
+        tr_m = {
+            'loss': np.asarray(tmp_monitor['train:loss']._values),
+            'lr': np.asarray(tmp_monitor['train:lr']._values),
+            'time': np.asarray(tmp_monitor['train:loss']._time)
+        }
+        eval_m = {
+            'loss': np.asarray(tmp_monitor['eval:loss']._values),
+            'time': None
+        }
+        # FIXME : for compatible of old API
+        tr_m['time'][1:] = tr_m['time'][1:] - tr_m['time'][:-1]
+        tr_m['time'][0] = 0.0
+        eval_m['time'] = np.zeros_like(eval_m['loss'])
+        return tr_m, eval_m, tmp_monitor['train:loss']._cnt, tmp_monitor['eval:loss']._cnt
 
 
 def draw_time(ax: plt.Axes, scalars: Union[np.array, list], num_steps: int, num_epochs: int, eval_time: Union[np.array, list], prop_box=True):
@@ -105,52 +279,19 @@ def draw_lr(ax: plt.Axes, scalars: Union[np.array, list]):
     return ax
 
 
-def read_from_check(check: OrderedDict) -> Tuple[np.array, np.array, int, int]:
-    '''
-    check: OrderedDict({
-            'log_train': ['epoch,loss,loss_real,net_lr,time'],
-            'log_eval': ['loss_real,time']
-        })
-    '''
-
-    df_train = np.array(check['log_train'][1:])
-    df_train = {
-        'loss': df_train[:, 1],
-        'loss_real': df_train[:, 2],
-        'lr': df_train[:, 3],
-        'time': df_train[:, 4],
-    }
-    df_eval = np.array(check['log_eval'][1:])
-    df_eval = {
-        'loss': df_eval[:, 0],
-        'time': df_eval[:, 1]
-    }
-    num_batches = df_train['loss'].shape[0]
-    num_epochs = df_eval['loss'].shape[0]
-    return df_train, df_eval, num_batches, num_epochs
-
-
-def plot_monitor(log_path: str = None, log: OrderedDict = None, title: str = None, interactive_show=False, o_path: str = None):
+def plot_monitor(path: str, title: str = None, interactive_show=False, o_path: str = None, pt_like: bool = True) -> str:
     """Plot the monitor log files
 
     Args:
-        log_path (str, optional): directory of log files
-        log (OrderedDict, optional): log files
+        path (str): directory of log files
         title (str, optional): title name (title of ploting)
         interactive_show (bool, optional): specify whether plot in interactive mode. Default False. 
     """
 
-    if log is None:
-        # read from file
-        if not os.path.isfile(log_path):
-            raise FileNotFoundError(f"'{log_path}' doesn't exist!")
-
-        log = torch.load(log_path, map_location='cpu')['log']
-
     if title is None:
         title = ' '
 
-    df_train, df_eval, num_batches, num_epochs = read_from_check(log)
+    df_train, df_eval, num_batches, num_epochs = read_from_check(path, pt_like)
 
     _, axes = plt.subplots(2, 2)
 
@@ -162,7 +303,7 @@ def plot_monitor(log_path: str = None, log: OrderedDict = None, title: str = Non
     draw_lr(axes[0][1], df_train['lr'])
 
     # Training loss and moving average
-    draw_tr_loss(axes[1][0], df_train['loss_real'])
+    draw_tr_loss(axes[1][0], df_train['loss'])
 
     # Dev loss
     draw_dev_loss(axes[1][1], df_eval['loss'], num_epochs)
@@ -172,19 +313,11 @@ def plot_monitor(log_path: str = None, log: OrderedDict = None, title: str = Non
     plt.suptitle(title)
     plt.tight_layout()
     if interactive_show:
+        outpath = None
         plt.show()
     else:
         if o_path is None:
-            if log_path is None:
-                direc = './'
-            elif os.path.isfile(log_path):
-                direc = os.path.dirname(log_path)
-            elif os.path.isdir(log_path):
-                direc = log_path
-            else:
-                raise ValueError(
-                    f"log_path={log_path} is neither a directory nor a file.")
-
+            direc = os.path.dirname(path)
             outpath = os.path.join(direc, 'monitor.png')
         else:
             if os.path.isdir(o_path):
@@ -193,23 +326,20 @@ def plot_monitor(log_path: str = None, log: OrderedDict = None, title: str = Non
                 assert os.path.isdir(os.path.dirname(o_path))
                 outpath = o_path
         plt.savefig(outpath, dpi=300)
-        print(f"> Monitor figure saved at {outpath}")
     plt.close()
+    return outpath
 
 
 def cmp(check0: str, check1: str, legends: Union[Tuple[str, str], None] = None, title: str = ' ', o_path=None):
     assert os.path.isfile(check0), f"{check0} is not a file."
     assert os.path.isfile(check1), f"{check1} is not a file."
 
-    check0 = torch.load(check0, map_location='cpu')['log']  # type: OrderedDict
-    check1 = torch.load(check1, map_location='cpu')['log']  # type: OrderedDict
-
     _, axes = plt.subplots(2, 2)
 
     if legends is None:
         legends = ['1', '2']
 
-    for clog in [check0, check1]:
+    for clog in [read_from_check(check0), read_from_check(check1)]:
 
         df_train, df_eval, num_batches, num_epochs = read_from_check(clog)
 
@@ -221,7 +351,7 @@ def cmp(check0: str, check1: str, legends: Union[Tuple[str, str], None] = None, 
         draw_lr(axes[0][1], df_train['lr'])
 
         # Training loss and moving average
-        draw_tr_loss(axes[1][0], df_train['loss_real'])
+        draw_tr_loss(axes[1][0], df_train['loss'])
 
         # Dev loss
         draw_dev_loss(axes[1][1], df_eval['loss'], num_epochs, prop_box=False)
@@ -241,8 +371,8 @@ def cmp(check0: str, check1: str, legends: Union[Tuple[str, str], None] = None, 
             assert os.path.isdir(os.path.dirname(o_path))
             outpath = o_path
     plt.savefig(outpath, dpi=300)
-    print(f"> Comparison figure saved at {outpath}")
     plt.close()
+    return outpath
 
 
 if __name__ == "__main__":

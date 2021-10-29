@@ -6,39 +6,11 @@ Modified into spec aug with masking by ratio by Huahuan Zheng (maxwellzh@outlook
 """
 
 from .layer import StackDelta, UnStackDelta
+from .coreutils import pad_list
 from typing import Union, Sequence
 
 import torch
 import torch.nn as nn
-from torch.nn.utils.rnn import pad_sequence
-
-
-def pad_list(xs: torch.Tensor, pad_value=0, dim=0) -> torch.Tensor:
-    """Perform padding for the list of tensors.
-
-    Args:
-        xs (`list`): List of Tensors [(T_1, `*`), (T_2, `*`), ..., (T_B, `*`)].
-        pad_value (float): Value for padding.
-
-    Returns:
-        Tensor: Padded tensor (B, Tmax, `*`).
-
-    Examples:
-        >>> x = [torch.ones(4), torch.ones(2), torch.ones(1)]
-        >>> x
-        [tensor([1., 1., 1., 1.]), tensor([1., 1.]), tensor([1.])]
-        >>> pad_list(x, 0)
-        tensor([[1., 1., 1., 1.],
-                [1., 1., 0., 0.],
-                [1., 0., 0., 0.]])
-
-    """
-    if dim == 0:
-        return pad_sequence(xs, batch_first=True, padding_value=pad_value)
-    else:
-        xs = [x.transpose(0, dim) for x in xs]
-        padded = pad_sequence(xs, batch_first=True, padding_value=pad_value)
-        return padded.transpose(1, dim+1).contiguous()
 
 
 class MaskFreq(nn.Module):

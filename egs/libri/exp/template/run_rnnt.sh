@@ -52,7 +52,7 @@ testset="test_clean test_other"
 
 ########## Train sentencepiece ##########
 char=false
-n_units=4096
+n_units=1024
 #########################################
 if [ $SP == "None" ]; then
     if [ $char == "true" ]; then
@@ -148,9 +148,8 @@ if [ $stage -le 3 ] && [ $stop_stage -ge 3 ]; then
 
     python3 -m cat.rnnt --seed=0 \
         --world-size 1 --rank=0 \
-        --batch_size=512 \
+        --batch_size=256 \
         --dir=$dir \
-        --config=$dir/config.json \
         --trset=$dir/pkl/tr.pkl \
         --devset=$dir/pkl/cv.pkl \
         --grad-accum-fold=1 \

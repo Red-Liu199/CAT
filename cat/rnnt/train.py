@@ -6,6 +6,7 @@
 Transducer trainer.
 """
 
+from ..shared import Manager
 from ..shared import coreutils as utils
 from ..shared import encoder as tn_zoo
 from ..shared import decoder as pn_zoo
@@ -25,19 +26,19 @@ from . import (
 
 import os
 import argparse
-import gather
 from collections import OrderedDict
 from warp_rnnt import rnnt_loss as RNNTLoss
 import warp_rnnt
 if warp_rnnt.__version__ >= '0.7.0':
     from warp_rnnt import fused_rnnt_loss as RNNTFusedLoss
-from typing import Union, Tuple, Sequence, Literal, List
+from typing import Union
 
 import torch
 import torch.nn as nn
 import torch.distributed as dist
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
+from torch.cuda.amp import autocast
 
 
 def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
@@ -56,7 +57,7 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
     else:
         Dataset = SpeechDatasetPickle
 
-    manager = utils.Manager(build_model, args)
+    manager = Manager(build_model, args)
     utils.distprint("> Model built.", args.gpu)
     utils.distprint("  Model size:{:.2f}M".format(
         utils.count_parameters(manager.model)/1e6), args.gpu)
@@ -199,7 +200,7 @@ class TransducerTrainer(nn.Module):
         else:
             reduction = 'sum'
 
-        with utils.autocast(enabled=False):
+        with autocast(enabled=False):
             if self.isfused:
                 loss = RNNTFusedLoss(joint_out.float(), targets.to(dtype=torch.int32),
                                      o_lens.to(device=joint_out.device,

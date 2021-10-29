@@ -8,6 +8,7 @@ Differed from `train_dist.py`, this one supports read configurations from json f
 and is more non-hard-coding style.
 """
 
+from ..shared import Manager
 from ..shared import coreutils as utils
 from ..shared import encoder as model_zoo
 from ..shared.data import SpeechDatasetPickle, SpeechDataset, sortedPadCollate
@@ -75,7 +76,7 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         num_workers=args.workers, pin_memory=True,
         sampler=test_sampler, collate_fn=sortedPadCollate())
 
-    manager = utils.Manager(build_model, args)
+    manager = Manager(build_model, args)
 
     # get GPU info
     gpu_info = utils.gather_all_gpu_info(args.gpu)

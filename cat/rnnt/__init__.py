@@ -13,6 +13,7 @@ from typing import Union, Tuple, Sequence, Literal, List
 
 import torch
 import torch.nn as nn
+from torch.cuda.amp import autocast
 
 
 class PackedSequence():
@@ -79,7 +80,7 @@ class PackedSequence():
         return out, self._lens
 
     def __add__(self, _y) -> torch.Tensor:
-        with utils.autocast(enabled=False):
+        with autocast(enabled=False):
             return gather.sum(self._data.float(), _y._data.float(), self._lens, _y._lens)
 
 

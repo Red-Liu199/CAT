@@ -17,7 +17,7 @@
         "type": "JointNet",
         "kwargs": {
             "hdim": 128,
-            "num_classes": 4231,
+            "num_classes": 4232,
             "odim_decoder": 128,
             "odim_encoder": 128
         }
@@ -27,7 +27,7 @@
         "kwargs": {
             "classical": false,
             "hdim": 128,
-            "num_classes": 4231,
+            "num_classes": 4232,
             "num_layers": 1,
             "variational_noise": [
                 0.0,
@@ -43,10 +43,10 @@
             "dropout": 0.3,
             "dropout_attn": 0.3,
             "hdim": 128,
-            "idim": 120,
+            "idim": 80,
             "kernel_size": 15,
             "num_cells": 6,
-            "num_classes": 4231,
+            "num_classes": 4232,
             "num_heads": 4
         }
     },

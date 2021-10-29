@@ -5,6 +5,10 @@
 """Common files and variables for different trainer.
 """
 
-FMT_CHECKPOINT=r"checkpoint.{:03}.pt"
+FMT_CHECKPOINT = r"checkpoint.{:03}.pt"
+FILE_WRITER = r"training.summary"
 
+
+from .manager import Manager
 from ._specaug import SpecAug
+

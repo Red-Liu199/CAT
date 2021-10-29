@@ -46,13 +46,13 @@ python utils/checkfile.py -d $dir $cat_recipe || exit 1
 # export CUDA_VISIBLE_DEVICES="8,7,6,5,4"
 
 # Setup train/dev/test set here. If there're multiple sets, split them with space
-trainset="train_sp"
-devset="dev_sp"
+trainset="train"
+devset="dev"
 testset="test"
 
 ########## Train sentencepiece ##########
-char=true
-n_units=5000
+char=false
+n_units=1024
 #########################################
 if [ $SP == "None" ]; then
     if [ $char == "true" ]; then
@@ -66,7 +66,6 @@ if [ $SP == "None" ]; then
 else
     # overwrite settings
     export SPdir=$SP
-    unset SP
 fi
 mkdir -p $SPdir
 
@@ -74,36 +73,37 @@ if [ $stage -le 1 ] && [ $stop_stage -ge 1 ]; then
     for set in $trainset $devset $testset; do
         python utils/checkfile.py -f ${cat_recipe}/${set}/text || exit 1
     done
-    # rm seq id to get pure text
-    for tr_set in $trainset; do
-        cat ${cat_recipe}/$tr_set/text
-    done | cut -d ' ' -f 2- | sed 's/ //g' >$SPdir/corpus.tmp || exit 1
 
-    python3 utils/spm_train.py --num_threads=$(nproc) --input=$SPdir/corpus.tmp --model_prefix=$SPdir/spm \
-        --bos_id=0 --eos_id=-1 --unk_id=1 --vocab_size=$n_units --user_defined_symbols="" \
-        --character_coverage=1 --model_type=$bpemode --unk_surface="<unk>" --add_dummy_prefix=False \
-        >$SPdir/spm_training.log 2>&1 &&
-        echo "SentenPiece training succeed." ||
-        {
-            echo "Error: check $SPdir/spm_training.log for details"
-            exit 1
-        }
-    rm $SPdir/corpus.tmp
+    if [ $SP == "None" ]; then
+        # rm seq id to get pure text
+        for tr_set in $trainset; do
+            cat ${cat_recipe}/$tr_set/text
+        done | cut -d ' ' -f 2- >$SPdir/corpus.tmp || exit 1
+
+        python3 utils/spm_train.py --num_threads=$(nproc) --input=$SPdir/corpus.tmp --model_prefix=$SPdir/spm \
+            --bos_id=0 --eos_id=-1 --unk_id=1 --vocab_size=$n_units --user_defined_symbols="" \
+            --character_coverage=1 --model_type=$bpemode --unk_surface="<unk>" \
+            >$SPdir/spm_training.log 2>&1 &&
+            echo "SentenPiece training succeed." ||
+            {
+                echo "Error: check $SPdir/spm_training.log for details"
+                exit 1
+            }
+        rm $SPdir/corpus.tmp
+    fi
 
     mkdir -p $dir/text
     curdata=$dir/text
     for set in $trainset $devset; do
         src_text=${cat_recipe}/${set}/text
         # rm seq id to get pure text
-        cat $src_text | cut -d ' ' -f 2- | sed 's/ //g' >$curdata/corpus.tmp
-
-        # encode text to token ids
-        cat $curdata/corpus.tmp | python3 utils/spm_encode.py --model=$SPdir/spm.model >$curdata/text_id.tmp
+        cat $src_text | cut -d ' ' -f 2- |
+            python3 utils/spm_encode.py --model=$SPdir/spm.model >$curdata/text_id.tmp
 
         # combine seq id with token ids
         cat $src_text | cut -d ' ' -f 1 >$curdata/seq_id.tmp
         paste -d ' ' $curdata/seq_id.tmp $curdata/text_id.tmp >$curdata/${set}.id
-        rm $curdata/{seq_id,text_id,corpus}.tmp
+        rm $curdata/{seq_id,text_id}.tmp
     done
     echo "Convert to token id done."
 
@@ -146,14 +146,14 @@ if [ $stage -le 3 ] && [ $stop_stage -ge 3 ]; then
     # parse the number of classes in configuration file
     python3 utils/parseunits.py $SPdir/spm.vocab $dir/config.json || exit 1
 
-    python3 rnnt/transducer_train.py --seed=0 \
+    python3 -m cat.rnnt --seed=0 \
         --world-size 1 --rank=0 \
         --batch_size=256 \
         --dir=$dir \
-        --config=$dir/config.json \
         --trset=$dir/pkl/tr.pkl \
         --devset=$dir/pkl/cv.pkl \
         --grad-accum-fold=1 \
+        --grad-norm=5.0 \
         --databalance \
         --checkall \
         --amp ||
@@ -178,6 +178,6 @@ if [ $stage -le 4 ] && [ $stop_stage -ge 4 ]; then
     for checkpoint in avg_last_10.pt avg_best_10.pt; do
         utils/e2edecode.sh $dir $(echo $testset | tr ' ' ':') $SPmodel \
             --out_prefix=$(echo $checkpoint | cut -d '.' -f 1) \
-            --check=$checkpoint --cer --cpu || exit 1
+            --check=$checkpoint --cpu || exit 1
     done
 fi

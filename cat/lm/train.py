@@ -8,15 +8,19 @@ Differed from `train_dist.py`, this one supports read configurations from json f
 and is more non-hard-coding style.
 """
 
+from ..shared import Manager
 from ..shared import coreutils as utils
-from ..shared.data import BalancedDistributedSampler, CorpusDataset, sortedPadCollateLM
+from ..shared.manager import evaluate as default_eval
 from ..shared.decoder import *
+from ..shared.data import (
+    BalancedDistributedSampler,
+    CorpusDataset,
+    sortedPadCollateLM
+)
 
 import gather
-import time
 import math
 import argparse
-from typing import Union
 
 import torch
 import torch.nn as nn
@@ -31,7 +35,6 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
     torch.cuda.set_device(gpu)
 
     args.rank = args.rank * ngpus_per_node + gpu
-    print(f"Use GPU: local[{args.gpu}] | global[{args.rank}]")
 
     dist.init_process_group(
         backend=args.dist_backend, init_method=args.dist_url,
@@ -45,7 +48,7 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         num_workers=args.workers, pin_memory=True,
         sampler=test_sampler, collate_fn=sortedPadCollateLM())
 
-    manager = utils.Manager(build_model, args, func_eval=evaluate)
+    manager = Manager(build_model, args, func_eval=evaluate)
     # lm training does not need specaug
     manager.specaug = None
 
@@ -108,51 +111,15 @@ class LMTrainer(nn.Module):
 
 
 @torch.no_grad()
-def evaluate(testloader: DataLoader, args: argparse.Namespace, manager: utils.Manager):
+def evaluate(testloader: DataLoader, args: argparse.Namespace, manager: Manager):
 
-    model = manager.model
-
-    batch_time = utils.AverageMeter('Time', ':6.3f')
-    losses = utils.AverageMeter('Loss', ':.3e')
-    progress = utils.ProgressMeter(
-        len(testloader),
-        [batch_time, losses],
-        prefix='Test: ')
-
-    beg = time.time()
-    cnt_batch = 0
-    total_loss = 0.
-    for i, minibatch in enumerate(testloader):
-        logits, input_lengths, labels, label_lengths = minibatch
-        logits, labels, input_lengths, label_lengths = logits.cuda(
-            args.gpu, non_blocking=True), labels, input_lengths, label_lengths
-
-        loss = model(logits, labels, input_lengths, label_lengths)
-        batch_sum_loss = loss * logits.size(0)  # type: torch.Tensor
-        n_batch = batch_sum_loss.new_tensor(logits.size(0), dtype=torch.long)
-
-        dist.all_reduce(batch_sum_loss, dist.ReduceOp.SUM)
-        dist.all_reduce(n_batch, dist.ReduceOp.SUM)
-
-        # measure accuracy and record loss
-        losses.update((batch_sum_loss/n_batch).item())
-        cnt_batch += n_batch.item()
-        total_loss += batch_sum_loss.item()
-
-        if ((i+1) % args.print_freq == 0 or args.debug) and args.gpu == 0:
-            progress.display(i+1)
-
-    avgloss = total_loss / cnt_batch
-    manager.log_update(
-        [avgloss, time.time() - beg], loc='log_eval')
-
-    # use ppl as evalution metric
-    return math.exp(avgloss)
+    avg_ce_loss = default_eval(testloader, args, manager)
+    return math.exp(avg_ce_loss)
 
 
 def build_model(args, configuration, dist=True, wrapper=True) -> LMTrainer:
     def _build_decoder(config) -> nn.Module:
-        LMNet = eval(config['type'])    # type: Union[PlainPN | LSTMPredictNet]
+        LMNet = eval(config['type'])    # type: AbsDecoder
         NetKwargs = config['kwargs']
         return LMNet(**NetKwargs)
 
