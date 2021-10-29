@@ -6,9 +6,8 @@
 """
 
 FMT_CHECKPOINT = r"checkpoint.{:03}.pt"
-FILE_WRITER = r"training.summary"
 
 
 from .manager import Manager
 from ._specaug import SpecAug
-
+from .monitor import FILE_WRITER

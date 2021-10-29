@@ -4,11 +4,19 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 # https://github.com/pytorch/fairseq/blob/main/scripts/average_checkpoints.py
+"""
+usage:
+    python -m cat.shared.avgmodel ...
+"""
+
+from .monitor import (
+    MonitorWriter,
+    BaseSummary
+)
 
 import argparse
 import collections
 import os
-import re
 
 import torch
 
@@ -74,23 +82,14 @@ def average_checkpoints(inputs):
 
 def find_n_best(fdir: str, n: int):
 
-    files = os.listdir(fdir)
-    pattern = re.compile(r'checkpoint[.]\d+[.]pt')
-
-    checklist = []
-    for fpath in files:
-        match = pattern.search(fpath)
-        if match is None:
-            continue
-        checklist.append(match.group(0))
-    if len(checklist) == 0:
-        raise RuntimeError("No any checkpoint.xxx.pt found in {}".format(fdir))
-
-    checklist = sorted(checklist, reverse=True)
-    ckpt = torch.load(os.path.join(fdir, checklist[0]), map_location='cpu')
+    temp_writer = MonitorWriter()
+    # FIXME : this is hard-coded
+    temp_writer.load(fdir.replace('checks', 'logs'))
+    if 'eval:loss' not in temp_writer.summaries:
+        raise RuntimeError("Could not locate the n-best checkpoint.")
 
     metric = [(i+1, _m)
-              for i, (_m, _) in enumerate(ckpt['log']['log_eval'][1:])]
+              for i, _m in enumerate(temp_writer['eval:loss']._values)]
 
     metric = sorted(metric, key=lambda item: item[1])[:n]
     return [os.path.join(fdir, f"checkpoint.{idx:03}.pt") for idx, _ in metric]

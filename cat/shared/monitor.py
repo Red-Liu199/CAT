@@ -8,7 +8,6 @@ Usage:
     in working directory:
     python3 cat/shared/monitor.py <path to my checkpoint>
 """
-from . import FILE_WRITER
 
 import time
 import pickle
@@ -19,6 +18,8 @@ import matplotlib.pyplot as plt
 from typing import Union, Tuple, Any, Dict, List
 
 import torch
+
+FILE_WRITER = r"training.summary"
 
 
 class BaseSummary():
@@ -146,6 +147,38 @@ class MonitorWriter():
     def visualize(self, fig_path: str = None) -> str:
         self.export()
         return plot_monitor(self._default_path, o_path=fig_path, pt_like=False)
+
+# FIXME : deprecate this
+
+
+def conver2new(path_old: str, path_new: str):
+    assert os.path.isfile(path_old), path_old
+    assert os.path.isdir(path_new), path_new
+    assert not os.path.isfile(os.path.join(
+        path_new, FILE_WRITER)), f"File {path_new}/{FILE_WRITER} exits."
+
+    prev_check = torch.load(path_old, map_location='cpu')['log']
+    writer = MonitorWriter(path_new)
+
+    writer.addWriter(['train:loss', 'train:lr', 'eval:loss'])
+    T = [0]
+    for hist in prev_check['log_train'][1:]:
+        _, _, loss, lr, time = hist
+        writer.update({
+            'train:loss': loss,
+            'train:lr': lr
+        })
+        T.append(time + T[-1])
+
+    for metric in ['train:loss', 'train:lr']:
+        writer[metric]._time = T[1:]
+
+    for hist in prev_check['log_eval'][1:]:
+        loss, _ = hist
+        writer.update('eval:loss', loss)
+
+    writer.export()
+    return writer._default_path
 
 
 def read_from_check(path: str, pt_like: bool = False) -> Tuple[np.array, np.array, int, int]:
@@ -330,7 +363,7 @@ def plot_monitor(path: str, title: str = None, interactive_show=False, o_path: s
     return outpath
 
 
-def cmp(check0: str, check1: str, legends: Union[Tuple[str, str], None] = None, title: str = ' ', o_path=None):
+def cmp(check0: str, check1: str, legends: Union[Tuple[str, str], None] = None, title: str = ' ', o_path=None, pt_like: bool = True):
     assert os.path.isfile(check0), f"{check0} is not a file."
     assert os.path.isfile(check1), f"{check1} is not a file."
 
@@ -339,7 +372,7 @@ def cmp(check0: str, check1: str, legends: Union[Tuple[str, str], None] = None, 
     if legends is None:
         legends = ['1', '2']
 
-    for clog in [read_from_check(check0), read_from_check(check1)]:
+    for clog in [read_from_check(check0, pt_like), read_from_check(check1, pt_like)]:
 
         df_train, df_eval, num_batches, num_epochs = read_from_check(clog)
 
@@ -386,12 +419,24 @@ if __name__ == "__main__":
                         help="Legend for two comparing figures, split by '-'. Default: 1-2")
     parser.add_argument("-o", type=str, default=None, dest="o_path",
                         help="Output figure path.")
+    parser.add_argument("--convert", action="store_true",
+                        help="Convert old monitor to new one.")
     args = parser.parse_args()
 
+    isold = (args.log[-3:] == '.pt')
+
+    if args.convert:
+        if not isold:
+            raise RuntimeError
+
+        print("> Ouput file: {}".format(conver2new(args.log, args.o_path)))
+        exit(0)
+
     if args.cmp is None:
-        plot_monitor(args.log, title=args.title, o_path=args.o_path)
+        plot_monitor(args.log, title=args.title,
+                     o_path=args.o_path, pt_like=isold)
     else:
         legends = args.cmplegend.split('-')
         assert len(legends) == 2
         cmp(args.log, args.cmp, legends=legends,
-            title=args.title, o_path=args.o_path)
+            title=args.title, o_path=args.o_path, pt_like=isold)

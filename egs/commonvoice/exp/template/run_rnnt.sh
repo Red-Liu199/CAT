@@ -168,10 +168,10 @@ if [ $stage -le 4 ] && [ $stop_stage -ge 4 ]; then
 
     # generate averaging models
     if [ ! -f $dir/checks/avg_best_10.pt ]; then
-        python utils/avgcheckpoint.py --inputs=$dir/checks --num-best 10 || exit 1
+        python -m cat.shared.avgmodel --inputs=$dir/checks --num-best 10 || exit 1
     fi
     if [ ! -f $dir/checks/avg_last_10.pt ]; then
-        python utils/avgcheckpoint.py --inputs $(find $dir/checks/ -name checkpoint.* | sort -g | tail -n 10) \
+        python -m cat.shared.avgmodel --inputs $(find $dir/checks/ -name checkpoint.* | sort -g | tail -n 10) \
             --output $dir/checks/avg_last_10.pt || exit 1
     fi
 
