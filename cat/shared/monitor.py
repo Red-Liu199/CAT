@@ -23,10 +23,21 @@ FILE_WRITER = r"training.summary"
 
 
 class BaseSummary():
-    def __init__(self) -> None:
-        self._values = []
-        self._time = []
-        self._cnt = 0
+    def __init__(self, src: dict = None) -> None:
+        if src is None:
+            self._values = []
+            self._time = []
+            self._cnt = 0
+        else:
+            self.load(src)
+
+    def dump(self) -> dict:
+        return {'val': self._values, 'time': self._time, 'cnt': self._cnt}
+
+    def load(self, src: dict):
+        self._values = src['val']
+        self._time = src['time']
+        self._cnt = src['cnt']
 
     def update(self, value: Any):
         self._values.append(value)
@@ -114,7 +125,10 @@ class MonitorWriter():
             prev_writer = None
 
         with open(path, 'wb') as fo:
-            pickle.dump(vars(writer), fo)
+            pickle.dump({
+                'path': writer._default_path,
+                'summaries': {metric: smr.dump() for metric, smr in writer.summaries.items()}
+            }, fo)
 
         del prev_writer
         self.empty()
@@ -129,12 +143,14 @@ class MonitorWriter():
 
         assert os.path.isfile(
             path), f"{self.__class__.__name__}: trying to load from invalid file {path}"
+
         with open(path, 'rb') as fi:
             check = pickle.load(fi)
-            for attr, value in check.items():
-                assert hasattr(
-                    self, attr), f"{self.__class__.__name__}: trying to load non-attribute '{attr}'"
-                setattr(self, attr, value)
+
+            self._default_path = check['path']
+            self.summaries = {}
+            for m, smr in check['summaries'].items():
+                self.summaries[m] = BaseSummary(smr)
 
     def merge(self, appd_writer):
 
@@ -152,6 +168,8 @@ class MonitorWriter():
 
 
 def conver2new(path_old: str, path_new: str):
+    import time
+
     assert os.path.isfile(path_old), path_old
     assert os.path.isdir(path_new), path_new
     assert not os.path.isfile(os.path.join(
@@ -163,13 +181,15 @@ def conver2new(path_old: str, path_new: str):
     writer.addWriter(['train:loss', 'train:lr', 'eval:loss'])
     T = [0]
     for hist in prev_check['log_train'][1:]:
-        _, _, loss, lr, time = hist
+        _, _, loss, lr, t = hist
         writer.update({
             'train:loss': loss,
             'train:lr': lr
         })
-        T.append(time + T[-1])
+        T.append(t + T[-1])
 
+    reset_m = time.time()
+    T = [t + reset_m - T[-1] for t in T]
     for metric in ['train:loss', 'train:lr']:
         writer[metric]._time = T[1:]
 
@@ -358,7 +378,7 @@ def plot_monitor(path: str, title: str = None, interactive_show=False, o_path: s
             else:
                 assert os.path.isdir(os.path.dirname(o_path))
                 outpath = o_path
-        plt.savefig(outpath, dpi=300)
+        plt.savefig(outpath, dpi=250)
     plt.close()
     return outpath
 
@@ -403,7 +423,7 @@ def cmp(check0: str, check1: str, legends: Union[Tuple[str, str], None] = None, 
         else:
             assert os.path.isdir(os.path.dirname(o_path))
             outpath = o_path
-    plt.savefig(outpath, dpi=300)
+    plt.savefig(outpath, dpi=250)
     plt.close()
     return outpath
 

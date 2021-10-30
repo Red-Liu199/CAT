@@ -9,10 +9,7 @@ usage:
     python -m cat.shared.avgmodel ...
 """
 
-from .monitor import (
-    MonitorWriter,
-    BaseSummary
-)
+from .monitor import MonitorWriter
 
 import argparse
 import collections

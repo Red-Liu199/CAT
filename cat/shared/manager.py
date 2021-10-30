@@ -136,6 +136,8 @@ class Manager(object):
             self.save(checkpoint)
             if self.rank == 0:
                 self.monitor.visualize(args.dir)
+                # skip exporting, since the monitor exported with visualize() automatically.
+                # self.monitor.export()
 
             if state == 2:
                 utils.distprint("Terminated: GPU[%d]" % self.rank, args.gpu)
@@ -164,7 +166,6 @@ class Manager(object):
         if self.rank != 0 or self.DEBUG:
             return None
 
-        self.monitor.export()
         if name[-3:] != '.pt':
             name += '.pt'
         PATH = os.path.join(PATH, name)
