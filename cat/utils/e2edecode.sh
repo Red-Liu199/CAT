@@ -75,7 +75,7 @@ if [ $(echo "$lm_weight > 0.0" | bc -l) -eq 1 ]; then
     prefix="ext_lm=$lm_weight "
     echo "  Ensure modeling unit of transducer is the same as that of extra LM."
 else
-    prefix="ext_lm= "
+    prefix=""
 fi
 if [ -d $spmodel ]; then
     export spmodel=$spmodel/spm.model

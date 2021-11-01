@@ -84,7 +84,6 @@ if [ $stage -le 3 ] && [ $stop_stage -ge 3 ]; then
         --grad-accum-fold=16 \
         --databalance \
         --checkall \
-        --resume=$dir/checks/checkpoint.059.pt \
         --amp ||
         exit 1
 
