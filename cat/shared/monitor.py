@@ -392,9 +392,10 @@ def cmp(check0: str, check1: str, legends: Union[Tuple[str, str], None] = None, 
     if legends is None:
         legends = ['1', '2']
 
-    for clog in [read_from_check(check0, pt_like), read_from_check(check1, pt_like)]:
+    for clog in [check0, check1]:
 
-        df_train, df_eval, num_batches, num_epochs = read_from_check(clog)
+        df_train, df_eval, num_batches, num_epochs = read_from_check(
+            clog, pt_like)
 
         # Time
         draw_time(axes[0][0], df_train['time'],
