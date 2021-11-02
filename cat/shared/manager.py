@@ -4,6 +4,7 @@
 
 """training/evaluating manager"""
 
+from ..shared.data import BalancedDistributedSampler
 from . import scheduler
 from . import coreutils as utils
 from ._specaug import SpecAug
@@ -11,36 +12,99 @@ from .monitor import MonitorWriter
 
 import os
 import argparse
-import time
 import json
 import shutil
 from collections import OrderedDict
-from typing import Callable, Union, Iterable, Optional
+from typing import Callable, Union, Iterable, Optional, List
 from datetime import datetime
 from tqdm import tqdm
 
 import torch
 import torch.nn as nn
 import torch.distributed as dist
+from torch.utils.data.distributed import DistributedSampler
+from torch.utils.data import DataLoader
 from torch.cuda.amp import autocast, GradScaler
 from torch.utils.tensorboard import SummaryWriter
 if torch.__version__ >= '1.8.0':
     from torch.distributed.optim import ZeroRedundancyOptimizer
 
 
+def check_parser(args: argparse.Namespace, expected_attrs: List[str]):
+    unseen = []
+    for attr in expected_attrs:
+        if not hasattr(args, attr):
+            unseen.append(attr)
+
+    if len(unseen) > 0:
+        raise RuntimeError(
+            f"Expect parser to have these arguments, but not found:\n    {' '.join(unseen)}")
+    else:
+        return None
+
+
 class Manager(object):
     def __init__(
             self,
-            func_build_model: Callable[[argparse.Namespace, dict], Union[nn.Module, nn.parallel.DistributedDataParallel]],
+            Dataset: torch.utils.data.Dataset,
+            collate_fn: Callable,
             args: argparse.Namespace,
+            func_build_model: Callable[[argparse.Namespace, dict], Union[nn.Module, nn.parallel.DistributedDataParallel]],
             func_train: Optional[Callable] = None,
             func_eval: Optional[Callable] = None):
         super().__init__()
 
+        check_parser(args, ['rank', 'gpu', 'workers', 'trset', 'devset', 'databalance',
+                     'batch_size', 'grad_accum_fold', 'config', 'dir', 'debug', 'logsdir', 'resume'])
+
+        # setup dataloader
+        tr_set = Dataset(args.trset)
+        val_set = Dataset(args.devset)
+
+        setattr(args, 'n_steps', 0)
+        if args.databalance:
+            utils.distprint(
+                "> Enable data balanced loading, which takes a while to initialize...", args.gpu)
+            train_sampler = BalancedDistributedSampler(
+                tr_set, args.batch_size, args.len_norm)
+            trainloader = DataLoader(
+                tr_set, batch_sampler=train_sampler,
+                num_workers=args.workers, collate_fn=collate_fn)
+            utils.distprint(
+                "> Seq length info for balanced loading generated.", args.gpu)
+            args.n_steps = train_sampler.total_size//args.batch_size//args.grad_accum_fold
+        else:
+            train_sampler = DistributedSampler(tr_set)
+            trainloader = DataLoader(
+                tr_set, batch_size=args.batch_size//dist.get_world_size(), shuffle=False,
+                num_workers=args.workers, sampler=train_sampler, collate_fn=collate_fn)
+            args.n_steps = len(trainloader)//args.grad_accum_fold
+
+        val_sampler = DistributedSampler(val_set, shuffle=False)
+        valloader = DataLoader(
+            val_set, batch_size=args.batch_size//dist.get_world_size(), shuffle=False,
+            num_workers=args.workers, pin_memory=True,
+            sampler=val_sampler, collate_fn=collate_fn)
+
+        self.train_sampler = train_sampler
+        self.trainloader = trainloader
+        self.valloader = valloader
+
+        # Initial model
         with open(args.config, 'r') as fi:
             configures = json.load(fi)  # type: dict
-
         self.model = func_build_model(args, configures)
+
+        utils.distprint("> Model built. Size: {:.2f}M".format(
+            utils.count_parameters(self.model)/1e6), args.gpu)
+
+        # get GPU info and create readme.md
+        gpu_info = utils.gather_all_gpu_info(args.gpu)
+        if args.rank == 0 and not args.debug:
+            utils.gen_readme(os.path.join(args.dir, 'readme.md'),
+                             model=self.model, gpu_info=gpu_info)
+
+        # hook the function
         if func_train is None:
             self.train = train
         else:
@@ -54,12 +118,10 @@ class Manager(object):
         # Initial specaug module
         if 'specaug_config' not in configures:
             specaug = None
-            if args.rank == 0:
-                utils.highlight_msg("Disable SpecAug")
+            utils.distprint("> Disable SpecAug", args.gpu)
         else:
             specaug = SpecAug(**configures['specaug_config'])
             specaug = specaug.to(f'cuda:{args.gpu}')
-
         self.specaug = specaug
 
         # Initial scheduler and optimizer
@@ -96,25 +158,25 @@ class Manager(object):
 
         if args.resume is not None:
             utils.distprint(
-                f"[GPU {args.rank}]: Resuming from: {args.resume}", args.gpu)
+                f"> Resuming from: {args.resume}", args.gpu)
             loc = f'cuda:{args.gpu}'
             checkpoint = torch.load(
                 args.resume, map_location=loc)  # type: OrderedDict
             self.load(checkpoint)
 
-    def run(self, train_sampler: torch.utils.data.distributed.DistributedSampler, trainloader: torch.utils.data.DataLoader, testloader: torch.utils.data.DataLoader, args: argparse.Namespace):
+    def run(self, args: argparse.Namespace):
 
-        for attr in ['checksdir', 'rank', 'gpu', 'dir', 'checkall']:
-            assert hasattr(args, attr)
+        check_parser(args, ['checksdir', 'rank', 'gpu', 'dir', 'checkall'])
+
         self.model.train()
         while True:
             self.epoch += 1
-            train_sampler.set_epoch(self.epoch)
+            self.train_sampler.set_epoch(self.epoch)
 
-            self.train(trainloader, args, self)
+            self.train(self.trainloader, args, self)
 
             self.model.eval()
-            metrics = self.evaluate(testloader, args, self)
+            metrics = self.evaluate(self.valloader, args, self)
             if isinstance(metrics, tuple):
                 # defaultly use the first one to evaluate
                 metrics = metrics[0]
@@ -134,7 +196,7 @@ class Manager(object):
                 checkpoint = os.path.join(args.checksdir, "checkpoint.pt")
 
             self.save(checkpoint)
-            if self.rank == 0:
+            if self.rank == 0 and not self.DEBUG:
                 self.monitor.visualize(args.dir)
                 # skip exporting, since the monitor exported with visualize() automatically.
                 # self.monitor.export()
@@ -222,8 +284,11 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
 
         normalized_loss = loss.detach() * logits.size(0)
         if hasattr(args, 'databalance') and args.databalance:
-            # current global size
-            # efficiently, we can set t_batch_size=args.batch_size, but current impl is more robust
+            '''
+            get current global size
+            efficiently, we can set t_batch_size=args.batch_size, 
+            but current impl is more robust
+            '''
             t_batch_size = logits.new_tensor(logits.size(0))
             dist.all_reduce(t_batch_size)
             loss.data = normalized_loss * (world_size / t_batch_size)
@@ -237,8 +302,8 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
 
         return detach_loss, n_batch
 
-    for attr in ['grad_accum_fold', 'n_steps', 'print_freq', 'rank', 'gpu', 'debug', 'amp', 'grad_norm']:
-        assert hasattr(args, attr), f"{attr} not in args"
+    check_parser(args, ['grad_accum_fold', 'n_steps',
+                 'print_freq', 'rank', 'gpu', 'debug', 'amp', 'grad_norm'])
 
     model = manager.model
     scheduler = manager.scheduler
@@ -321,8 +386,8 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
 @torch.no_grad()
 def update_bn(trainloader, args: argparse.Namespace, manager: Manager):
 
-    for attr in ['n_steps', 'print_freq', 'rank', 'gpu', 'debug', 'amp']:
-        assert hasattr(args, attr), f"{attr} not in args"
+    check_parser(args, ['n_steps', 'print_freq',
+                 'rank', 'gpu', 'debug', 'amp'])
 
     model = manager.model
     if not hasattr(model.module, 'impl_forward'):

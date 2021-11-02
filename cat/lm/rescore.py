@@ -3,6 +3,8 @@
 # Author: Zheng Huahuan (maxwellzh@outlook.com)
 
 """Rescoring with pre-trained GPT-2 model or custom LM.
+
+This script is ported from cat.rnnt.decode
 NOTE (huahuan):
     For GPT-2 rescoring:
         At the first time of running the script, the model will be automatically downloaded.
@@ -16,7 +18,6 @@ from ..shared import coreutils as utils
 from . import lm_builder
 from ..shared.data import NbestListDataset, NbestListCollate, InferenceDistributedSampler
 
-import re
 import os
 import json
 import time

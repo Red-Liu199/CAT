@@ -1,11 +1,9 @@
-"""
-Copyright 2021 Tsinghua University
-Apache 2.0.
-Author: Zheng Huahuan (maxwellzh@outlook.com)
+# Copyright 2021 Tsinghua University
+# Apache 2.0.
+# Author: Zheng Huahuan (maxwellzh@outlook.com)
 
-This script uses DistributedDataParallel (DDP) to train model within framework of CAT.
-Differed from `train_dist.py`, this one supports read configurations from json file
-and is more non-hard-coding style.
+"""
+Language model trainer.
 """
 
 from ..shared import Manager
@@ -13,7 +11,6 @@ from ..shared import coreutils as utils
 from ..shared.manager import evaluate as default_eval
 from ..shared.decoder import *
 from ..shared.data import (
-    BalancedDistributedSampler,
     CorpusDataset,
     sortedPadCollateLM
 )
@@ -26,7 +23,6 @@ import torch
 import torch.nn as nn
 import torch.distributed as dist
 from torch.utils.data import DataLoader
-from torch.utils.data.distributed import DistributedSampler
 
 
 def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
@@ -40,54 +36,14 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         backend=args.dist_backend, init_method=args.dist_url,
         world_size=args.world_size, rank=args.rank)
 
-    test_set = CorpusDataset(args.devset)
-    test_sampler = DistributedSampler(test_set)
+    manager = Manager(CorpusDataset, sortedPadCollateLM(),
+                      args, build_model, func_eval=evaluate)
 
-    testloader = DataLoader(
-        test_set, batch_size=args.batch_size, shuffle=(test_sampler is None),
-        num_workers=args.workers, pin_memory=True,
-        sampler=test_sampler, collate_fn=sortedPadCollateLM())
-
-    manager = Manager(build_model, args, func_eval=evaluate)
     # lm training does not need specaug
     manager.specaug = None
 
-    # get GPU info
-    gpu_info = utils.gather_all_gpu_info(args.gpu)
-
-    utils.distprint("> Model built.", args.gpu)
-    utils.distprint("  Model size:{:.2f}M".format(
-        utils.count_parameters(manager.model)/1e6), args.gpu)
-    if args.rank == 0 and not args.debug:
-        utils.gen_readme(args.dir+'/readme.md',
-                         model=manager.model, gpu_info=gpu_info)
-
-    tr_set = CorpusDataset(args.trset)
-    setattr(args, 'n_steps', 0)
-
-    if args.databalance:
-        utils.distprint(
-            "> Enable data balanced loading, it takes a while to initialize...", args.gpu)
-        train_sampler = BalancedDistributedSampler(
-            tr_set, args.batch_size, args.len_norm)
-        trainloader = DataLoader(
-            tr_set, batch_sampler=train_sampler,
-            num_workers=args.workers, pin_memory=True,
-            collate_fn=sortedPadCollateLM())
-        utils.distprint(
-            "> Seq length info for balanced loading generated.", args.gpu)
-        args.n_steps = train_sampler.total_size//args.batch_size//args.grad_accum_fold
-    else:
-        train_sampler = DistributedSampler(tr_set)
-
-        trainloader = DataLoader(
-            tr_set, batch_size=args.batch_size//ngpus_per_node, shuffle=(train_sampler is None),
-            num_workers=args.workers, pin_memory=True,
-            sampler=train_sampler, collate_fn=sortedPadCollateLM())
-        args.n_steps = len(trainloader)//args.grad_accum_fold
-
     # training
-    manager.run(train_sampler, trainloader, testloader, args)
+    manager.run(args)
 
 
 class LMTrainer(nn.Module):

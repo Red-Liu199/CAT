@@ -13,7 +13,6 @@ from ..shared import decoder as pn_zoo
 from ..shared.layer import TimeReduction
 from ..shared import SpecAug
 from ..shared.data import (
-    BalancedDistributedSampler,
     SpeechDataset,
     SpeechDatasetPickle,
     sortedPadCollateTransducer
@@ -36,8 +35,6 @@ from typing import Union
 import torch
 import torch.nn as nn
 import torch.distributed as dist
-from torch.utils.data.distributed import DistributedSampler
-from torch.utils.data import DataLoader
 from torch.cuda.amp import autocast
 
 
@@ -57,52 +54,12 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
     else:
         Dataset = SpeechDatasetPickle
 
-    manager = Manager(build_model, args)
-    utils.distprint("> Model built.", args.gpu)
-    utils.distprint("  Model size:{:.2f}M".format(
-        utils.count_parameters(manager.model)/1e6), args.gpu)
-    # get GPU info
-    gpu_info = utils.gather_all_gpu_info(args.gpu)
-    if args.rank == 0 and not args.debug:
-        utils.gen_readme(args.dir+'/readme.md',
-                         model=manager.model, gpu_info=gpu_info)
-
-    tr_set = Dataset(args.trset)
-    test_set = Dataset(args.devset)
-    setattr(args, 'n_steps', 0)
-
-    if args.databalance:
-        utils.distprint(
-            "> Enable data balanced loading.\n  It takes a while to initialize...", args.gpu)
-        train_sampler = BalancedDistributedSampler(
-            tr_set, args.batch_size, args.len_norm)
-        trainloader = DataLoader(
-            tr_set, batch_sampler=train_sampler,
-            num_workers=args.workers, pin_memory=True,
-            collate_fn=sortedPadCollateTransducer())
-        utils.distprint(
-            "> Seq length info for balanced loading generated.", args.gpu)
-
-        args.n_steps = train_sampler.total_size//args.batch_size//args.grad_accum_fold
-    else:
-        train_sampler = DistributedSampler(tr_set)
-
-        trainloader = DataLoader(
-            tr_set, batch_size=args.batch_size//ngpus_per_node, shuffle=(train_sampler is None),
-            num_workers=args.workers, pin_memory=True,
-            sampler=train_sampler, collate_fn=sortedPadCollateTransducer())
-        args.n_steps = len(trainloader)//args.grad_accum_fold
-
-    test_sampler = DistributedSampler(test_set, shuffle=False)
-    testloader = DataLoader(
-        test_set, batch_size=args.batch_size//ngpus_per_node, shuffle=(test_sampler is None),
-        num_workers=args.workers, pin_memory=True,
-        sampler=test_sampler, collate_fn=sortedPadCollateTransducer())
+    manager = Manager(Dataset, sortedPadCollateTransducer(), args, build_model)
 
     if args.update_bn:
         assert args.resume is not None, "invalid behavior"
 
-        utils.update_bn(trainloader, args, manager)
+        utils.update_bn(manager.trainloader, args, manager)
         updated_check = args.resume.replace('.pt', '_bn.pt')
         manager.save(updated_check)
         utils.distprint(
@@ -110,7 +67,7 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         return
 
     # training
-    manager.run(train_sampler, trainloader, testloader, args)
+    manager.run(args)
 
 
 class TransducerTrainer(nn.Module):

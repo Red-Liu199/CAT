@@ -13,14 +13,11 @@ from ..shared import coreutils as utils
 from ..shared import encoder as model_zoo
 from ..shared.data import SpeechDatasetPickle, SpeechDataset, sortedPadCollate
 
-import os
 import argparse
 
 import torch
 import torch.nn as nn
 import torch.distributed as dist
-from torch.utils.data.distributed import DistributedSampler
-from torch.utils.data import DataLoader
 
 
 def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
@@ -31,70 +28,24 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
     torch.cuda.set_device(gpu)
 
     args.rank = args.rank * ngpus_per_node + gpu
-    print(f"Use GPU: local[{args.gpu}] | global[{args.rank}]")
 
     dist.init_process_group(
         backend=args.dist_backend, init_method=args.dist_url,
         world_size=args.world_size, rank=args.rank)
 
-    args.batch_size = args.batch_size // ngpus_per_node
-
-    utils.distprint("> Data prepare", args.gpu)
     if args.h5py:
-        data_format = "hdf5"
-        utils.highlight_msg(
-            "H5py reading might cause error with Multi-GPUs")
         Dataset = SpeechDataset
-        if args.trset is None or args.devset is None:
-            raise FileNotFoundError(
-                "With '--hdf5' option, you must specify data location with '--trset' and '--devset'.")
     else:
-        data_format = "pickle"
         Dataset = SpeechDatasetPickle
 
-    if args.trset is None:
-        args.trset = os.path.join(args.data, f'{data_format}/tr.{data_format}')
-    if args.devset is None:
-        args.devset = os.path.join(
-            args.data, f'{data_format}/cv.{data_format}')
-
-    tr_set = Dataset(args.trset)
-    test_set = Dataset(args.devset)
-    utils.distprint("  Data prepared.", args.gpu)
-
-    train_sampler = DistributedSampler(tr_set)
-    test_sampler = DistributedSampler(test_set)
-    test_sampler.set_epoch(1)
-
-    trainloader = DataLoader(
-        tr_set, batch_size=args.batch_size, shuffle=(train_sampler is None),
-        num_workers=args.workers, pin_memory=True,
-        sampler=train_sampler, collate_fn=sortedPadCollate())
-
-    testloader = DataLoader(
-        test_set, batch_size=args.batch_size, shuffle=(test_sampler is None),
-        num_workers=args.workers, pin_memory=True,
-        sampler=test_sampler, collate_fn=sortedPadCollate())
-
-    manager = Manager(build_model, args)
-
-    # get GPU info
-    gpu_info = utils.gather_all_gpu_info(args.gpu)
-
-    utils.distprint("> Model built.", args.gpu)
-    utils.distprint("  Model size:{:.2f}M".format(
-        utils.count_parameters(manager.model)/1e6), args.gpu)
-
-    if args.rank == 0 and not args.debug:
-        utils.gen_readme(args.dir+'/readme.md',
-                         model=manager.model, gpu_info=gpu_info)
+    manager = Manager(Dataset, sortedPadCollate(), args, build_model)
 
     # init ctc-crf, args.iscrf is set in build_model
     if args.iscrf:
-        ctx = CRFContext(f"{args.data}/den_meta/den_lm.fst", args.gpu)
+        ctx = CRFContext(args.den_lm, args.gpu)
 
     # training
-    manager.run(train_sampler, trainloader, testloader, args)
+    manager.run(args)
 
 
 class AMTrainer(nn.Module):
@@ -167,8 +118,8 @@ def main():
     parser = utils.BasicDDPParser()
     parser.add_argument("--h5py", action="store_true",
                         help="Load data with H5py, defaultly use pickle (recommended).")
-    parser.add_argument("--data", type=str, default=None,
-                        help="Location of training/testing data.")
+    parser.add_argument("--den-lm", type=str, default=None,
+                        help="Location of denominator LM.")
 
     args = parser.parse_args()
 

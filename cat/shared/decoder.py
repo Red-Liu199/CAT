@@ -195,6 +195,12 @@ class PositionalEncoding(nn.Module):
         return self.dropout(x)
 
 
+'''
+Reference:
+https://github.com/pytorch/examples/blob/3970e068c7f18d2d54db2afee6ddd81ef3f93c24/word_language_model/model.py#L108
+'''
+
+
 class Transformer(AbsDecoder):
     def __init__(self, num_classes: int, dim_hid: int, num_head: int, num_layers: int, dropout: float = 0.1, padding_idx: int = -1) -> None:
         super().__init__(num_classes, dim_hid, padding_idx=padding_idx)
