@@ -361,12 +361,11 @@ def evaluate(testloader, args: argparse.Namespace, manager: Manager) -> float:
             args.gpu, non_blocking=True), labels, input_lengths, label_lengths
 
         '''
-        Suppose model can deal with train/eval mode.
-        And in eval mode, the loss (metric) is sum overall batches.
+        Suppose the loss is reduced by mean
         '''
         loss = model(logits, labels, input_lengths, label_lengths)
 
-        real_loss = loss  # type: torch.Tensor
+        real_loss = loss * logits.size(0)  # type: torch.Tensor
         n_batch = real_loss.new_tensor(logits.size(0), dtype=torch.long)
 
         dist.all_reduce(real_loss, dist.ReduceOp.SUM)
