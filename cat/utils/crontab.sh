@@ -1,4 +1,4 @@
-opts=$(python utils/arseopt.py '{
+opts=$(python utils/parseopt.py '{
         "run":{
             "type": "str",
             "help": "Experiment names, split by ':'. Such as: \"rnnt-v1:rnnt-v2\"."
