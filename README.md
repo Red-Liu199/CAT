@@ -4,7 +4,7 @@
 
 **Data preparation:**
 
-Currently, this repository is relied on [CAT](https://github.com/thu-spmi/CAT) for data pre-processing. Basically the audio features and some of the text normalization.
+Currently, this repository is relied on [CAT](https://github.com/thu-spmi/CAT) for data pre-processing, basically the audio features extraction and some of the text normalization.
 
 So, before going into the task, you should do data preparation with CAT first. For more information, please refer to [tools/README.md](tools/README.md).
 
@@ -27,7 +27,8 @@ In this repo, we support training RNN-T, Language model and CTC/CTC-CRF model tr
   
    - CUDA compatible machine, NVIDIA driver installed and NVIDIA toolkit available.
    - PyTorch: `>=1.9.0` is recommended
-   - CAT: https://github.com/thu-spmi/CAT only for data preparation. After installing the CAT, please refers to the details in tools/README.md
+   - [CAT](https://github.com/thu-spmi/CAT): This is optional if you just do language model training. 
+      After installing the CAT, please refers to the details in [tools/README.md](tools/README.md)
      and link directory.
      
       ```bash
