@@ -36,8 +36,21 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         backend=args.dist_backend, init_method=args.dist_url,
         world_size=args.world_size, rank=args.rank)
 
+    if args.eval is not None:
+        assert ngpus_per_node == 1, "worlsize > 1 might lead to incorrect ppl calculation."
+        args.trset = args.eval
+        args.devset = args.eval
+        if args.resume is None:
+            utils.distprint(
+                "You're trying to evalute over the data with untrained model.", args.gpu)
+
     manager = Manager(CorpusDataset, sortedPadCollateLM(),
                       args, build_model, func_eval=evaluate)
+
+    if args.eval is not None:
+        ppl = evaluate(manager.valloader, args, manager)
+        utils.distprint(f"Perplexity over dataset is {ppl:.2f}", args.gpu)
+        return
 
     # lm training does not need specaug
     manager.specaug = None
@@ -124,6 +137,8 @@ def build_model(args, configuration, dist=True, wrapper=True) -> LMTrainer:
 
 def main():
     parser = utils.BasicDDPParser()
+    parser.add_argument("--eval", type=str,
+                        help="Do evaluation and calculate the PPL.")
 
     args = parser.parse_args()
 
