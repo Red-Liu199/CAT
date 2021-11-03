@@ -64,6 +64,7 @@ elif [ ! $SPdir ]; then
     exit 1
 fi
 unset SP
+mkdir -p $SPdir
 python utils/checkfile.py -d $SPdir $dir || exit 1
 
 if [ $stage -le 0 ] && [ $stop_stage -ge 0 ]; then
@@ -87,6 +88,7 @@ if [ $stage -le 0 ] && [ $stop_stage -ge 0 ]; then
 
 fi
 
+textdir=$dir/text
 if [ $stage -le 1 ] && [ $stop_stage -ge 1 ]; then
     echo -e "\nStage 1: Text processing"
 
@@ -94,9 +96,8 @@ if [ $stage -le 1 ] && [ $stop_stage -ge 1 ]; then
         python utils/checkfile.py -f $set || exit 1
     done
 
-    mkdir -p $dir/text
+    mkdir -p $textdir
 
-    textdir=$dir/text
     for prefix in train dev test; do
         dataset=$(eval echo '$'${prefix}set)
         for set in $dataset; do
@@ -112,7 +113,6 @@ fi
 if [ $stage -le 2 ] && [ $stop_stage -ge 2 ]; then
     echo -e "\nStage 2: Data pickling"
 
-    textdir=$dir/text
     python utils/checkfile.py -d $textdir -f $textdir/train.id $textdir/dev.id || exit 1
 
     mkdir -p $dir/pkl
@@ -123,10 +123,10 @@ if [ $stage -le 2 ] && [ $stop_stage -ge 2 ]; then
 
 fi
 
+textdir=$dir/pkl
 if [ $stage -le 3 ] && [ $stop_stage -ge 3 ]; then
     echo -e "\nStage 3: NN training"
 
-    textdir=$dir/pkl
     # parse the number of classes in configuration file
     python3 utils/parseunits.py $SPdir/spm.vocab $dir/config.json || exit 1
 
@@ -135,10 +135,9 @@ if [ $stage -le 3 ] && [ $stop_stage -ge 3 ]; then
         --dir=$dir \
         --trset=$textdir/tr.pkl \
         --devset=$textdir/dev.pkl \
-        --batch_size=512 \
+        --batch_size=128 \
         --grad-norm=5.0 \
         --databalance \
-        --checkall \
         --amp ||
         exit 1
 
@@ -151,6 +150,7 @@ if [ $stage -le 4 ] && [ $stop_stage -ge 4 ]; then
     python3 -m cat.lm \
         --world-size 1 --rank 0 -j 1 \
         --dir=$dir \
+        --resume=$dir/checks/bestckpt.pt \
         --eval=$textdir/test.pkl ||
         exit 1
 fi
