@@ -39,9 +39,8 @@ def main(args):
         assert os.path.isfile(
             args.lm_check), f"File not found: {args.lm_check}"
     assert os.path.isfile(args.nbest), f"File not found: {args.nbest}"
-    o_path = os.path.dirname(args.output)
-    assert os.path.isdir(o_path), f"Directory not found: {o_path}"
-    setattr(args, 'o_path', o_path)
+    cachedir = '/tmp'
+    assert os.path.isdir(cachedir), f"Cache directory not found: {cachedir}"
 
     if not torch.cuda.is_available() or args.cpu:
         print("> Using CPU")
@@ -58,6 +57,7 @@ def main(args):
 
     randomstr = str(uuid.uuid4())
     fmt = randomstr+r".{}.tmp"
+    fmt = os.path.join(cachedir, fmt)
     try:
         t_beg = time.time()
         if args.cpu:
@@ -122,7 +122,7 @@ def main_worker(gpu: int, args: argparse.Namespace, fmt: str = "rescore.{}.tmp",
 
     dataloader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1,
                             sampler=data_sampler, collate_fn=NbestListCollate(tokenizer, isGPT=args.gpt2))
-    writer = os.path.join(args.o_path, fmt.format(gpu))
+    writer = fmt.format(gpu)
     # rescoring
     with autocast(enabled=(True if device != 'cpu' else False)), open(writer, 'w') as fo:
         for i, batch in enumerate(dataloader):
