@@ -38,7 +38,8 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
 
     if args.eval is not None:
         if ngpus_per_node > 1:
-            utils.distprint("worlsize > 1 might lead to incorrect ppl calculation.", args.gpu)
+            utils.distprint(
+                "worlsize > 1 might lead to incorrect ppl calculation.", args.gpu)
         args.trset = args.eval
         args.devset = args.eval
         args.batch_size = dist.get_world_size()

@@ -25,7 +25,7 @@ opts=$(python utils/parseopt.py '{
         "--lamb":{
             "type":"float",
             "default": 0.1,
-            "help": "External language model weight. Default: 0.1 (disable)"
+            "help": "External language model weight. Default: 0.1"
         },
         "--cpu":{
             "action":"store_true",
@@ -77,4 +77,5 @@ if [ -f ./rescore.sorted.out.tmp ]; then
     else
         python utils/wer.py --stripid $gt_text ./rescore.sorted.out.tmp || exit 1
     fi
+    rm ./rescore.sorted.out.tmp
 fi

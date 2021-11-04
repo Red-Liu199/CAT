@@ -274,8 +274,10 @@ class NbestListDataset(AbsDataset):
 
 
 class NbestListCollate():
-    def __init__(self, tokenizer, isGPT: bool = False) -> None:
+    def __init__(self, tokenizer, isGPT: bool = False, bos_id:int=0) -> None:
         self._tokenizer = tokenizer
+        assert isinstance(bos_id, int) and bos_id >= 0, f"ValueError: bos_id={bos_id}"
+        self.bos_id = bos_id
         if isGPT:
             self.isgpt = True
         else:
@@ -311,7 +313,7 @@ class NbestListCollate():
             tokens = self._tokenizer(texts, return_tensors='pt', padding=True)
         else:
             tokens = {'input_ids': None, 'attention_mask': None}
-            ids = [self._tokenizer.encode(seqs) for seqs in texts]
+            ids = [[self.bos_id] + self._tokenizer.encode(seqs) for seqs in texts]
             tokens['input_ids'] = utils.pad_list(
                 [torch.LongTensor(i) for i in ids])
             lens = torch.LongTensor([len(x) for x in ids])

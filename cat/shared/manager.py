@@ -296,6 +296,7 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
 
         scaler.scale(loss).backward()
 
+        dist.all_reduce(normalized_loss)
         detach_loss += normalized_loss.float()
         n_batch += t_batch_size
 
