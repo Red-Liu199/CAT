@@ -20,8 +20,8 @@ opts=$(python utils/parseopt.py '{
         },
         "--check":{
             "type": "str",
-            "default": "bestckpt.pt",
-            "help": "Name of checkpoint. Default: bestckpt.pt"
+            "default": "avg_best_10.pt",
+            "help": "Name of checkpoint. Default: avg_best_10.pt"
         },
         "--text_dir":{
             "type": "str",

@@ -78,7 +78,7 @@ def main(args):
         mp.spawn(main_worker, nprocs=world_size, args=(args,))
 
     t_end = time.time()
-    print("Time of searching: {:.2f}s".format(t_end-t_beg))
+    print("\nTime of searching: {:.2f}s".format(t_end-t_beg))
 
     nbest_pattern = re.compile(r'[.]nbest$')
     with open(os.path.join(args.output_dir, 'nbest.pkl'), 'wb') as fo:
@@ -154,7 +154,7 @@ def decode(args, encoder, beamsearcher, testloader, device, local_writer):
     L = sum([1 for _ in testloader])
     nbest = {}
     cnt_frame = 0
-    t_beg = time.time()
+    # t_beg = time.time()
     with autocast(enabled=(True if device != 'cpu' else False)), open(local_writer, 'w') as fi:
         for i, batch in enumerate(testloader):
             if args.save_logit:
@@ -183,9 +183,9 @@ def decode(args, encoder, beamsearcher, testloader, device, local_writer):
             print(
                 "\r|{:<50}|[{:>5}/{:<5}]".format(int((i+1)/L*50)*'#', i+1, L), end='')
 
-    t_total = time.time()-t_beg
-    print("\r|{0}|[{1:>5}/{1:<5}] {2:5.1f}ms/f".format(50 *
-          '#', L, 1000*t_total/cnt_frame))
+    # t_total = time.time()-t_beg
+    # print("\r|{0}|[{1:>5}/{1:<5}] {2:5.1f}ms/f".format(50 *
+    #       '#', L, 1000*t_total/cnt_frame))
 
     with open(f"{local_writer}.nbest", 'wb') as fi:
         pickle.dump(nbest, fi)
@@ -291,7 +291,7 @@ def worker_compute_enc_out(gpu: int, world_size: int, suffix: str, usegpu: bool,
             output.append((key[0], encoder_o.cpu()))
             print(
                 "\r|{:<50}|[{:>5}/{:<5}]".format(int((i+1)/L*50)*'#', i+1, L), end='')
-    print("\r|{0}|[{1:>5}/{1:<5}]".format(50*'#', L))
+    # print("\r|{0}|[{1:>5}/{1:<5}]".format(50*'#', L))
     with open(f'{suffix}.{gpu}', 'wb') as fo:
         pickle.dump(output, fo)
 

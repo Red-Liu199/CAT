@@ -322,22 +322,23 @@ class TransducerBeamSearcher(torch.nn.Module):
                             if self.lm_weight > 0:
                                 topk_hyp.cache["lm"] = hidden_lm
 
-                                topk_hyp.score += (
-                                    self.lm_weight
-                                    * log_probs_lm[0, 0, tok])
+                                topk_hyp.score += self.lm_weight * \
+                                    log_probs_lm.view(-1)[tok]
 
                             process_hyps.append(topk_hyp)
 
             del prefix_cache
             # Add norm score
+            for b in beam_hyps:
+                b.score /= len(b.pred)
+
             nbest_hyps = sorted(
                 beam_hyps,
-                key=lambda x: x.score/len(x.pred),
+                key=lambda x: x.score,
                 reverse=True,
             )[: self.nbest]
             nbest_batch.append([hyp.pred[1:] for hyp in nbest_hyps])
-            nbest_batch_score.append([hyp.score/len(hyp.pred)
-                                     for hyp in nbest_hyps])
+            nbest_batch_score.append([hyp.score for hyp in nbest_hyps])
 
         return (nbest_batch, nbest_batch_score)
 
