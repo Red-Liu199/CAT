@@ -11,6 +11,7 @@ import numpy as np
 from collections import OrderedDict
 from typing import Literal
 
+import math
 import torch
 import torch.nn as nn
 
@@ -216,13 +217,14 @@ class ConformerNet(nn.Module):
 
         if conv == 'vgg2l':
             self.conv_subsampling = c_layers.VGG2LSubsampling(in_channel)
-            conv_dim = 128 * (idim//in_channel//4)
+            ch_sub = math.ceil(math.ceil((idim//in_channel)/2)/2)
+            conv_dim = 128 * ch_sub
         elif conv == 'conv2d':
             if conv_multiplier is None:
                 conv_multiplier = hdim
             self.conv_subsampling = c_layers.Conv2dSubdampling(
                 conv_multiplier, norm=subsample_norm, stacksup=delta_feats)
-            conv_dim = conv_multiplier * (idim//in_channel//4)
+            conv_dim = conv_multiplier * (((idim//in_channel)//2)//2)
         else:
             raise RuntimeError(f"Unknown type of convolutional layer: {conv}")
 

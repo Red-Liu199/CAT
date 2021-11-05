@@ -283,19 +283,17 @@ class TransducerBeamSearcher(torch.nn.Module):
                     log_probs = self._joint_step(tn_i_t, pn_out)
 
                     # Sort outputs at time
-                    logp_targets, positions = torch.topk(
-                        log_probs.view(-1), k=self.beam_size, dim=-1
-                    )
+                    logp_targets, tokens = torch.topk(
+                        log_probs.view(-1), k=self.beam_size, dim=-1)
 
                     if self.is_latency_control:
                         best_logp = (
                             logp_targets[0]
-                            if positions[0] != blank
-                            else logp_targets[1]
-                        )
+                            if tokens[0] != blank
+                            else logp_targets[1])
 
                     # Extend hyp by selection
-                    for log_p, tok in zip(logp_targets, positions):
+                    for log_p, tok in zip(logp_targets, tokens):
                         topk_hyp = a_best_hyp.clone()  # type: Hypothesis
                         topk_hyp.score += log_p
 

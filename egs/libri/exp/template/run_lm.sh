@@ -135,10 +135,10 @@ if [ $stage -le 2 ] && [ $stop_stage -ge 2 ]; then
 
 fi
 
+textdir=$dir/pkl
 if [ $stage -le 3 ] && [ $stop_stage -ge 3 ]; then
     echo -e "\nStage 3: NN training"
 
-    textdir=$dir/pkl
     # parse the number of classes in configuration file
     python3 utils/parseunits.py $SPdir/spm.vocab $dir/config.json || exit 1
 
@@ -155,4 +155,14 @@ if [ $stage -le 3 ] && [ $stop_stage -ge 3 ]; then
         exit 1
 
     echo -e "\ncommit: \`$(git log -n 1 --pretty=format:"%H")\`" >>$dir/readme.md
+fi
+
+if [ $stage -le 4 ] && [ $stop_stage -ge 4 ]; then
+    echo -e "\nStage 4: Evaluate the test set"
+    python3 -m cat.lm \
+        --world-size 1 --rank 0 -j 1 \
+        --dir=$dir \
+        --resume=$dir/checks/bestckpt.pt \
+        --eval=$textdir/test.pkl ||
+        exit 1
 fi
