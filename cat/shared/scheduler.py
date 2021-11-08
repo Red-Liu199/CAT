@@ -186,11 +186,11 @@ class SchedulerFixedStop(Scheduler):
 
     def impl_step(self, metric):
         state = 0
-        if not (self._reverse_ ^ (metric < self.best_metric)):
+        if self.epoch_cur >= self.epoch_max:
+            state = 2
+        elif not (self._reverse_ ^ (metric < self.best_metric)):
             self.best_metric = metric
             state = 1
-        elif self.epoch_cur >= self.epoch_max:
-            state = 2
 
         self.custom_update()
 

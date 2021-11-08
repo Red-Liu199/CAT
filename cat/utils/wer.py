@@ -49,7 +49,7 @@ def oracleWER(l_gt: List[Tuple[str, str]], l_hy: List[Tuple[str, List[str]]]) ->
     _sub, _del, _ins, _hit = 0, 0, 0, 0
     for key, g_s in l_gt:
         candidates = l_hy[key]
-        best_wer = 100.0
+        best_wer = float('inf')
         best_measure = {}
 
         for can_seq in candidates:
@@ -74,17 +74,7 @@ def run_oracle_wer_wrapper(args):
     return oracleWER(*args)
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("gt", type=str, help="Ground truth sequences.")
-    parser.add_argument("hy", type=str, help="Hypothesis of sequences.")
-    parser.add_argument("--stripid", action="store_true", default=False,
-                        help="Tell whether the sequence start with a id or not. When --oracle, this will be disable. Default: False")
-    parser.add_argument("--cer", action="store_true", default=False,
-                        help="Compute CER. Default: False")
-    parser.add_argument("--oracle", action="store_true", default=False,
-                        help="Compute Oracle WER/CER. This requires the `hy` to be N-best list instead of text. Default: False")
-    args = parser.parse_args()
+def main(args: argparse.Namespace):
 
     ground_truth = args.gt  # type:str
     hypothesis = args.hy  # type:str
@@ -117,9 +107,6 @@ if __name__ == "__main__":
 
     # rm the '\n' and the last space
     processor.append(lambda s: s.strip('\n '))
-    if args.stripid:
-        # rm id in the first place
-        processor.append(lambda s: ' '.join(s.split()[1:]))
 
     if args.cer:
         # rm space then split by char
@@ -140,6 +127,21 @@ if __name__ == "__main__":
 
         l_hy = sorted(l_hy, key=lambda item: item[0])
         l_gt = sorted(l_gt, key=lambda item: item[0])
+    elif args.stripid:
+        for i, s in enumerate(l_gt):
+            sl = s.split()
+            key, g_s = sl[0], ' '.join(sl[1:])
+            l_gt[i] = (key, processor(g_s))
+
+        for i, s in enumerate(l_hy):
+            sl = s.split()
+            key, g_s = sl[0], ' '.join(sl[1:])
+            l_hy[i] = (key, processor(g_s))
+
+        l_hy = sorted(l_hy, key=lambda item: item[0])
+        l_gt = sorted(l_gt, key=lambda item: item[0])
+        l_hy = [seq for _, seq in l_hy]
+        l_gt = [seq for _, seq in l_gt]
     else:
         l_hy = processor(l_hy)
         l_gt = processor(l_gt)
@@ -177,3 +179,23 @@ if __name__ == "__main__":
     pretty_str = f"%{prefix} {_wer*100:.2f} [{_err} / {_sum}, {_ins} ins, {_del} del, {_sub} sub ]"
 
     sys.stdout.write(pretty_str+'\n')
+
+
+def WERParser():
+    parser = argparse.ArgumentParser('Compute WER/CER')
+    parser.add_argument("gt", type=str, help="Ground truth sequences.")
+    parser.add_argument("hy", type=str, help="Hypothesis of sequences.")
+    parser.add_argument("--stripid", action="store_true", default=False,
+                        help="Tell whether the sequence start with a id or not. When --oracle, this will be disable. Default: False")
+    parser.add_argument("--cer", action="store_true", default=False,
+                        help="Compute CER. Default: False")
+    parser.add_argument("--oracle", action="store_true", default=False,
+                        help="Compute Oracle WER/CER. This requires the `hy` to be N-best list instead of text. Default: False")
+    return parser
+
+
+if __name__ == "__main__":
+    parser = WERParser()
+    args = parser.parse_args()
+
+    main(args)

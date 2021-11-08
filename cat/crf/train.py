@@ -32,12 +32,7 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         backend=args.dist_backend, init_method=args.dist_url,
         world_size=args.world_size, rank=args.rank)
 
-    if args.h5py:
-        Dataset = SpeechDataset
-    else:
-        Dataset = SpeechDatasetPickle
-
-    manager = Manager(Dataset, sortedPadCollate(), args, build_model)
+    manager = Manager(SpeechDatasetPickle, sortedPadCollate(), args, build_model)
 
     # init ctc-crf, args.iscrf is set in build_model
     if args.iscrf:
@@ -115,8 +110,6 @@ def build_model(args, configuration, train=True) -> nn.Module:
 
 def main():
     parser = utils.BasicDDPParser()
-    parser.add_argument("--h5py", action="store_true",
-                        help="Load data with H5py, defaultly use pickle (recommended).")
     parser.add_argument("--den-lm", type=str, default=None,
                         help="Location of denominator LM.")
 

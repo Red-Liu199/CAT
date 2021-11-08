@@ -1,0 +1,600 @@
+"""Ported from run_rnnt.sh, rewrote with python
+"""
+
+
+import os
+import json
+import pickle
+import argparse
+from typing import Union, Literal, List, Dict, Optional
+
+
+def resolve_sp_path(config: dict, prefix: Optional[str] = None, allow_making: bool = False):
+    if 'model_prefix' in config:
+        spdir = os.path.dirname(config['model_prefix'])
+        if os.path.isdir(spdir):
+            return config, (config['model_prefix']+'.model', config['model_prefix']+'.vocab')
+
+    if prefix is not None:
+        prefix += '_'
+
+    assert 'model_type' in config, "resolve_sp_path: missing 'model_type' in configuration"
+    if config['model_type'] == 'word' or config['model_type'] == 'char':
+        f_out = prefix + config['model_type']
+    elif config['model_type'] == 'unigram':
+        assert 'vocab_size' in config, "resolve_sp_path: missing 'vocab_size' in configuration"
+        f_out = prefix + config['model_type'] + '_' + str(config['vocab_size'])
+    else:
+        raise NotImplementedError(
+            f"Unknown tokenization mode: {config['model_type']}, expected one of ['word', 'char', 'unigram']")
+
+    config['model_prefix'] = os.path.join('sentencepiece', f_out+'/spm')
+    if allow_making:
+        os.makedirs(os.path.dirname(config['model_prefix']), exist_ok=True)
+    return config, (config['model_prefix']+'.model', config['model_prefix']+'.vocab')
+
+
+def sentencepiece_train(intext: str, **kwargs):
+    """Train the sentencepiece tokenizer.
+
+    Args:
+        intext   (str) : input text file for training. Each line represent a sentence.
+        spdir    (str) : output directory to store sentencepiece model and vocab.
+        **kwargs (dict): any keyword arguments would be parsed into sentencepiece training
+    """
+    try:
+        import sentencepiece as spm
+    except ModuleNotFoundError:
+        print("Tokenization requires module sentencepiece. Install with\npip install sentencepiece")
+    pass
+
+    checkExist('f', intext)
+
+    DEFAULT_SETTINGS = {
+        "input": intext,
+        "num_threads": os.cpu_count(),
+        "bos_id": 0,
+        "eos_id": -1,
+        "unk_id": 1,
+        "character_coverage": 1.0,
+        "unk_surface": "<unk>"
+    }
+    DEFAULT_SETTINGS.update(kwargs)
+    # available options https://github.com/google/sentencepiece/blob/master/doc/options.md
+    spm.SentencePieceTrainer.Train(**DEFAULT_SETTINGS)
+
+
+def parsingData(f_scp: str, f_label: str, f_out: str, filter: Optional[str] = None, spm=None):
+    """Parsing audio feature and text label into pickle file.
+
+    Args:
+        f_scp   (str): Kaldi-like-style .scp file.
+        f_label (str): Pure text file include utterance id and sentence labels. Split by space.
+        f_out   (str): Ouput pickle file location.
+        filter (str, optional): identifier for filtering out seqs with unqualified length. 
+            such as '100:2000' means remove those whose length is shorter than 100 or longer than 2000. Default: None
+        spm (sentencepiece.SentencePieceProcessor optional): If `spm` is None, lines in `f_label` MUST be token indices, 
+            otherwise it should be text.
+    """
+    import kaldiio
+    import numpy as np
+    from tqdm import tqdm
+
+    checkExist('f', [f_scp, f_label])
+    checkExist('d', os.path.dirname(f_out))
+
+    pkl_data = []
+    cnt_rm = 0
+    l_min = 1
+    l_max = float('inf')
+    if filter is not None:
+        assert ':' in filter, f"parsingData: invalid filter format {filter}"
+        l_bound, u_bound = (i for i in filter.split(':'))
+        if l_bound != '':
+            l_min = int(l_bound)
+        if u_bound != '':
+            l_max = int(u_bound)
+
+    with open(f_label, 'r') as fi_label:
+        labels = fi_label.readlines()
+    labels = [l.split() for l in labels]
+    if spm is None:
+        labels = {l[0]: np.asarray([int(i) for i in l[1:]]) for l in labels}
+    else:
+        labels = {l[0]: np.asarray(spm.encode(' '.join(l[1:])))
+                  for l in labels}
+
+    total_lines = sum(1 for _ in open(f_scp, 'r'))
+    assert len(
+        labels) == total_lines, f"parsingData: f_scp and f_label should match on the # lines, instead {total_lines} {len(labels)}"
+
+    f_opened = {}
+    with open(f_scp, 'r') as fi_scp:
+        for line in tqdm(fi_scp, total=total_lines):
+            key, loc_ark = line.split()
+            tag = labels[key]
+            feature = kaldiio.load_mat(
+                loc_ark, fd_dict=f_opened)   # type:np.ndarray
+
+            if feature.shape[0] < l_min or feature.shape[0] > l_max:
+                cnt_rm += 1
+                continue
+
+            pkl_data.append([key, loc_ark, tag])
+
+    for f in f_opened.values():
+        f.close()
+
+    with open(f_out, 'wb') as fo:
+        pickle.dump(pkl_data, fo)
+
+    print(f"parsingData: remove {cnt_rm} unqualified sequences.")
+
+
+def combinePickle(f_in: Union[List[str], str], f_out: str, rm_src: bool = False):
+    """Combine several pickle files into one.
+
+    Args:
+        f_in   (list, str)     : pickle file(s) to be merged.
+        f_out  (str)           : destination file.
+        rm_src (bool, optional): specify whether rm original files.
+    """
+    import shutil
+
+    if isinstance(f_in, str):
+        f_in = [f_in]
+
+    checkExist('f', f_in)
+    checkExist('d', os.path.dirname(f_out))
+
+    if len(f_in) == 1:
+        if rm_src:
+            shutil.move(f_in[0], f_out)
+        else:
+            shutil.copy(f_in[0], f_out)
+        return
+
+    datasets = []
+    for f_pkl in f_in:
+        print("combinePickle: merging {}".format(f_pkl))
+        with open(f_pkl, 'rb') as fi:
+            datasets += pickle.load(fi)
+
+    print("combinePickle: export to {}".format(f_out))
+    with open(f_out, 'wb') as fo:
+        pickle.dump(datasets, fo)
+
+
+def checkExist(f_type: Literal['d', 'f'], f_list: Union[str, List[str]]):
+    """Check whether directory/file exist and raise error if it doesn't.
+    """
+    assert f_type in [
+        'd', 'f'], f"checkExist: Unknown f_type: {f_type}, expected one of ['d', 'f']"
+    if isinstance(f_list, str):
+        f_list = [f_list]
+    assert len(
+        f_list) > 0, f"checkExist: Expect the file/dir list to have at least one element, but found empty."
+
+    hints = {'d': 'Directory', 'f': 'File'}
+    not_founds = []
+
+    if f_type == 'd':
+        check = os.path.isdir
+    elif f_type == 'f':
+        check = os.path.isfile
+    else:
+        raise RuntimeError(
+            f"checkExist: Unknown f_type: {f_type}, expected one of ['d', 'f']")
+
+    for item in f_list:
+        if not check(item):
+            not_founds.append(item)
+
+    if len(not_founds) > 0:
+        o_str = f"{hints[f_type]} checking failed"
+        for item in not_founds:
+            o_str += f"\n\t{item}"
+        raise FileNotFoundError(o_str)
+    else:
+        return
+
+
+def expandPath(f_type: Literal['t', 's'], s_list: Union[str, List[str]], cwd: Optional[str] = None) -> List[str]:
+    """Expand the dataset to path of CAT data location.
+
+    Args:
+        f_type (str)          : 't': text, 's': scp
+        s_list (list, str)    : list of dataset(s), can be string
+        cwd    (str, optional): location of current working directory
+    """
+    if cwd is None:
+        cwd = os.getcwd()
+
+    cat_data = f'../../tools/CAT/egs/{os.path.basename(cwd)}/data'
+    checkExist('d', cat_data)
+    if f_type == 't':
+        fmt = os.path.join(cat_data, '{}/text')
+    elif f_type == 's':
+        fmt = os.path.join(cat_data, 'all_ark/{}.scp')
+    else:
+        raise RuntimeError(f"expandPath: Unknown expand type '{f_type}'")
+
+    if isinstance(s_list, str):
+        return [fmt.format(s_list)]
+    else:
+        return [fmt.format(s) for s in s_list]
+
+
+def recursive_rpl(src_dict: dict, target_key: str, rpl_val):
+    if not isinstance(src_dict, dict):
+        return
+
+    if target_key in src_dict:
+        src_dict[target_key] = rpl_val
+    else:
+        for k, v in src_dict.items():
+            recursive_rpl(v, target_key, rpl_val)
+
+
+def updateNamespaceFromDict(src_dict: dict, parser: argparse.ArgumentParser, positionals: List[str] = []):
+    args = argparse.Namespace()
+    processed_dict = {}
+    for k, v in src_dict.items():
+        processed_dict[k.replace('-', '_')] = v
+    args.__dict__.update(processed_dict)
+    to_args = parser.parse_args(args=positionals, namespace=args)
+    return to_args
+
+
+def generate_visible_gpus(N: int) -> str:
+    assert N >= 0
+    return ','.join([str(i) for i in range(N)])
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("expdir", type=str, help="Experiment directory.")
+    parser.add_argument("--start_stage", dest='stage_beg',
+                        type=int, default=1, help="Start stage of processing. Default: 1")
+    parser.add_argument("--stop_stage", dest='stage_end',
+                        type=int, default=-1, help="Stop stage of processing. Default: last stage.")
+    parser.add_argument("--ngpu", type=int, default=-1,
+                        help="Number of GPUs to be used.")
+
+    args = parser.parse_args()
+    s_beg = args.stage_beg
+    s_end = args.stage_end
+    if s_end == -1:
+        s_end = float('inf')
+
+    assert s_end >= 1, f"Invalid stop stage: {s_end}"
+    assert s_beg >= 1 and s_beg <= s_end, f"Invalid start stage: {s_beg}"
+
+    cwd = os.getcwd()
+    checkExist('d', args.expdir)
+    f_hyper_settings = os.path.join(args.expdir, 'hyper-p.json')
+    checkExist('f', f_hyper_settings)
+    with open(f_hyper_settings, 'r') as fi:
+        hyper_settings = json.load(fi)
+
+    ############ Stage 1: Tokenizer training ############
+    if s_beg <= 1 and s_end >= 1:
+        fmt = "Stage 1: Tokenizer training: {}"
+        import uuid
+        import re
+
+        assert 'data' in hyper_settings, fmt.format(
+            f"missing 'data' in hyper-setting file {f_hyper_settings}")
+        assert 'sp' in hyper_settings, fmt.format(
+            f"missing 'sp' in hyper-setting file {f_hyper_settings}")
+        f_corpus_tmp = os.path.join('/tmp', str(uuid.uuid4()))
+        assert 'train' in hyper_settings['data'], fmt.format(
+            "missing 'train' in hyper-p['data']")
+
+        trset = hyper_settings['data']['train']
+        tr_texts = expandPath('t', trset, cwd)
+        checkExist('f', tr_texts)
+        with open(f_corpus_tmp, 'w') as fo:
+            for _text in tr_texts:
+                with open(_text, 'r') as fi:
+                    for line in fi:
+                        # skip empty line
+                        if re.match(r'^\s*$', line):
+                            continue
+                        # rm the seq id in first column
+                        line = line.split()
+                        fo.write(' '.join(line[1:]) + '\n')
+
+        sp_settings, _ = resolve_sp_path(
+            hyper_settings['sp'], os.path.basename(cwd), allow_making=True)
+        sentencepiece_train(f_corpus_tmp, **sp_settings)
+
+        hyper_settings['sp'] = sp_settings
+        with open(f_hyper_settings, 'w') as fo:
+            json.dump(hyper_settings, fo, indent=4)
+
+        os.remove(f_corpus_tmp)
+
+    ############ Stage 2: Pickle data ############
+    if s_beg <= 2 and s_end >= 2:
+        import uuid
+        import sentencepiece as spm
+        fmt = "Stage 2: Pickle data: {}"
+
+        assert 'data' in hyper_settings, fmt.format(
+            f"missing 'data' in hyper-setting file {f_hyper_settings}")
+        assert 'sp' in hyper_settings, fmt.format(
+            f"missing 'sp' in hyper-setting file {f_hyper_settings}")
+
+        _, (spmodel, _) = resolve_sp_path(hyper_settings['sp'])
+        checkExist('f', spmodel)
+        spmodel = spm.SentencePieceProcessor(model_file=spmodel)
+
+        data_settings = hyper_settings['data']
+        if 'filter' not in data_settings:
+            data_settings['filter'] = None
+
+        d_pkl = os.path.join(args.expdir, 'pkl')
+        os.makedirs(d_pkl, exist_ok=True)
+        for dataset in ['train', 'dev', 'test']:
+            assert dataset in data_settings, fmt.format(
+                f"missing '{dataset}' in hyper-p['data']")
+
+            f_texts = expandPath('t', data_settings[dataset], cwd)
+            f_scps = expandPath('s', data_settings[dataset], cwd)
+            if dataset == 'train':
+                filter = data_settings['filter']
+            else:
+                filter = None
+            for f_s, f_t in zip(f_scps, f_texts):
+                f_pkl_tmp = os.path.join('/tmp', str(uuid.uuid4()))
+                parsingData(f_scp=f_s, f_label=f_t, f_out=f_pkl_tmp,
+                            filter=filter, spm=spmodel)
+            combinePickle(f_pkl_tmp, os.path.join(
+                d_pkl, dataset+'.pkl'), rm_src=True)
+
+    ############ Stage 3: NN training ############
+    if s_beg <= 3 and s_end >= 3:
+        fmt = "Stage 3: NN training: {}"
+        try:
+            import cat
+        except ModuleNotFoundError:
+            import sys
+            sys.path.append(cwd)
+        from cat.rnnt.train import RNNTParser
+        from cat.rnnt.train import main as RNNTMain
+        import torch
+        import subprocess
+
+        assert 'sp' in hyper_settings, fmt.format(
+            f"missing 'sp' in hyper-setting file {f_hyper_settings}")
+        assert 'train' in hyper_settings, fmt.format(
+            f"missing 'train' in hyper-setting file {f_hyper_settings}")
+        _, (_, spvocab) = resolve_sp_path(hyper_settings['sp'])
+        checkExist('f', spvocab)
+        nnconfig = os.path.join(args.expdir, 'config.json')
+        checkExist('f', nnconfig)
+
+        if args.ngpu > -1:
+            os.environ['CUDA_VISIBLE_DEVICES'] = \
+                generate_visible_gpus(args.ngpu)
+
+        with open(nnconfig, 'r') as fi:
+            nnconfig = json.load(fi)
+        # setup the num_classes to vocab_size
+        with open(spvocab, 'r') as fi:
+            n_vocab = sum(1 for _ in fi)
+        # recursively search for 'num_classes'
+        recursive_rpl(nnconfig, 'num_classes', n_vocab)
+
+        if subprocess.run('command -v git', shell=True, capture_output=True).returncode != 0:
+            print(fmt.format("git command not found. Suppress saving git commit."))
+        else:
+            process = subprocess.run(
+                "git log -n 1 --pretty=format:\"%H\"", shell=True, check=True, stdout=subprocess.PIPE)
+            hyper_settings['commit'] = process.stdout.decode('utf-8')
+
+            with open(f_hyper_settings, 'w') as fo:
+                json.dump(hyper_settings, fo, indent=4)
+
+        training_settings = hyper_settings['train']
+        if 'trset' not in training_settings:
+            train_data = os.path.join(args.expdir, 'pkl/train.pkl')
+            checkExist('f', train_data)
+            training_settings['trset'] = train_data
+            print(fmt.format(f"set 'trset' to {train_data}"))
+        if 'devset' not in training_settings:
+            dev_data = os.path.join(args.expdir, 'pkl/dev.pkl')
+            checkExist('f', dev_data)
+            training_settings['devset'] = dev_data
+            print(fmt.format(f"set 'devset' to {dev_data}"))
+        if 'world-size' not in training_settings:
+            training_settings['world-size'] = 1
+        if 'rank' not in training_settings:
+            training_settings['rank'] = 0
+        if 'dir' not in training_settings:
+            training_settings['dir'] = args.expdir
+            print(fmt.format(f"set 'dir' to {args.expdir}"))
+
+        nnargs = updateNamespaceFromDict(training_settings, RNNTParser())
+        RNNTMain(nnargs)
+
+    ############ Stage 4: Decoding ############
+    if s_beg <= 4 and s_end >= 4:
+        fmt = "Stage 4: Decoding: {}"
+        import re
+        import torch
+        try:
+            import cat
+        except ModuleNotFoundError:
+            import sys
+            sys.path.append(cwd)
+        from cat.rnnt.decode import DecoderParser
+        from cat.rnnt.decode import main as DecoderMain
+
+        assert 'inference' in hyper_settings, fmt.format(
+            f"missing 'inference' in hyper-setting file {f_hyper_settings}")
+        assert 'data' in hyper_settings, fmt.format(
+            f"missing 'data' in hyper-setting file {f_hyper_settings}")
+        assert 'test' in hyper_settings['data'], fmt.format(
+            "missing 'test' in hyper-p['data']")
+
+        inference_settings = hyper_settings['inference']
+        checkdir = os.path.join(args.expdir, 'checks')
+        checkExist('d', checkdir)
+
+        # decode
+        assert 'decode' in inference_settings, fmt.format(
+            "missing 'decode' in hyper-p['inference']")
+        decode_settings = inference_settings['decode']
+
+        if 'resume' in decode_settings:
+            print(fmt.format(
+                "setting 'resume' in decoding would overwrite the model averaging settings."))
+            try:
+                checkExist('f', decode_settings['resume'])
+                checkpoint = decode_settings['resume']
+            except FileNotFoundError:
+                checkExist('f', os.path.join(
+                    checkdir, decode_settings['resume']))
+                checkpoint = os.path.join(checkdir, decode_settings['resume'])
+            # rm dirname and '.pt'
+            suffix_avgmodel = os.path.basename(checkpoint)[:-3]
+        else:
+            # model averaging
+            if 'avgmodel' not in inference_settings:
+                suffix_avgmodel = 'best-1'
+                checkpoint = os.path.join(checkdir, 'bestckpt.pt')
+            else:
+                assert 'avgmodel' in inference_settings, fmt.format(
+                    "missing 'avgmodel' in hyper-p['inference']")
+
+                avgmodel_settings = inference_settings['avgmodel']
+                assert 'mode' in avgmodel_settings, fmt.format(
+                    "missing 'mode' in hyper-p['inference']['avgmodel']")
+                assert 'num' in avgmodel_settings, fmt.format(
+                    "missing 'num' in hyper-p['inference']['avgmodel']")
+                avg_mode, avg_num = avgmodel_settings['mode'], avgmodel_settings['num']
+
+                from avgmodel import find_n_best, average_checkpoints
+                suffix_avgmodel = f"{avg_mode}-{avg_num}"
+                if avg_mode == 'best':
+                    f_check_list = find_n_best(checkdir, avg_num)
+                elif avg_mode == 'last':
+                    pattern = re.compile(r"checkpoint[.]\d{3}[.]pt")
+                    f_check_all = [os.path.join(checkdir, _f) for _f in os.listdir(
+                        checkdir) if pattern.search(_f) is not None]
+                    if len(f_check_all) < avg_num:
+                        raise RuntimeError(fmt.format(
+                            f"trying to do model averaging {avg_num} over {len(f_check_all)} checkpoint."))
+                    f_check_list = sorted(f_check_all, reverse=True)[:avg_num]
+                    del f_check_all
+                else:
+                    raise NotImplementedError(fmt.format(
+                        f"Unknown model averaging mode {avg_mode}"))
+                checkpoint = os.path.join(checkdir, suffix_avgmodel+'.pt')
+                params = average_checkpoints(f_check_list)
+                torch.save(params, checkpoint)
+
+        checkExist('f', checkpoint)
+        decode_settings['resume'] = checkpoint
+        print(fmt.format(
+            f"set 'resume' to {checkpoint}"))
+
+        if 'config' not in decode_settings:
+            decode_settings['config'] = os.path.join(
+                args.expdir, 'config.json')
+            print(fmt.format(f"set 'config' to {decode_settings['config']}"))
+            checkExist('f', decode_settings['config'])
+        if 'spmodel' not in decode_settings:
+            assert 'sp' in hyper_settings, fmt.format(
+                f"you should set at least one of 'sp' in hyper-p or 'spmodel' in hyper-p['inference']['decode']")
+            _, (spmodel, _) = resolve_sp_path(hyper_settings['sp'])
+            decode_settings['spmodel'] = spmodel
+            print(fmt.format(
+                f"set 'spmodel' to {decode_settings['spmodel']}"))
+        if 'nj' not in decode_settings:
+            decode_settings['nj'] = os.cpu_count()
+            print(fmt.format(
+                f"set 'nj' to {decode_settings['nj']}"))
+        if 'lm-weight' in decode_settings and decode_settings['lm-weight'] > 0.0:
+            assert 'lm' in inference_settings, fmt.format(
+                "'lm-weight' > 0 in hyper-p['inference']['decode'] should be used with 'lmdir' in hyper-p['inference']")
+            lmdir = inference_settings['lmdir']
+            checkExist('d', lmdir)
+            if 'ext-lm-config' not in decode_settings:
+                decode_settings['ext-lm-config'] = os.path.join(
+                    lmdir, 'config.json')
+                print(fmt.format(
+                    f"set 'ext-lm-config' to {decode_settings['ext-lm-config']}"))
+                checkExist('f', decode_settings['ext-lm-config'])
+            if 'ext-lm-check' not in decode_settings:
+                decode_settings['ext-lm-check'] = os.path.join(
+                    lmdir, 'checks/bestckpt.pt')
+                print(fmt.format(
+                    f"set 'ext-lm-check' to {decode_settings['ext-lm-check']}"))
+                checkExist('f', decode_settings['ext-lm-check'])
+        if 'output_prefix' not in decode_settings:
+            decodedir = os.path.join(args.expdir, 'decode')
+            os.makedirs(decodedir, exist_ok=True)
+            f_text = f"beam-{decode_settings['beam_size']}_algo-{decode_settings['algo']}_{suffix_avgmodel}"
+            decode_out_prefix = os.path.join(decodedir, f_text)
+            print(fmt.format(
+                f"set 'output_prefix' to {decode_out_prefix}"))
+        else:
+            decode_out_prefix = decode_settings['output_prefix']
+
+        testsets = hyper_settings['data']['test']
+        f_scps = expandPath('s', testsets, cwd)
+        checkExist('f', f_scps)
+
+        for _set, scp in zip(testsets, f_scps):
+            decode_settings['output_prefix'] = decode_out_prefix+f'_{_set}'
+            decode_settings['input_scp'] = scp
+            print(fmt.format(f"{scp} -> {decode_settings['output_prefix']}"))
+            decodeargs = updateNamespaceFromDict(
+                decode_settings, DecoderParser())
+            DecoderMain(decodeargs)
+
+        # compute wer/cer
+        from wer import WERParser
+        from wer import main as WERMain
+        assert 'er' in inference_settings, fmt.format(
+            "missing 'er' in hyper-p['inference']")
+        error_rate_settings = inference_settings['er']
+        assert 'mode' in error_rate_settings, fmt.format(
+            "missing 'mode' in hyper-p['inference']['er']")
+
+        f_texts = expandPath('t', testsets, cwd)
+        checkExist('f', f_texts)
+
+        if 'oracle' not in error_rate_settings:
+            error_rate_settings['oracle'] = True
+            print(fmt.format(f"set 'oracle' to True"))
+
+        wer_settings = {
+            'stripid': True,
+            'cer': True if error_rate_settings['mode'] == 'cer' else False,
+            'oracle': error_rate_settings['oracle']
+        }
+        for _set, _text in zip(testsets, f_texts):
+            wer_settings.update({
+                'gt': _text,
+                'hy': decode_out_prefix+f'_{_set}'
+            })
+
+            if wer_settings['oracle']:
+                wer_settings['oracle'] = False
+                # compute non-oracle WER/CER
+                print(_set, end='\t')
+                werargs = updateNamespaceFromDict(wer_settings, WERParser(), [
+                    wer_settings['gt'], wer_settings['hy']])
+                WERMain(werargs)
+                wer_settings['oracle'] = True
+                wer_settings['hy'] += '.nbest'
+
+            print(_set, end='\t')
+            werargs = updateNamespaceFromDict(wer_settings, WERParser(), [
+                                              wer_settings['gt'], wer_settings['hy']])
+            WERMain(werargs)

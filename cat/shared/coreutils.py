@@ -287,9 +287,12 @@ def group_by_lens(src_l: List[Any], linfo: List[int], N: int, _norm: Union[None,
         _avg = sum(_linfo)/_K
         lower_bound = _len_linfo
         cnt_interval = 0
+        cnt_piece = 0
+        max_piece = _len_linfo - _K + 1
         for i in range(_len_linfo-1, -1, -1):
             cnt_interval += _linfo[i]
-            if cnt_interval > _avg:
+            cnt_piece += 1
+            if cnt_interval > _avg or cnt_piece > max_piece:
                 return [lower_bound, _len_linfo]
             lower_bound -= 1
 
@@ -309,7 +312,6 @@ def group_by_lens(src_l: List[Any], linfo: List[int], N: int, _norm: Union[None,
 
     # greedy not optimal
     g_avg = sum(linfo) / N
-    cnt_parts = 0
     res = N
     indices_fwd = [0]
     indices_bwd = [len_src]
@@ -373,9 +375,15 @@ def setPath(args: argparse.Namespace):
 
     setattr(args, 'checksdir', checksdir)
     setattr(args, 'logsdir', logsdir)
-    if os.listdir(checksdir) != [] and not args.debug and args.resume is None:
-        raise FileExistsError(
-            f"{args.checksdir} is not empty! Refuse to run.")
+    if not args.debug and args.resume is None:
+        if os.listdir(checksdir) != []:
+            raise FileExistsError(
+                f"{args.checksdir} is not empty! Refuse to run.")
+        from .monitor import FILE_WRITER
+        logfile = os.path.join(args.logsdir, FILE_WRITER)
+        if os.path.isfile(logfile):
+            raise FileExistsError(
+                f"{logfile} exist! Refuse to run.")
 
 
 def load_checkpoint(model: Union[torch.nn.Module, torch.nn.parallel.DistributedDataParallel], path_ckpt: str) -> torch.nn.Module:

@@ -33,7 +33,7 @@ if torch.__version__ >= '1.8.0':
 def check_parser(args: argparse.Namespace, expected_attrs: List[str]):
     unseen = []
     for attr in expected_attrs:
-        if not hasattr(args, attr):
+        if attr not in args:
             unseen.append(attr)
 
     if len(unseen) > 0:
@@ -282,7 +282,7 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
             loss = model(logits, labels, input_lengths, label_lengths)/fold
 
         normalized_loss = loss.detach() * logits.size(0)
-        if hasattr(args, 'databalance') and args.databalance:
+        if 'databalance' in args and args.databalance:
             '''
             get current global size
             efficiently, we can set t_batch_size=args.batch_size, 

@@ -20,6 +20,7 @@ import re
 import os
 import json
 import time
+import uuid
 import pickle
 import argparse
 import sentencepiece as spm
@@ -50,44 +51,33 @@ def main(args):
         world_size = torch.cuda.device_count()
     args.world_size = world_size
 
-    if args.save_logit:
-        # generate encoder output first
-        prefix = os.path.basename(args.input_scp).split('.')[0]
-        binary_enc = os.path.join(
-            args.enc_out_dir, f"{prefix}.bin")
-        link_enc = os.path.join(
-            args.enc_out_dir, f"{prefix}.lnk")
-        if not os.path.isfile(binary_enc) or not os.path.isfile(link_enc):
-            print("> Encoder output file not found, generating...")
-            t_beg = time.time()
-            compute_encoder_output(args, enc_bin=binary_enc, enc_link=link_enc)
-            t_end = time.time()
-            print("Time of encoder computation: {:.2f}s".format(t_end-t_beg))
-        setattr(args, 'enc_bin', binary_enc)
-        setattr(args, 'enc_lnk', link_enc)
-
+    cachedir = '/tmp'
+    fmt = os.path.join(cachedir, str(uuid.uuid4())+r".{}.tmp")
     t_beg = time.time()
     if args.cpu:
-        model, ext_lm = gen_model(args, 'cpu')
+        model, ext_lm = build_model(args, 'cpu')
         model.share_memory()
         if ext_lm is not None:
             ext_lm.share_memory()
 
-        mp.spawn(main_worker, nprocs=world_size, args=(args, (model, ext_lm)))
+        mp.spawn(main_worker, nprocs=world_size,
+                 args=(args, fmt, (model, ext_lm)))
     else:
-        mp.spawn(main_worker, nprocs=world_size, args=(args,))
+        mp.spawn(main_worker, nprocs=world_size, args=(args, fmt))
 
     t_end = time.time()
     print("\nTime of searching: {:.2f}s".format(t_end-t_beg))
 
-    nbest_pattern = re.compile(r'[.]nbest$')
-    with open(os.path.join(args.output_dir, 'nbest.pkl'), 'wb') as fo:
-        all_nbest = {}
-        for nbest_f in os.listdir(args.output_dir):
-            if nbest_pattern.search(nbest_f) is None:
-                continue
+    with open(args.output_prefix, 'w') as fo:
+        for i in range(world_size):
+            with open(fmt.format(i), 'r') as fi:
+                fo.write(fi.read())
+            os.remove(fmt.format(i))
 
-            partial_bin = os.path.join(args.output_dir, nbest_f)
+    with open(args.output_prefix+'.nbest', 'wb') as fo:
+        all_nbest = {}
+        for i in range(world_size):
+            partial_bin = fmt.format(i) + '.nbest'
             with open(partial_bin, 'rb') as fi:
                 partial_nbest = pickle.load(fi)  # type: dict
 
@@ -96,7 +86,7 @@ def main(args):
         pickle.dump(all_nbest, fo)
 
 
-def main_worker(gpu: int, args: argparse.Namespace, models=None):
+def main_worker(gpu: int, args: argparse.Namespace, fmt: str, models=None):
 
     args.gpu = gpu
     # only support one node
@@ -118,7 +108,7 @@ def main_worker(gpu: int, args: argparse.Namespace, models=None):
             backend='nccl', init_method=args.dist_url,
             world_size=world_size, rank=args.rank)
 
-        model, ext_lm = gen_model(args, device)
+        model, ext_lm = build_model(args, device)
 
     testset = ScpDataset(args.input_scp)
     data_sampler = InferenceDistributedSampler(testset)
@@ -126,29 +116,20 @@ def main_worker(gpu: int, args: argparse.Namespace, models=None):
         testset, batch_size=1, shuffle=False,
         num_workers=1, sampler=data_sampler, collate_fn=TestPadCollate())
 
-    writer = os.path.join(args.output_dir, f'decode.{gpu}.tmp')
-    beamsearcher = TransducerBeamSearcher(
+    searcher = TransducerBeamSearcher(
         model.decoder, model.joint, blank_id=0, bos_id=model.bos_id, beam_size=args.beam_size,
         nbest=args.beam_size, algo=args.algo, prefix_merge=True,
         state_beam=2.3, expand_beam=2.3, temperature=1.0,
         lm_module=ext_lm, lm_weight=args.lm_weight)
 
-    decode(args, model.encoder, beamsearcher, testloader,
-           device=device, local_writer=writer)
+    decode(args, model.encoder, searcher, testloader,
+           device=device, local_writer=fmt.format(gpu))
 
     return None
 
 
 @torch.no_grad()
-def decode(args, encoder, beamsearcher, testloader, device, local_writer):
-    if args.save_logit:
-        f_enc_hid = open(args.enc_bin, 'rb')
-        with open(args.enc_lnk, 'rb') as fi:
-            f_enc_seeks = pickle.load(fi)
-
-    def _load_enc_mat(k: str):
-        f_enc_hid.seek(f_enc_seeks[k])
-        return (pickle.load(f_enc_hid)).to(device, non_blocking=True)
+def decode(args, encoder, searcher, testloader, device, local_writer):
 
     sp = spm.SentencePieceProcessor(model_file=args.spmodel)
     L = sum([1 for _ in testloader])
@@ -157,22 +138,16 @@ def decode(args, encoder, beamsearcher, testloader, device, local_writer):
     # t_beg = time.time()
     with autocast(enabled=(True if device != 'cpu' else False)), open(local_writer, 'w') as fi:
         for i, batch in enumerate(testloader):
-            if args.save_logit:
-                key = batch[0][0]
-                enc_o = _load_enc_mat(key)
-            else:
-                key, x, x_lens = batch
-                key = key[0]
-                x = x.to(device)
-                enc_o, _ = encoder(x, x_lens)
-
-            nbest_list, scores_nbest = beamsearcher(
+            key, x, x_lens = batch
+            key = key[0]
+            x = x.to(device)
+            enc_o, _ = encoder(x, x_lens)
+            nbest_list, scores_nbest = searcher(
                 enc_o)
-            cnt_frame += enc_o.size(1)
 
+            cnt_frame += enc_o.size(1)
             nbest[key] = [(score.item(), sp.decode(hypo))
                           for hypo, score in zip(nbest_list[0], scores_nbest[0])]
-
             _, best_seq = nbest[key][0]
 
             if args.lower:
@@ -183,18 +158,11 @@ def decode(args, encoder, beamsearcher, testloader, device, local_writer):
             print(
                 "\r|{:<50}|[{:>5}/{:<5}]".format(int((i+1)/L*50)*'#', i+1, L), end='')
 
-    # t_total = time.time()-t_beg
-    # print("\r|{0}|[{1:>5}/{1:<5}] {2:5.1f}ms/f".format(50 *
-    #       '#', L, 1000*t_total/cnt_frame))
-
     with open(f"{local_writer}.nbest", 'wb') as fi:
         pickle.dump(nbest, fi)
 
-    if args.save_logit:
-        f_enc_hid.close()
 
-
-def gen_model(args, device) -> Tuple[torch.nn.Module, Union[torch.nn.Module, None]]:
+def build_model(args, device) -> Tuple[torch.nn.Module, Union[torch.nn.Module, None]]:
     if isinstance(device, int):
         device = f'cuda:{device}'
 
@@ -223,93 +191,20 @@ def gen_model(args, device) -> Tuple[torch.nn.Module, Union[torch.nn.Module, Non
         return model, ext_lm_model
 
 
-def compute_encoder_output(args, enc_bin: str, enc_link: str):
-    if not torch.cuda.is_available() or args.cpu:
-        usegpu = False
-    else:
-        usegpu = True
+def DecoderParser():
 
-    num_workers = args.world_size
-    # binary files saved as f'{enc_bin}.x'
-    mp.spawn(worker_compute_enc_out, nprocs=num_workers,
-             args=(num_workers, enc_bin, usegpu, args))
-
-    print("> Merging sub-process output files..")
-    fseeks = {}
-    with open(enc_bin, 'wb') as fo:
-        for i in range(num_workers):
-            with open(f'{enc_bin}.{i}', 'rb') as fi:
-                # type: List[Tuple[str, torch.Tensor]]
-                part_data = pickle.load(fi)
-
-            for key, mat in part_data:
-                fseeks[key] = fo.tell()
-                pickle.dump(mat, fo)
-            os.remove(f'{enc_bin}.{i}')
-
-    with open(enc_link, 'wb') as fo:
-        pickle.dump(fseeks, fo)
-    print("  files merging done.")
-    torch.cuda.empty_cache()
-
-
-@torch.no_grad()
-def worker_compute_enc_out(gpu: int, world_size: int, suffix: str, usegpu: bool, args):
-    rank = gpu
-
-    if usegpu:
-        device = gpu
-        dist.init_process_group(
-            backend='nccl', init_method=args.dist_url,
-            world_size=world_size, rank=rank)
-    else:
-        device = 'cpu'
-        half_nprocs = torch.get_num_threads()
-        torch.set_num_threads((half_nprocs * 2)//world_size)
-        dist.init_process_group(
-            backend='gloo', init_method=args.dist_url,
-            world_size=world_size, rank=rank)
-
-    if device != 'cpu':
-        torch.cuda.set_device(device)
-
-    model, _ = gen_model(args, device)
-
-    testset = ScpDataset(args.input_scp)
-    data_sampler = InferenceDistributedSampler(testset)
-    testloader = DataLoader(
-        testset, batch_size=1, shuffle=False,
-        num_workers=1, sampler=data_sampler, collate_fn=TestPadCollate())
-
-    output = []
-    L = sum([1 for _ in testloader])
-    with autocast(enabled=(True if device != 'cpu' else False)):
-        for i, batch in enumerate(testloader):
-            key, x, x_lens = batch
-            x = x.to(device)
-            encoder_o, _ = model.encoder(x, x_lens)
-            output.append((key[0], encoder_o.cpu()))
-            print(
-                "\r|{:<50}|[{:>5}/{:<5}]".format(int((i+1)/L*50)*'#', i+1, L), end='')
-    # print("\r|{0}|[{1:>5}/{1:<5}]".format(50*'#', L))
-    with open(f'{suffix}.{gpu}', 'wb') as fo:
-        pickle.dump(output, fo)
-
-
-if __name__ == '__main__':
-
-    parser = utils.BasicDDPParser(istraining=False)
+    parser = utils.BasicDDPParser(
+        istraining=False, prog='RNN-Transducer decoding.')
 
     parser.add_argument("--ext-lm-config", type=str, default=None,
                         help="Config of external LM.")
     parser.add_argument("--ext-lm-check", type=str, default=None,
                         help="Checkpoint of external LM.")
-    parser.add_argument("--lm-weight", type=float, default=0.1,
+    parser.add_argument("--lm-weight", type=float, default=0.0,
                         help="Weight of external LM.")
 
     parser.add_argument("--input_scp", type=str, default=None)
-    parser.add_argument("--output_dir", type=str, default=None)
-    parser.add_argument("--enc-out-dir", type=str, default=None)
+    parser.add_argument("--output_prefix", type=str, default='./decode')
     parser.add_argument("--algo", type=str,
                         choices=['default', 'lc'], default='default')
     parser.add_argument("--beam_size", type=int, default=3)
@@ -318,9 +213,10 @@ if __name__ == '__main__':
     parser.add_argument("--nj", type=int, default=None)
     parser.add_argument("--cpu", action='store_true', default=False)
     parser.add_argument("--lower", action='store_true', default=False)
-    parser.add_argument("--save-logit", action='store_true', default=False,
-                        help="Firstly generate encoder output and save in files, then do decoding.")
+    return parser
 
+
+if __name__ == '__main__':
+    parser = DecoderParser()
     args = parser.parse_args()
-
     main(args)

@@ -10,19 +10,19 @@
 
 * follow google 2048 batch size and large conformer
 
-### WER
+### Result
 ```
-Custom checkpoint: avg_last_10.pt | Use CPU = True
-test_clean %WER 2.37 [1245 / 52576, 139 ins, 99 del, 1007 sub ]
-    oracle %WER 2.00 [1050 / 52576, 121 ins, 76 del, 853 sub ]
-test_other %WER 5.46 [2857 / 52343, 316 ins, 234 del, 2307 sub ]
-    oracle %WER 4.63 [2423 / 52343, 251 ins, 193 del, 1979 sub ]
+lc
+test_clean      %WER 2.37 [1245 / 52576, 144 ins, 98 del, 1003 sub ]
+test_clean      %WER 1.98 [1039 / 52576, 124 ins, 76 del, 839 sub ]
+test_other      %WER 5.44 [2850 / 52343, 304 ins, 236 del, 2310 sub ]
+test_other      %WER 4.56 [2385 / 52343, 240 ins, 189 del, 1956 sub ]
 
-Custom checkpoint: avg_best_10.pt | Use CPU = True
-test_clean %WER 2.41 [1268 / 52576, 142 ins, 104 del, 1022 sub ]
-    oracle %WER 1.96 [1030 / 52576, 121 ins, 73 del, 836 sub ]
-test_other %WER 5.44 [2850 / 52343, 314 ins, 239 del, 2297 sub ]
-    oracle %WER 4.54 [2378 / 52343, 241 ins, 192 del, 1945 sub ]
+native:
+test_clean      %WER 2.38 [1252 / 52576, 145 ins, 98 del, 1009 sub ]
+test_clean      %WER 1.23 [648 / 52576, 64 ins, 43 del, 541 sub ]
+test_other      %WER 5.44 [2850 / 52343, 307 ins, 236 del, 2307 sub ]
+test_other      %WER 3.44 [1800 / 52343, 179 ins, 118 del, 1503 sub ]
 ```
 
 ### Monitor figure

@@ -1,0 +1,43 @@
+{
+    "data": {
+        "train": "train_960",
+        "dev": [
+            "dev_clean",
+            "dev_other"
+        ],
+        "test": [
+            "test_clean",
+            "test_other"
+        ],
+        "filter": ":2000"
+    },
+    "sp": {
+        "model_type": "unigram",
+        "vocab_size": 1024,
+        "model_prefix": "sentencepiece/libri_unigram_1024/spm"
+    },
+    "train": {
+        "batch_size": 128,
+        "grad-accum-fold": 16,
+        "databalance": true,
+        "checkall": true,
+        "amp": true
+    },
+    "inference": {
+        "avgmodel": {
+            "mode": "best",
+            "num": 10
+        },
+        "decode": {
+            "algo": "lc",
+            "beam_size": 10,
+            "cpu": true,
+            "resume": "best_10.pt"
+        },
+        "er": {
+            "mode": "wer",
+            "oracle": true
+        }
+    },
+    "commit": "c27bfb725780ba8ef9784211c8b93cbe57ee7782"
+}

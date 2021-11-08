@@ -13,7 +13,6 @@ from ..shared import decoder as pn_zoo
 from ..shared.layer import TimeReduction
 from ..shared import SpecAug
 from ..shared.data import (
-    SpeechDataset,
     SpeechDatasetPickle,
     sortedPadCollateTransducer
 )
@@ -48,12 +47,8 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         backend=args.dist_backend, init_method=args.dist_url,
         world_size=args.world_size, rank=args.rank)
 
-    if args.h5py:
-        Dataset = SpeechDataset
-    else:
-        Dataset = SpeechDatasetPickle
-
-    manager = Manager(Dataset, sortedPadCollateTransducer(), args, build_model)
+    manager = Manager(SpeechDatasetPickle,
+                      sortedPadCollateTransducer(), args, build_model)
 
     if args.update_bn:
         assert args.resume is not None, "invalid behavior"
@@ -292,13 +287,15 @@ def build_model(args, configuration: dict, dist: bool = True, verbose: bool = Tr
     return model
 
 
-def main():
-    parser = utils.BasicDDPParser()
-    parser.add_argument("--h5py", action="store_true",
-                        help="Load data with H5py, defaultly use pickle (recommended).")
+def RNNTParser():
+    parser = utils.BasicDDPParser("RNN-Transducer training")
+    return parser
 
-    args = parser.parse_args()
+
+def main(args: argparse.Namespace = None):
+    if args is None:
+        parser = RNNTParser()
+        args = parser.parse_args()
 
     utils.setPath(args)
-
     utils.main_spawner(args, main_worker)

@@ -11,7 +11,6 @@ from . import coreutils as utils
 
 import os
 import kaldiio
-import h5py
 import pickle
 import math
 import hashlib
@@ -71,50 +70,6 @@ class AbsDataset(Dataset):
             with open(cache_f, 'wb') as fo:
                 pickle.dump(ls, fo)
             return ls
-
-
-class SpeechDataset(AbsDataset):
-    def __init__(self, h5py_path):
-        super().__init__(h5py_path)
-        self.dataset = None
-        hdf5_file = h5py.File(h5py_path, 'r')
-        self.keys = list(hdf5_file.keys())
-
-    def __len__(self):
-        return len(self.keys)
-
-    def __getitem__(self, idx):
-        if self.dataset is None:
-            self.dataset = h5py.File(self.f_path, 'r')
-
-        dataset = self.dataset[self.keys[idx]]
-        mat = dataset[:]
-        label = dataset.attrs['label']
-
-        return torch.tensor(mat, dtype=torch.float), torch.IntTensor(label)
-
-
-class SpeechDatasetMem(AbsDataset):
-    def __init__(self, h5py_path):
-        super().__init__(h5py_path)
-        hdf5_file = h5py.File(h5py_path, 'r')
-        keys = hdf5_file.keys()
-        self.data_batch = []
-        for key in keys:
-          dataset = hdf5_file[key]
-          mat = dataset[()]
-          label = dataset.attrs['label']
-          self.data_batch.append(
-              [torch.tensor(mat, dtype=torch.float), torch.IntTensor(label)])
-
-        hdf5_file.close()
-        print("read all data into memory")
-
-    def __len__(self):
-        return len(self.data_batch)
-
-    def __getitem__(self, idx):
-        return self.data_batch[idx]
 
 
 class SpeechDatasetPickle(AbsDataset):
@@ -274,9 +229,10 @@ class NbestListDataset(AbsDataset):
 
 
 class NbestListCollate():
-    def __init__(self, tokenizer, isGPT: bool = False, bos_id:int=0) -> None:
+    def __init__(self, tokenizer, isGPT: bool = False, bos_id: int = 0) -> None:
         self._tokenizer = tokenizer
-        assert isinstance(bos_id, int) and bos_id >= 0, f"ValueError: bos_id={bos_id}"
+        assert isinstance(
+            bos_id, int) and bos_id >= 0, f"ValueError: bos_id={bos_id}"
         self.bos_id = bos_id
         if isGPT:
             self.isgpt = True
@@ -313,7 +269,8 @@ class NbestListCollate():
             tokens = self._tokenizer(texts, return_tensors='pt', padding=True)
         else:
             tokens = {'input_ids': None, 'attention_mask': None}
-            ids = [[self.bos_id] + self._tokenizer.encode(seqs) for seqs in texts]
+            ids = [[self.bos_id] +
+                   self._tokenizer.encode(seqs) for seqs in texts]
             tokens['input_ids'] = utils.pad_list(
                 [torch.LongTensor(i) for i in ids])
             lens = torch.LongTensor([len(x) for x in ids])
@@ -500,20 +457,9 @@ class BalancedDistributedSampler(DistributedSampler):
         # Add implementation here
         batched_indices = [indices[idx_g_batch:idx_g_batch+self.g_batch]
                            for idx_g_batch in range(0, self.total_size, self.g_batch)]
-
-        # num_threads = min(int(os.cpu_count()) //
-        #                   self.num_replicas, len(batched_indices))
-        # interval = len(batched_indices) // num_threads
-        # process_idx = [interval * i for i in range(num_threads+1)]
-        # if process_idx[-1] != len(batched_indices):
-        #     process_idx[-1] = len(batched_indices)
-        # pool_args = [(batched_indices[process_idx[i]:process_idx[i+1]], self._lens, self._l_norm, self.num_replicas, i)
-        #              for i in range(num_threads)]
-        # with Pool(processes=num_threads) as pool:
-        #     gathered_groups = pool.map(group_indices, pool_args)
-        # partial_indices = []
-        # for g, _ in sorted(gathered_groups, key=lambda i: i[1]):
-        #     partial_indices += g
+        
+        if len(batched_indices[-1]) < self.num_replicas:
+            batched_indices.pop()
 
         partial_indices, _ = group_indices(
             (batched_indices, self._lens, self._l_norm, self.num_replicas, 0))
