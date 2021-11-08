@@ -6,10 +6,14 @@
 # https://github.com/pytorch/fairseq/blob/main/scripts/average_checkpoints.py
 """
 usage:
-    python -m cat.shared.avgmodel ...
+    python utils/avgmodel.py -h
 """
-
-from .monitor import MonitorWriter
+try:
+    from cat.shared.monitor import MonitorWriter
+except ModuleNotFoundError:
+    import sys
+    sys.path.append('.')
+    from cat.shared.monitor import MonitorWriter
 
 import argparse
 import collections

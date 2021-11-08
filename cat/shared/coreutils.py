@@ -107,7 +107,7 @@ def gen_readme(path: str, model: nn.Module, gpu_info: list = []) -> str:
         ""
     ]
     msg += [
-        "### WER"
+        "### Result"
         "",
         "```",
         "",

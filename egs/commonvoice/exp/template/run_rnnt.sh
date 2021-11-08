@@ -167,13 +167,9 @@ if [ $stage -le 4 ] && [ $stop_stage -ge 4 ]; then
     python utils/checkfile.py -f $SPmodel -d $dir || exit 1
 
     # generate averaging models
-    if [ ! -f $dir/checks/avg_best_10.pt ]; then
-        python -m cat.shared.avgmodel --inputs=$dir/checks --num-best 10 || exit 1
-    fi
-    if [ ! -f $dir/checks/avg_last_10.pt ]; then
-        python -m cat.shared.avgmodel --inputs $(find $dir/checks/ -name checkpoint.* | sort -g | tail -n 10) \
-            --output $dir/checks/avg_last_10.pt || exit 1
-    fi
+    python utils/avgmodel.py --inputs=$dir/checks --num-best 10 || exit 1
+    python utils/avgmodel.py --inputs $(find $dir/checks/ -name checkpoint.* | sort -g | tail -n 10) \
+        --output $dir/checks/avg_last_10.pt || exit 1
 
     for checkpoint in avg_last_10.pt avg_best_10.pt; do
         utils/e2edecode.sh $dir $(echo $testset | tr ' ' ':') $SPmodel \
