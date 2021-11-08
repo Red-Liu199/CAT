@@ -411,7 +411,7 @@ class sortedPadCollateLM():
             label  : torch.LongTensor
 
     Return:
-        (labels_with_bos, label_lengths, labels_with_eos, `torch.empty(1)`, `torch.empty(1)`)
+        (labels_with_bos, label_lengths, labels_with_eos, `torch.empty(1)`)
     """
 
     def __call__(self, batch: Sequence[torch.LongTensor]):

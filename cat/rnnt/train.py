@@ -42,11 +42,11 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
     utils.SetRandomSeed(args.seed)
     args.gpu = gpu
     args.rank = args.rank * ngpus_per_node + gpu
+    torch.cuda.set_device(args.gpu)
 
     dist.init_process_group(
         backend=args.dist_backend, init_method=args.dist_url,
         world_size=args.world_size, rank=args.rank)
-    dist.barrier(device_ids=[args.gpu])
 
     if args.h5py:
         Dataset = SpeechDataset
