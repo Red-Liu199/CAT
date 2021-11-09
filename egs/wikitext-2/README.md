@@ -12,12 +12,11 @@ Size of datasets (# sequences):
 
 ```bash
 # view helping info
-bash exp/template/run_lm.sh -h
+python utils/lm_process.py -h
 
-# create a experiment directory and training
+# create a experiment directory from template and training
 mkdir exp/myexp
-cp exp/template/config.json exp/myexp/
-cp exp/template/run_lm.sh exp/myexp/
+cp exp/template/*.json exp/myexp/
 
-bash exp/myexp/run_lm.sh --sta 0
+python utils/lm_process.py exp/myexp/
 ```
