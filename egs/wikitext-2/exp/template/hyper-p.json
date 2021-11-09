@@ -1,0 +1,25 @@
+{
+    "data": {
+        "train": "data/train.txt",
+        "dev": "data/valid.txt",
+        "test": "data/test.txt",
+        "text_processing": {
+            "truncate": 128
+        }
+    },
+    "sp": {
+        "model_type": "word",
+        "vocab_size": 30959,
+        "use_all_vocab": true,
+        "model_prefix": "sentencepiece/wikitext-2_word/spm"
+    },
+    "train": {
+        "batch_size": 128,
+        "grad-norm": 5.0,
+        "grad-accum-fold": 1,
+        "databalance": true,
+        "checkall": true,
+        "amp": true
+    },
+    "commit": "be61b7bd78943cde2156760ef39ea292e9bd8b8f"
+}

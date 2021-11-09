@@ -12,9 +12,17 @@ So, before going into the task, you should do data preparation with CAT first. F
 
 In this repo, we support training RNN-T, Language model and CTC/CTC-CRF model training as well as the inference/decoding.
 
-- **RNN-T:** refer to `egs/<recipe>/template/run_rnnt.sh`
-- **LM:** refer to `egs/<recipe>/template/run_lm.sh`
-- **CTC/CTC-CRF:** this can be regarded as a replica of CAT, but with better and pretty training procedure monitoring. Unfortunately, there's no available `run_ctc.sh` like RNN-T and LM training. I'll add it in the future, but that is not on my current schedule. And training CTC/CTC-CRF requires the `ctc_crf` to be installed. Refer to CAT installation for more details.
+- **RNN-T:** refer to `egs/<task>/template/` for details. In `egs/<task>/`, run template experiment with
+   ```bash
+   cd egs/<task>/
+   python utils/asr_process.py exp/template
+   ```
+- **LM:** refer to `egs/<task>/template/` for details. In `egs/<task>/`, run template experiment with
+   ```bash
+   cd egs/<task>/
+   python utils/lm_process.py exp/template
+   ```
+- **CTC/CTC-CRF:** this can be regarded as a replica of CAT, but with better and pretty training procedure monitoring. Unfortunately, there's no available `ctc_process.py` like RNN-T and LM training. I'll add it in the future, but that is not on my current schedule. And training CTC/CTC-CRF requires the `ctc_crf` to be installed. Refer to CAT installation for more details.
 
 ## In-house SOTA Results 
 
@@ -32,7 +40,8 @@ In this repo, we support training RNN-T, Language model and CTC/CTC-CRF model tr
      and link directory.
      
       ```bash
-      ln -s <CAT> tools/
+      cd tools/
+      ln -s <CAT> ./
       ```
    
 2. Python packages

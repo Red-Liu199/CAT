@@ -4,64 +4,15 @@
 from asr_process import (
     checkExist,
     resolve_sp_path,
-    expandPath,
-    sentencepiece_train,
+    combineText,
     updateNamespaceFromDict,
-    NNTrain
+    NNTrain,
+    SentencePieceTrain
 )
 
 import os
-import uuid
 import json
 import argparse
-from typing import Union, List, Optional, Tuple
-
-
-def priorResolvePath(dataset: Union[str, List[str]]) -> Tuple[List[str], List[str]]:
-    """Resolve text file location for dataset.
-
-    Args:
-        dataset (str, list): dataset(s)
-
-    Returns:
-        (local_texts, outside_texts)
-    """
-    if isinstance(dataset, str):
-        dataset = [dataset]
-
-    local_text = []
-    outside_text = []
-    for _set in dataset:
-        _text = os.path.join('data/text', _set)
-        if os.path.isfile(_text):
-            local_text.append(_text)
-        else:
-            outside_text.append(_set)
-
-    outside_text = expandPath('t', outside_text)
-    checkExist('f', outside_text)
-    return local_text, outside_text
-
-
-def combineText(datasets: Union[str, List[str]], f_out: Optional[str] = None) -> str:
-    """Combine text files of dataset(s) and return the combined file."""
-    text_noid, text_withid = priorResolvePath(datasets)
-    assert len(text_noid) > 0 or len(
-        text_withid) > 0, f"combineText: datasets seem empty {datasets}"
-
-    if f_out is None:
-        f_out = os.path.join('/tmp', str(uuid.uuid4()))
-    with open(f_out, 'w') as fo:
-        for _text in text_noid:
-            with open(_text, 'r') as fi:
-                fo.write(fi.read())
-        for _text in text_withid:
-            with open(_text, 'r') as fi:
-                for line in fi:
-                    # rm the seq id in first column
-                    line = line.split()
-                    fo.write(' '.join(line[1:]) + '\n')
-    return f_out
 
 
 if __name__ == "__main__":
@@ -104,20 +55,7 @@ if __name__ == "__main__":
             print(fmt.format(
                 f"found existing sentencepiece model at {spmodel}, skipped training."))
         except FileNotFoundError:
-            # there is not a trained sp model. so train one.
-            assert 'train' in hyper_settings['data'], fmt.format(
-                "missing 'train' in hyper-p['data']")
-
-            f_corpus_tmp = combineText(hyper_settings['data']['train'])
-            sp_settings, _ = resolve_sp_path(
-                hyper_settings['sp'], os.path.basename(cwd), allow_making=True)
-            sentencepiece_train(f_corpus_tmp, **sp_settings)
-
-            hyper_settings['sp'] = sp_settings
-            with open(f_hyper_settings, 'w') as fo:
-                json.dump(hyper_settings, fo, indent=4)
-
-            os.remove(f_corpus_tmp)
+            SentencePieceTrain(hyper_settings, f_hyper_settings, fmt)
 
     ############ Stage 2  Pickle data ############
     if s_beg <= 2 and s_end >= 2:

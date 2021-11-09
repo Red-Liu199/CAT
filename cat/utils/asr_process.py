@@ -7,9 +7,10 @@ Uage:
 
 import os
 import json
+import uuid
 import pickle
 import argparse
-from typing import Union, Literal, List, Dict, Optional, Callable
+from typing import Union, Literal, List, Tuple, Optional, Callable
 
 
 def resolve_sp_path(config: dict, prefix: Optional[str] = None, allow_making: bool = False):
@@ -20,10 +21,13 @@ def resolve_sp_path(config: dict, prefix: Optional[str] = None, allow_making: bo
 
     if prefix is not None:
         prefix += '_'
+    else:
+        prefix = ''
 
     assert 'model_type' in config, "resolve_sp_path: missing 'model_type' in configuration"
     if config['model_type'] == 'word' or config['model_type'] == 'char':
         f_out = prefix + config['model_type']
+        config['use_all_vocab'] = True
     elif config['model_type'] == 'unigram':
         assert 'vocab_size' in config, "resolve_sp_path: missing 'vocab_size' in configuration"
         f_out = prefix + config['model_type'] + '_' + str(config['vocab_size'])
@@ -48,8 +52,8 @@ def sentencepiece_train(intext: str, **kwargs):
     try:
         import sentencepiece as spm
     except ModuleNotFoundError:
-        print("Tokenization requires module sentencepiece. Install with\npip install sentencepiece")
-    pass
+        raise ModuleNotFoundError(
+            "Tokenization requires module sentencepiece. Install with\npip install sentencepiece")
 
     checkExist('f', intext)
 
@@ -194,7 +198,7 @@ def checkExist(f_type: Literal['d', 'f'], f_list: Union[str, List[str]]):
             not_founds.append(item)
 
     if len(not_founds) > 0:
-        o_str = f"{hints[f_type]} checking failed"
+        o_str = f"{hints[f_type]} checking failed:"
         for item in not_founds:
             o_str += f"\n\t{item}"
         raise FileNotFoundError(o_str)
@@ -277,20 +281,22 @@ def NNTrain(
 
     _, (_, spvocab) = resolve_sp_path(settings['sp'])
     checkExist('f', spvocab)
-    nnconfig = os.path.join(args.expdir, 'config.json')
-    checkExist('f', nnconfig)
+    f_nnconfig = os.path.join(args.expdir, 'config.json')
+    checkExist('f', f_nnconfig)
 
     if args.ngpu > -1:
         os.environ['CUDA_VISIBLE_DEVICES'] = \
             generate_visible_gpus(args.ngpu)
 
-    with open(nnconfig, 'r') as fi:
+    with open(f_nnconfig, 'r') as fi:
         nnconfig = json.load(fi)
     # setup the num_classes to vocab_size
     with open(spvocab, 'r') as fi:
         n_vocab = sum(1 for _ in fi)
     # recursively search for 'num_classes'
     recursive_rpl(nnconfig, 'num_classes', n_vocab)
+    with open(f_nnconfig, 'w') as fo:
+        json.dump(nnconfig, fo, indent=4)
 
     if subprocess.run('command -v git', shell=True, capture_output=True).returncode != 0:
         print(promt.format("git command not found. Suppress saving git commit."))
@@ -333,6 +339,98 @@ def NNTrain(
     MainFunc(nnargs)
 
 
+def priorResolvePath(dataset: Union[str, List[str]], local_dir: str = 'data/text') -> Tuple[List[str], List[str]]:
+    """Resolve text file location for dataset.
+
+    Args:
+        dataset (str, list): dataset(s)
+
+    Returns:
+        (local_texts, outside_texts)
+    """
+    if isinstance(dataset, str):
+        dataset = [dataset]
+
+    local_text = []
+    outside_text = []
+    for _set in dataset:
+        if os.path.isfile(_set):
+            local_text.append(_set)
+        else:
+            _text = os.path.join(local_dir, _set)
+            if os.path.isfile(_text):
+                local_text.append(_text)
+            else:
+                outside_text.append(_set)
+
+    try:
+        outside_text = expandPath('t', outside_text)
+        checkExist('f', outside_text)
+    except FileNotFoundError as fe:
+        print(fe)
+        print("Resolve outside path as empty.")
+        outside_text = []
+    return local_text, outside_text
+
+
+def combineText(datasets: Union[str, List[str]], f_out: Optional[str] = None, seperator: str = ' ') -> str:
+    """Combine text files of dataset(s) and return the combined file."""
+    text_noid, text_withid = priorResolvePath(datasets)
+    assert len(text_noid) > 0 or len(
+        text_withid) > 0, f"combineText: dataset '{datasets}' seems empty."
+
+    if f_out is None:
+        f_out = os.path.join('/tmp', str(uuid.uuid4()))
+
+    with open(f_out, 'w') as fo:
+        for _text in text_noid:
+            with open(_text, 'r') as fi:
+                fo.write(fi.read())
+        for _text in text_withid:
+            with open(_text, 'r') as fi:
+                for line in fi:
+                    # rm the seq id in first column
+                    line = line.split()
+                    fo.write(seperator.join(line[1:]) + '\n')
+    return f_out
+
+
+def SentencePieceTrain(
+        settings: dict,
+        f_hyper:str, promt:str='{}'):
+    assert 'data' in settings, promt.format(
+        f"missing 'data' in hyper-setting file {f_hyper}")
+    assert 'sp' in settings, promt.format(
+        f"missing 'sp' in hyper-setting file {f_hyper}")
+    f_corpus_tmp = os.path.join('/tmp', str(uuid.uuid4()))
+    assert 'train' in settings['data'], promt.format(
+        "missing 'train' in hyper-p['data']")
+    if 'lang' in settings['data']:
+        # check if it's chinese-like languages
+        iszh = ('zh' == settings['data']['lang'].split('-')[0])
+    else:
+        iszh = False
+
+    if iszh:
+        seperator = ''
+    else:
+        seperator = ' '
+    f_corpus_tmp = combineText(
+        settings['data']['train'], seperator=seperator)
+    sp_settings, (_, vocab) = resolve_sp_path(
+        settings['sp'], os.path.basename(os.getcwd()), allow_making=True)
+    sentencepiece_train(f_corpus_tmp, **sp_settings)
+
+    checkExist('f', vocab)
+    with open(vocab, 'r') as fi:
+        n_vocab = sum(1 for _ in fi)
+    sp_settings['vocab_size'] = n_vocab
+    settings['sp'] = sp_settings
+    with open(f_hyper, 'w') as fo:
+        json.dump(settings, fo, indent=4)
+
+    os.remove(f_corpus_tmp)
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
@@ -363,44 +461,11 @@ if __name__ == "__main__":
     ############ Stage 1  Tokenizer training ############
     if s_beg <= 1 and s_end >= 1:
         fmt = "Stage 1  Tokenizer training: {}"
-        import uuid
-        import re
 
-        assert 'data' in hyper_settings, fmt.format(
-            f"missing 'data' in hyper-setting file {f_hyper_settings}")
-        assert 'sp' in hyper_settings, fmt.format(
-            f"missing 'sp' in hyper-setting file {f_hyper_settings}")
-        f_corpus_tmp = os.path.join('/tmp', str(uuid.uuid4()))
-        assert 'train' in hyper_settings['data'], fmt.format(
-            "missing 'train' in hyper-p['data']")
-
-        trset = hyper_settings['data']['train']
-        tr_texts = expandPath('t', trset, cwd)
-        checkExist('f', tr_texts)
-        with open(f_corpus_tmp, 'w') as fo:
-            for _text in tr_texts:
-                with open(_text, 'r') as fi:
-                    for line in fi:
-                        # skip empty line
-                        if re.match(r'^\s*$', line):
-                            continue
-                        # rm the seq id in first column
-                        line = line.split()
-                        fo.write(' '.join(line[1:]) + '\n')
-
-        sp_settings, _ = resolve_sp_path(
-            hyper_settings['sp'], os.path.basename(cwd), allow_making=True)
-        sentencepiece_train(f_corpus_tmp, **sp_settings)
-
-        hyper_settings['sp'] = sp_settings
-        with open(f_hyper_settings, 'w') as fo:
-            json.dump(hyper_settings, fo, indent=4)
-
-        os.remove(f_corpus_tmp)
+        SentencePieceTrain(hyper_settings, f_hyper_settings, fmt)
 
     ############ Stage 2  Pickle data ############
     if s_beg <= 2 and s_end >= 2:
-        import uuid
         import sentencepiece as spm
         fmt = "Stage 2  Pickle data: {}"
 
@@ -549,7 +614,7 @@ if __name__ == "__main__":
             print(fmt.format(
                 f"set 'nj' to {decode_settings['nj']}"))
         if 'lm-weight' in decode_settings and decode_settings['lm-weight'] > 0.0:
-            assert 'lm' in inference_settings, fmt.format(
+            assert 'lmdir' in inference_settings, fmt.format(
                 "'lm-weight' > 0 in hyper-p['inference']['decode'] should be used with 'lmdir' in hyper-p['inference']")
             lmdir = inference_settings['lmdir']
             checkExist('d', lmdir)
@@ -580,6 +645,8 @@ if __name__ == "__main__":
                 f"set 'dist-url' to {decode_settings['dist-url']}"))
 
         testsets = hyper_settings['data']['test']
+        if isinstance(testsets, str):
+            testsets = [testsets]
         f_scps = expandPath('s', testsets, cwd)
         checkExist('f', f_scps)
 
