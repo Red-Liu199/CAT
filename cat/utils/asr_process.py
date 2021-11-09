@@ -1,4 +1,7 @@
 """Ported from run_rnnt.sh, rewrote with python
+
+Uage:
+    python utils/asr_process.py
 """
 
 
@@ -6,7 +9,7 @@ import os
 import json
 import pickle
 import argparse
-from typing import Union, Literal, List, Dict, Optional
+from typing import Union, Literal, List, Dict, Optional, Callable
 
 
 def resolve_sp_path(config: dict, prefix: Optional[str] = None, allow_making: bool = False):
@@ -251,6 +254,85 @@ def generate_visible_gpus(N: int) -> str:
     return ','.join([str(i) for i in range(N)])
 
 
+def get_free_port():
+    '''Return a free available port on local machine.'''
+    import socket
+    s = socket.socket()
+    s.bind(('', 0))            # Bind to a free port provided by the host.
+    return s.getsockname()[1]
+
+
+def NNTrain(
+        args: argparse.Namespace,
+        settings: dict,
+        f_hyper_p: str,
+        fmt_data: str,
+        Parser: argparse.ArgumentParser,
+        MainFunc: Callable[[argparse.Namespace], None],
+        promt: str = '{}'):
+    import subprocess
+
+    assert 'sp' in settings, promt.format(f"missing 'sp' in hyper-p")
+    assert 'train' in settings, promt.format("missing 'train' in hyper-p")
+
+    _, (_, spvocab) = resolve_sp_path(settings['sp'])
+    checkExist('f', spvocab)
+    nnconfig = os.path.join(args.expdir, 'config.json')
+    checkExist('f', nnconfig)
+
+    if args.ngpu > -1:
+        os.environ['CUDA_VISIBLE_DEVICES'] = \
+            generate_visible_gpus(args.ngpu)
+
+    with open(nnconfig, 'r') as fi:
+        nnconfig = json.load(fi)
+    # setup the num_classes to vocab_size
+    with open(spvocab, 'r') as fi:
+        n_vocab = sum(1 for _ in fi)
+    # recursively search for 'num_classes'
+    recursive_rpl(nnconfig, 'num_classes', n_vocab)
+
+    if subprocess.run('command -v git', shell=True, capture_output=True).returncode != 0:
+        print(promt.format("git command not found. Suppress saving git commit."))
+    else:
+        process = subprocess.run(
+            "git log -n 1 --pretty=format:\"%H\"", shell=True, check=True, stdout=subprocess.PIPE)
+        with open(f_hyper_p, 'r') as fi:
+            orin_settings = json.load(fi)
+        orin_settings['commit'] = process.stdout.decode('utf-8')
+        with open(f_hyper_p, 'w') as fo:
+            json.dump(orin_settings, fo, indent=4)
+
+    training_settings = settings['train']
+    if 'trset' not in training_settings:
+        train_data = fmt_data.format('train')
+        checkExist('f', train_data)
+        training_settings['trset'] = train_data
+        print(promt.format(f"set 'trset' to {train_data}"))
+    if 'devset' not in training_settings:
+        dev_data = fmt_data.format('dev')
+        checkExist('f', dev_data)
+        training_settings['devset'] = dev_data
+        print(promt.format(f"set 'devset' to {dev_data}"))
+    if 'world-size' not in training_settings:
+        training_settings['world-size'] = 1
+    if 'rank' not in training_settings:
+        training_settings['rank'] = 0
+    if 'dir' not in training_settings:
+        training_settings['dir'] = args.expdir
+        print(promt.format(f"set 'dir' to {args.expdir}"))
+    if 'workers' not in training_settings:
+        training_settings['workers'] = 2
+        print(promt.format(f"set 'workers' to 2"))
+    if 'dist-url' not in training_settings:
+        training_settings['dist-url'] = f"tcp://localhost:{get_free_port()}"
+        print(promt.format(
+            f"set 'dist-url' to {training_settings['dist-url']}"))
+
+    nnargs = updateNamespaceFromDict(training_settings, Parser)
+    MainFunc(nnargs)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
@@ -278,9 +360,9 @@ if __name__ == "__main__":
     with open(f_hyper_settings, 'r') as fi:
         hyper_settings = json.load(fi)
 
-    ############ Stage 1: Tokenizer training ############
+    ############ Stage 1  Tokenizer training ############
     if s_beg <= 1 and s_end >= 1:
-        fmt = "Stage 1: Tokenizer training: {}"
+        fmt = "Stage 1  Tokenizer training: {}"
         import uuid
         import re
 
@@ -316,11 +398,11 @@ if __name__ == "__main__":
 
         os.remove(f_corpus_tmp)
 
-    ############ Stage 2: Pickle data ############
+    ############ Stage 2  Pickle data ############
     if s_beg <= 2 and s_end >= 2:
         import uuid
         import sentencepiece as spm
-        fmt = "Stage 2: Pickle data: {}"
+        fmt = "Stage 2  Pickle data: {}"
 
         assert 'data' in hyper_settings, fmt.format(
             f"missing 'data' in hyper-setting file {f_hyper_settings}")
@@ -354,9 +436,9 @@ if __name__ == "__main__":
             combinePickle(f_pkl_tmp, os.path.join(
                 d_pkl, dataset+'.pkl'), rm_src=True)
 
-    ############ Stage 3: NN training ############
+    ############ Stage 3  NN training ############
     if s_beg <= 3 and s_end >= 3:
-        fmt = "Stage 3: NN training: {}"
+        fmt = "Stage 3  NN training: {}"
         try:
             import cat
         except ModuleNotFoundError:
@@ -364,65 +446,13 @@ if __name__ == "__main__":
             sys.path.append(cwd)
         from cat.rnnt.train import RNNTParser
         from cat.rnnt.train import main as RNNTMain
-        import torch
-        import subprocess
 
-        assert 'sp' in hyper_settings, fmt.format(
-            f"missing 'sp' in hyper-setting file {f_hyper_settings}")
-        assert 'train' in hyper_settings, fmt.format(
-            f"missing 'train' in hyper-setting file {f_hyper_settings}")
-        _, (_, spvocab) = resolve_sp_path(hyper_settings['sp'])
-        checkExist('f', spvocab)
-        nnconfig = os.path.join(args.expdir, 'config.json')
-        checkExist('f', nnconfig)
+        NNTrain(args, hyper_settings, f_hyper_settings, os.path.join(
+            args.expdir, 'pkl/{}.pkl'), RNNTParser(), RNNTMain, fmt)
 
-        if args.ngpu > -1:
-            os.environ['CUDA_VISIBLE_DEVICES'] = \
-                generate_visible_gpus(args.ngpu)
-
-        with open(nnconfig, 'r') as fi:
-            nnconfig = json.load(fi)
-        # setup the num_classes to vocab_size
-        with open(spvocab, 'r') as fi:
-            n_vocab = sum(1 for _ in fi)
-        # recursively search for 'num_classes'
-        recursive_rpl(nnconfig, 'num_classes', n_vocab)
-
-        if subprocess.run('command -v git', shell=True, capture_output=True).returncode != 0:
-            print(fmt.format("git command not found. Suppress saving git commit."))
-        else:
-            process = subprocess.run(
-                "git log -n 1 --pretty=format:\"%H\"", shell=True, check=True, stdout=subprocess.PIPE)
-            hyper_settings['commit'] = process.stdout.decode('utf-8')
-
-            with open(f_hyper_settings, 'w') as fo:
-                json.dump(hyper_settings, fo, indent=4)
-
-        training_settings = hyper_settings['train']
-        if 'trset' not in training_settings:
-            train_data = os.path.join(args.expdir, 'pkl/train.pkl')
-            checkExist('f', train_data)
-            training_settings['trset'] = train_data
-            print(fmt.format(f"set 'trset' to {train_data}"))
-        if 'devset' not in training_settings:
-            dev_data = os.path.join(args.expdir, 'pkl/dev.pkl')
-            checkExist('f', dev_data)
-            training_settings['devset'] = dev_data
-            print(fmt.format(f"set 'devset' to {dev_data}"))
-        if 'world-size' not in training_settings:
-            training_settings['world-size'] = 1
-        if 'rank' not in training_settings:
-            training_settings['rank'] = 0
-        if 'dir' not in training_settings:
-            training_settings['dir'] = args.expdir
-            print(fmt.format(f"set 'dir' to {args.expdir}"))
-
-        nnargs = updateNamespaceFromDict(training_settings, RNNTParser())
-        RNNTMain(nnargs)
-
-    ############ Stage 4: Decoding ############
+    ############ Stage 4  Decoding ############
     if s_beg <= 4 and s_end >= 4:
-        fmt = "Stage 4: Decoding: {}"
+        fmt = "Stage 4  Decoding: {}"
         import re
         import torch
         try:
@@ -544,6 +574,10 @@ if __name__ == "__main__":
                 f"set 'output_prefix' to {decode_out_prefix}"))
         else:
             decode_out_prefix = decode_settings['output_prefix']
+        if 'dist-url' not in decode_settings:
+            decode_settings['dist-url'] = f"tcp://localhost:{get_free_port()}"
+            print(fmt.format(
+                f"set 'dist-url' to {decode_settings['dist-url']}"))
 
         testsets = hyper_settings['data']['test']
         f_scps = expandPath('s', testsets, cwd)
@@ -556,6 +590,7 @@ if __name__ == "__main__":
             decodeargs = updateNamespaceFromDict(
                 decode_settings, DecoderParser())
             DecoderMain(decodeargs)
+            decode_settings['dist-url'] = f"tcp://localhost:{get_free_port()}"
 
         # compute wer/cer
         from wer import WERParser

@@ -1,8 +1,6 @@
 {
     "data": {
-        "train": [
-            "train_960"
-        ],
+        "train": "train_960",
         "dev": [
             "dev_clean",
             "dev_other"
@@ -11,10 +9,7 @@
             "test_clean",
             "test_other"
         ],
-        "filter": ":2000",
-        "text_processing": {
-            "truncate": 128
-        }
+        "filter": ":2000"
     },
     "sp": {
         "model_type": "unigram",
@@ -23,8 +18,7 @@
     },
     "train": {
         "batch_size": 256,
-        "grad-norm": 5.0,
-        "grad-accum-fold": 1,
+        "grad-accum-fold": 2,
         "databalance": true,
         "checkall": true,
         "amp": true
@@ -44,5 +38,5 @@
             "oracle": true
         }
     },
-    "commit": "60aa5175c9630bcb5ea1790444732fc948b05865"
+    "commit": "c27bfb725780ba8ef9784211c8b93cbe57ee7782"
 }

@@ -457,16 +457,15 @@ class BalancedDistributedSampler(DistributedSampler):
         # Add implementation here
         batched_indices = [indices[idx_g_batch:idx_g_batch+self.g_batch]
                            for idx_g_batch in range(0, self.total_size, self.g_batch)]
-        
+
         if len(batched_indices[-1]) < self.num_replicas:
             batched_indices.pop()
 
         partial_indices, _ = group_indices(
             (batched_indices, self._lens, self._l_norm, self.num_replicas, 0))
 
-        partial_indices = [x[self.rank] for x in partial_indices]
-
-        return iter(partial_indices)
+        local_indices = [x[self.rank] for x in partial_indices]
+        return iter(local_indices)
 
 
 def group_indices(args: Tuple[List[List[int]], List[int], Union[str, None], int, int]):

@@ -137,13 +137,17 @@ def build_model(args, configuration, dist=True, wrapper=True) -> LMTrainer:
     return model
 
 
-def main():
-    parser = utils.BasicDDPParser()
+def LMParser():
+    parser = utils.BasicDDPParser('Language model training.')
     parser.add_argument("--eval", type=str,
                         help="Do evaluation and calculate the PPL.")
+    return parser
 
-    args = parser.parse_args()
+
+def main(args: argparse = None):
+    if args is None:
+        parser = LMParser()
+        args = parser.parse_args()
 
     utils.setPath(args)
-
     utils.main_spawner(args, main_worker)

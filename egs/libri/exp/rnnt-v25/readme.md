@@ -13,19 +13,17 @@
 
 ### WER
 ```
-Use CPU = False
-test_clean ext_lm= %WER 3.01 [1581 / 52576, 215 ins, 106 del, 1260 sub ]
-test_other ext_lm= %WER 7.46 [3907 / 52343, 441 ins, 318 del, 3148 sub ]
+best-10
+test_clean      %WER 2.70 [1417 / 52576, 182 ins, 103 del, 1132 sub ]
+test_clean      %WER 2.20 [1159 / 52576, 149 ins, 72 del, 938 sub ]
+test_other      %WER 6.70 [3506 / 52343, 397 ins, 290 del, 2819 sub ]
+test_other      %WER 5.61 [2939 / 52343, 321 ins, 234 del, 2384 sub ]
 
-Custom checkpoint: avg_best_10.pt
-Use CPU = False
-test_clean ext_lm= %WER 2.70 [1420 / 52576, 184 ins, 104 del, 1132 sub ]
-test_other ext_lm= %WER 6.70 [3509 / 52343, 392 ins, 287 del, 2830 sub ]
-
-Custom checkpoint: avg_last_10.pt
-Use CPU = False
-test_clean ext_lm= %WER 2.71 [1426 / 52576, 164 ins, 108 del, 1154 sub ]
-test_other ext_lm= %WER 6.56 [3433 / 52343, 393 ins, 295 del, 2745 sub ]
+last-10
+test_clean      %WER 2.72 [1432 / 52576, 165 ins, 109 del, 1158 sub ]
+test_clean      %WER 2.25 [1184 / 52576, 138 ins, 78 del, 968 sub ]
+test_other      %WER 6.55 [3426 / 52343, 397 ins, 294 del, 2735 sub ]
+test_other      %WER 5.55 [2904 / 52343, 323 ins, 231 del, 2350 sub ]
 ```
 
 ### Monitor figure

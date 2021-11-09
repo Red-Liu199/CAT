@@ -1,109 +1,76 @@
+"""Convert text to pickle data
+
+text could be in token index format or pure text (with tokenizer specified)
+"""
+
 import argparse
 import pickle
 import os
-import string
-import random
+import uuid
+import sentencepiece as spm
 from multiprocessing import Pool
 from typing import Union, Tuple
 
 
-def randName(L: int) -> str:
-    return ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(L))
+def text2bin(arguments: Tuple[argparse.Namespace, str, int, int]):
 
-
-def text2bin(arguments: Tuple[argparse.Namespace, int, int, int]) -> Tuple[str, int]:
-
-    args, pool_id, idx_beg, idx_end = arguments
-    norm_len = args.concat
-    binfile = '{}.{}.tmp'.format(args.outbin, randName(8))
+    args, binfile, idx_beg, idx_end = arguments
     if idx_end == -1:
         idx_end = float('inf')
+
+    if args.spm is not None:
+        spmodel = spm.SentencePieceProcessor(model_file=args.spm)
+        processor = spmodel.encode
+    else:
+        def processor(line): return [int(x) for x in line.split()]
 
     dataset = []
     postfix = []
     cnt_process = 0
     tot_line = 0
-    with open(args.intext, 'r') as fi, open(binfile, 'wb') as fo:
-        if norm_len != -1:
-            for i, line in (enumerate(fi)):
-                if i < idx_beg or i >= idx_end:
-                    continue
-                tot_line += 1
-                if args.strip:
-                    data = [int(x) for x in line.split()[1:]]
-                else:
-                    data = [int(x) for x in line.split()]
+    flag_norm = (args.concat != -1) or (args.truncate != -1)
+    istruncate = (args.truncate != -1)
+    if istruncate:
+        norm_len = args.truncate
+    else:
+        norm_len = args.concat
 
-                data = postfix + data
+    with open(args.intext, 'r') as fi:
+        for i, line in (enumerate(fi)):
+            if i < idx_beg or i >= idx_end:
+                continue
+            tot_line += 1
+            l_data = processor(line)
+
+            if flag_norm:
+                data = postfix + l_data
                 while len(data) >= norm_len:
-                    dataset.append(fo.tell())
-                    pickle.dump(data[:norm_len], fo)
+                    dataset.append(data[:norm_len])
                     data = data[norm_len:]
                     cnt_process += 1
                 if len(data) > 0:
-                    postfix = data
-                    postfix.append(args.sos_id)
-        elif args.truncate != -1:
-            for i, line in (enumerate(fi)):
-                if i < idx_beg or i >= idx_end:
-                    continue
-                tot_line += 1
-                if args.strip:
-                    data = [int(x) for x in line.split()[1:]]
-                else:
-                    data = [int(x) for x in line.split()]
+                    if istruncate:
+                        dataset.append(data)
+                        cnt_process += 1
+                    else:
+                        postfix = data
+                        postfix.append(args.bos_id)
+            else:
+                dataset.append(l_data)
 
-                while len(data) >= args.truncate:
-                    dataset.append(fo.tell())
-                    pickle.dump(data[:args.truncate], fo)
-                    data = data[args.truncate:]
-                    cnt_process += 1
+    with open(binfile, 'wb') as fo:
+        pickle.dump(dataset, fo)
 
-                if len(data) > 0:
-                    dataset.append(fo.tell())
-                    pickle.dump(data, fo)
-                    cnt_process += 1
+    if flag_norm:
+        if istruncate:
+            print("Truncate by {}, # {} -> {}".format(
+                args.truncate, tot_line, cnt_process))
         else:
-            for i, line in (enumerate(fi)):
-                if i < idx_beg or i >= idx_end:
-                    continue
-
-                tot_line += 1
-                if args.strip:
-                    data = [int(x) for x in line.split()[1:]]
-                else:
-                    data = [int(x) for x in line.split()]
-                dataset.append(fo.tell())
-                pickle.dump(data, fo)
-
-    if norm_len != -1:
-        print("[{:2}] Concat by len {}, # {} -> {}".format(pool_id,
-              norm_len, tot_line, cnt_process))
-        return pool_id, binfile, cnt_process
-    elif args.truncate != -1:
-        print("[{:2}] Truncate by len {}, # {} -> {}".format(pool_id,
-              args.truncate, tot_line, cnt_process))
-        return pool_id, binfile, cnt_process
-    else:
-        return pool_id, binfile, tot_line
+            print("Concat by {}, # {} -> {}".format(
+                norm_len, tot_line, cnt_process))
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("intext", type=str,
-                        help="Input text files (in id format).")
-    parser.add_argument("outbin", type=str, help="Ouput file.")
-    parser.add_argument("--nj", type=int, default=1,
-                        help="Number of threads. Default: 1")
-    parser.add_argument("--strip", action="store_true", default=False)
-    parser.add_argument("--concat", type=int, default=-1,
-                        help="Use concat mode instead valid mode with given length. Default: -1 (disable)")
-    parser.add_argument("--truncate", type=int, default=-1, metavar="trunc",
-                        help="Truncate the seq longer than trunc and take res of it as new seq. Default: -1 (disable)")
-    parser.add_argument("--sos_id", type=int, default=0,
-                        help="Begin of sequence index, available in concat > 1. Default: 0")
-
-    args = parser.parse_args()
+def main(args: argparse.Namespace):
     assert args.truncate == -1 or args.concat == - \
         1, "--concat is conflict with --truncate"
 
@@ -114,8 +81,9 @@ if __name__ == "__main__":
     if not os.path.isfile(args.intext):
         raise FileNotFoundError(f"{args.intext} does not exist!")
 
+    fmt = os.path.join('/tmp', str(uuid.uuid4())+'.{}.tmp')
     if num_threads == 1:
-        pool_args = [(args, 0, 0, -1)]
+        pool_args = [(args, fmt.format(0), 0, -1)]
     else:
         num_lines = sum(1 for _ in open(args.intext, 'r'))
         interval = num_lines // num_threads
@@ -123,29 +91,55 @@ if __name__ == "__main__":
         if indices[-1] != num_lines:
             indices[-1] = num_lines
 
-        pool_args = [(args, i, indices[i], indices[i+1])
+        pool_args = [(args, fmt.format(i), indices[i], indices[i+1])
                      for i in range(num_threads)]
 
     with Pool(processes=num_threads) as pool:
-        binfiles = pool.map(text2bin, pool_args)
+        pool.map(text2bin, pool_args)
 
     print("> Sub-process done. Begin merging...")
-    binfiles = sorted(binfiles, key=lambda item: item[0])
 
-    randbin = '{}.bin'.format(args.outbin)
+    randbin = '{}.bin'.format(args.output)
     _seeks = []
     with open(randbin, 'wb') as fo:
-        for _, file, N in binfiles:
-            with open(file, 'rb') as fi:
-                for n in range(N):
-                    _seeks.append(fo.tell())
-                    pickle.dump(pickle.load(fi), fo)
-            os.remove(file)
+        for i in range(num_threads):
+            with open(fmt.format(i), 'rb') as fi:
+                part_dataset = pickle.load(fi)
 
-    with open(args.outbin, 'wb') as fo:
+            for _data in part_dataset:
+                _seeks.append(fo.tell())
+                pickle.dump(_data, fo)
+            os.remove(fmt.format(i))
+
+    with open(args.output, 'wb') as fo:
         # save the file name of binary file
         pickle.dump(randbin, fo)
         # save the location information
         pickle.dump(_seeks, fo)
 
-    print("> Merged: Index file {} --> binary file {}".format(args.outbin, randbin))
+    print("> Merged: Index {} --> binary {}".format(args.output, randbin))
+
+
+def TextProcessingParser():
+    parser = argparse.ArgumentParser(
+        'Convert pure text into pickle data with multi-processing')
+    parser.add_argument("intext", type=str,
+                        help="Input text files (in token id if no --spm, or text  with --spm).")
+    parser.add_argument("output", type=str, help="Ouput file.")
+    parser.add_argument("--spm", type=str,
+                        help="Location of sentencepiece model.")
+    parser.add_argument("--nj", type=int, default=1,
+                        help="Number of threads. Default: 1")
+    parser.add_argument("--concat", type=int, default=-1,
+                        help="Use concat mode instead valid mode with given length. Default: -1 (disable)")
+    parser.add_argument("--truncate", type=int, default=-1, metavar="trunc",
+                        help="Truncate the seq longer than trunc and take res of it as new seq. Default: -1 (disable)")
+    parser.add_argument("--bos_id", type=int, default=0,
+                        help="Begin of sequence index, available in concat > 1. Default: 0")
+    return parser
+
+
+if __name__ == "__main__":
+    parser = TextProcessingParser()
+    args = parser.parse_args()
+    main(args)
