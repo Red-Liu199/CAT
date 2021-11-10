@@ -6,3 +6,4 @@ kaldiio>=2.17.2
 tensorboard>=2.6.0
 jiwer>=2.2.0
 pyyaml>=6.0
+transformers>=4.12.3

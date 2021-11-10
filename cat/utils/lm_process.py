@@ -44,6 +44,7 @@ if __name__ == "__main__":
 
     ############ Stage 1  Tokenizer training ############
     if s_beg <= 1 and s_end >= 1:
+        print("{0} {1} {0}".format("="*20, "Stage 1 Tokenizer training"))
         fmt = "Stage 1  Tokenizer training: {}"
 
         assert 'sp' in hyper_settings, fmt.format(
@@ -59,6 +60,7 @@ if __name__ == "__main__":
 
     ############ Stage 2  Pickle data ############
     if s_beg <= 2 and s_end >= 2:
+        print("{0} {1} {0}".format("="*20, "Stage 2 Pickle data"))
         from transText2Bin import TextProcessingParser
         from transText2Bin import main as ProcessingMain
         fmt = "Stage 2  Pickle data: {}"
@@ -105,6 +107,7 @@ if __name__ == "__main__":
 
     ############ Stage 3  NN training ############
     if s_beg <= 3 and s_end >= 3:
+        print("{0} {1} {0}".format("="*20, "Stage 3 NN training"))
         fmt = "Stage 3  NN training: {}"
         try:
             import cat
@@ -119,6 +122,7 @@ if __name__ == "__main__":
 
     ############ Stage 4  Evaluating ############
     if s_beg <= 4 and s_end >= 4:
+        print("{0} {1} {0}".format("="*20, "Stage 4 Evaluating"))
         fmt = "Stage 4  Evaluating: {}"
         try:
             import cat

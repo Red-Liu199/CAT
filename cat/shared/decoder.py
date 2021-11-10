@@ -13,6 +13,8 @@ import torch
 import torch.nn as nn
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
+from transformers import GPT2Model, GPT2Config
+
 
 class AbsDecoder(nn.Module):
     """Abstract decoder class
@@ -200,7 +202,7 @@ Reference:
 https://github.com/pytorch/examples/blob/3970e068c7f18d2d54db2afee6ddd81ef3f93c24/word_language_model/model.py#L108
 '''
 
-
+# FIXME (huahuan): deprecate this once the huggingface one is tested.
 class Transformer(AbsDecoder):
     def __init__(self, num_classes: int, dim_hid: int, num_head: int, num_layers: int, dropout: float = 0.1, padding_idx: int = -1) -> None:
         super().__init__(num_classes, dim_hid, padding_idx=padding_idx)
@@ -214,9 +216,17 @@ class Transformer(AbsDecoder):
             encoder_layers, num_layers)
         self.ninp = dim_hid
 
-    def forward(self, src: torch.Tensor, input_lengths: Optional[torch.Tensor] = None, *args, **kwargs):
+    def forward(self, src: torch.Tensor, cache: torch.Tensor = None, input_lengths: Optional[torch.Tensor] = None, *args, **kwargs):
         # (N, S) -> (S, N)
         src = src.transpose(0, 1)
+        # this cache way is not efficient at all, but quite simple
+        if 'hidden' in kwargs and cache is None:
+            cache = kwargs['hidden']
+        if cache is not None:
+            # FIXME (huahuan): deal with paddings for N > 1
+            src = torch.cat([cache, src], dim=1)
+            cache = src.detach()
+
         T = src.size(0)
         src_mask = torch.triu(src.new_ones(
             T, T, dtype=torch.bool), diagonal=1)
@@ -231,4 +241,41 @@ class Transformer(AbsDecoder):
         encoder_out = self.transformer_encoder(
             embedded_src, src_mask, src_key_padding_mask)
         output = self.classifier(encoder_out).transpose(0, 1)
-        return output, None
+        return output, cache
+
+
+class CausalTransformer(AbsDecoder):
+    def __init__(self, num_classes: int, dim_hid: int, num_head: int, num_layers: int, attn_dropout: float = 0.1, padding_idx: int = -1) -> None:
+        super().__init__(num_classes, dim_hid, padding_idx=padding_idx)
+        configuration = GPT2Config(
+            vocab_size=num_classes, n_embd=dim_hid,
+            n_layer=num_layers, n_head=num_head, attn_pdrop=attn_dropout)
+        self.trans = GPT2Model(configuration)
+        # use my own token embedding layer
+        self.trans.wte = None
+
+    def forward(self, src_ids: torch.Tensor, cache: torch.Tensor = None, input_lengths: Optional[torch.Tensor] = None, *args, **kwargs):
+        # (N, S) -> (N, S, D])
+        embed_x = self.embedding(src_ids)
+        use_cache = not self.training
+
+        if input_lengths is None:
+            padding_mask = None
+        else:
+            # 1 for not masked, 0 for masked,
+            # this behavior is different from PyTorch nn.Transformer
+            padding_mask = torch.arange(src_ids.size(1), device=src_ids.device)[
+                None, :] < input_lengths[:, None].to(src_ids.device)
+            padding_mask = padding_mask.to(torch.float)
+
+        if 'hidden' in kwargs and cache is None:
+            cache = kwargs['hidden']
+
+        clm_out = self.trans(inputs_embeds=embed_x,
+                             attention_mask=padding_mask,
+                             past_key_values=cache, use_cache=use_cache)
+        logits = self.classifier(clm_out['last_hidden_state'])
+        if use_cache:
+            return logits, clm_out['past_key_values']
+        else:
+            return logits, None

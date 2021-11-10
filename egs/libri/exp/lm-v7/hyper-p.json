@@ -1,0 +1,32 @@
+{
+    "data": {
+        "train": [
+            "train_960"
+        ],
+        "dev": [
+            "dev_clean",
+            "dev_other"
+        ],
+        "test": [
+            "test_clean",
+            "test_other"
+        ],
+        "text_processing": {
+            "truncate": 128
+        }
+    },
+    "sp": {
+        "model_type": "unigram",
+        "vocab_size": 1024,
+        "model_prefix": "sentencepiece/libri_unigram_1024/spm"
+    },
+    "train": {
+        "batch_size": 1024,
+        "grad-norm": 5.0,
+        "grad-accum-fold": 2,
+        "databalance": true,
+        "checkall": true,
+        "amp": true
+    },
+    "commit": "60aa5175c9630bcb5ea1790444732fc948b05865"
+}

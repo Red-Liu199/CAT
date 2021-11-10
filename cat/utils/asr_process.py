@@ -397,7 +397,7 @@ def combineText(datasets: Union[str, List[str]], f_out: Optional[str] = None, se
 
 def SentencePieceTrain(
         settings: dict,
-        f_hyper:str, promt:str='{}'):
+        f_hyper: str, promt: str = '{}'):
     assert 'data' in settings, promt.format(
         f"missing 'data' in hyper-setting file {f_hyper}")
     assert 'sp' in settings, promt.format(
@@ -431,6 +431,7 @@ def SentencePieceTrain(
 
     os.remove(f_corpus_tmp)
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
@@ -460,12 +461,14 @@ if __name__ == "__main__":
 
     ############ Stage 1  Tokenizer training ############
     if s_beg <= 1 and s_end >= 1:
+        print("{0} {1} {0}".format("="*20, "Stage 1 Tokenizer training"))
         fmt = "Stage 1  Tokenizer training: {}"
 
         SentencePieceTrain(hyper_settings, f_hyper_settings, fmt)
 
     ############ Stage 2  Pickle data ############
     if s_beg <= 2 and s_end >= 2:
+        print("{0} {1} {0}".format("="*20, "Stage 2 Pickle data"))
         import sentencepiece as spm
         fmt = "Stage 2  Pickle data: {}"
 
@@ -503,6 +506,7 @@ if __name__ == "__main__":
 
     ############ Stage 3  NN training ############
     if s_beg <= 3 and s_end >= 3:
+        print("{0} {1} {0}".format("="*20, "Stage 3 NN training"))
         fmt = "Stage 3  NN training: {}"
         try:
             import cat
@@ -517,6 +521,7 @@ if __name__ == "__main__":
 
     ############ Stage 4  Decoding ############
     if s_beg <= 4 and s_end >= 4:
+        print("{0} {1} {0}".format("="*20, "Stage 4 Decoding"))
         fmt = "Stage 4  Decoding: {}"
         import re
         import torch
@@ -630,10 +635,13 @@ if __name__ == "__main__":
                 print(fmt.format(
                     f"set 'ext-lm-check' to {decode_settings['ext-lm-check']}"))
                 checkExist('f', decode_settings['ext-lm-check'])
+            suffix_lm = f"lm-{decode_settings['lm-weight']}"
+        else:
+            suffix_lm = "nolm"
         if 'output_prefix' not in decode_settings:
             decodedir = os.path.join(args.expdir, 'decode')
             os.makedirs(decodedir, exist_ok=True)
-            f_text = f"beam-{decode_settings['beam_size']}_algo-{decode_settings['algo']}_{suffix_avgmodel}"
+            f_text = f"beam-{decode_settings['beam_size']}_algo-{decode_settings['algo']}_{suffix_lm}_{suffix_avgmodel}"
             decode_out_prefix = os.path.join(decodedir, f_text)
             print(fmt.format(
                 f"set 'output_prefix' to {decode_out_prefix}"))

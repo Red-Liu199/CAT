@@ -202,7 +202,7 @@ The origin impl return pos_enc + x. Our impl only return pos_enc
 
 class PositionalEncoding(nn.Module):
 
-    def __init__(self, d_model, max_len=2000):
+    def __init__(self, d_model, max_len=4096):
         super(PositionalEncoding, self).__init__()
 
         pe = torch.zeros(max_len, d_model)

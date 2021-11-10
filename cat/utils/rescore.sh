@@ -54,10 +54,9 @@ if [ $cpu == "True" ]; then
 fi
 
 checkpoint=$lmdir/checks/$check
-python utils/checkfile.py -f $gt_text $checkpoint $lmdir/config.json $nbestlist $spmodel || exit 1
-
+text_recored=./rescore.out.tmp
 python -m cat.lm.rescore \
-    $nbestlist ./rescore.out.tmp \
+    $nbestlist $text_recored \
     --dist-url="tcp://127.0.0.1:13245" \
     --lm-config=$lmdir/config.json \
     --lm-check=$checkpoint \
@@ -66,16 +65,11 @@ python -m cat.lm.rescore \
     --lamb=$lamb ||
     exit 1
 
-if [ -f ./rescore.out.tmp ]; then
-    cat ./rescore.out.tmp | sort -k 1 >./rescore.sorted.out.tmp || exit 1
-    rm ./rescore.out.tmp
-fi
-
-if [ -f ./rescore.sorted.out.tmp ]; then
+if [ -f $text_recored ]; then
     if [ $cer == "True" ]; then
-        python utils/wer.py --stripid --cer $gt_text ./rescore.sorted.out.tmp || exit 1
+        python utils/wer.py --stripid --cer $gt_text $text_recored || exit 1
     else
-        python utils/wer.py --stripid $gt_text ./rescore.sorted.out.tmp || exit 1
+        python utils/wer.py --stripid $gt_text $text_recored || exit 1
     fi
-    rm ./rescore.sorted.out.tmp
+    rm $text_recored
 fi

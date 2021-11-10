@@ -2,10 +2,10 @@
 # This script includes the processing of librispeech extra corpus text
 set -u
 
-d_out=data/text
+d_out=data
 
 mkdir -p $d_out
-text=$d_out/librispeech
+text=$d_out/librispeech.txt
 if [ ! -f $text ]; then
     archive=$d_out/librispeech-lm-norm.txt.gz
     if [ ! -f $archive ]; then
