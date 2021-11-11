@@ -1,0 +1,47 @@
+{
+    "data": {
+        "train": [
+            "train_960"
+        ],
+        "dev": [
+            "dev_clean",
+            "dev_other"
+        ],
+        "test": [
+            "test_clean",
+            "test_other"
+        ],
+        "filter": ":2000"
+    },
+    "sp": {
+        "bos_id":-1,
+        "unk_id": 0,
+        "model_type": "unigram",
+        "vocab_size": 1024,
+        "model_prefix": "sentencepiece/libri_unigram_1024_nobos/spm"
+    },
+    "train": {
+        "batch_size": 480,
+        "grad-norm": 5.0,
+        "grad-accum-fold": 1,
+        "databalance": true,
+        "checkall": true,
+        "amp": true
+    },
+    "inference": {
+        "avgmodel": {
+            "mode": "best",
+            "num": 10
+        },
+        "decode": {
+            "algo": "lc",
+            "beam_size": 10,
+            "cpu": true
+        },
+        "er": {
+            "mode": "wer",
+            "oracle": true
+        }
+    },
+    "commit": "60aa5175c9630bcb5ea1790444732fc948b05865"
+}

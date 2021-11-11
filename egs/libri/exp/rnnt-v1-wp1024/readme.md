@@ -10,6 +10,7 @@
 
 * No initialized module.
 * Joint training from scratch
+* incompatible with new `*_process.py`
 
 ### WER
 ```

@@ -10,6 +10,7 @@
 
 * PN pretrained from LM, TN pretrained from phone-CTC-CRF
 * No frozen module in joint training
+* incompatible with new `*_process.py`
 
 ### WER
 ```

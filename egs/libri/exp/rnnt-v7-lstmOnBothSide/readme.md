@@ -10,6 +10,7 @@
 
 * Pre-train and fix PN & TN
 * Stack LSTM on both PN and TN
+* incompatible with new `*_process.py`
 
 ### WER
 ```

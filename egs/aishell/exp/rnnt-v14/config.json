@@ -37,8 +37,7 @@
             "variational_noise": [
                 0.0,
                 0.075
-            ],
-            "classical": false
+            ]
         }
     },
     "joint": {

@@ -10,6 +10,7 @@
 
 * Pre-trained and fixed PN & TN
 * Stack extra 2 LSTM on TN in joint-training
+* incompatible with new `*_process.py`
 
 ### WER
 ```

@@ -12,6 +12,8 @@
 
 ### WER
 ```
+result is unreliable since --databalance bug, see rnnt-v23
+
 test_clean %WER 4.05 [2127 / 52576, 284 ins, 154 del, 1689 sub ]
 test_other %WER 10.03 [5249 / 52343, 602 ins, 413 del, 4234 sub ]
 

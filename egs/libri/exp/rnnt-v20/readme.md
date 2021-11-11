@@ -13,6 +13,8 @@
 
 ### WER
 ```
+result is unreliable since --databalance bug, see rnnt-v23
+
 %WER 4.50 [ 2367 / 52576, 308 ins, 157 del, 1902 sub ]
 %WER 10.76 [ 5630 / 52343, 725 ins, 467 del, 4438 sub ]
 # with model average last 8
