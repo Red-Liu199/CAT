@@ -12,16 +12,8 @@
 
 ### WER
 ```
-Use CPU = False
-test ext_lm= %CER 5.48 [5743 / 104765, 148 ins, 190 del, 5405 sub ]
-
-Custom checkpoint: avg_best_10.pt
-Use CPU = False
-test ext_lm= %CER 4.87 [5102 / 104765, 137 ins, 141 del, 4824 sub ]
-
-Custom checkpoint: avg_last_10.pt
-Use CPU = False
-test ext_lm= %CER 4.85 [5078 / 104765, 112 ins, 163 del, 4803 sub ]
+test    %CER 4.86 [5096 / 104765, 127 ins, 156 del, 4813 sub ]
+test    %CER 3.46 [3623 / 104765, 82 ins, 134 del, 3407 sub ]
 ```
 
 ### Monitor figure

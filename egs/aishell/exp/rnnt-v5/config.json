@@ -34,8 +34,7 @@
             "variational_noise": [
                 0.0,
                 0.075
-            ],
-            "classical": false
+            ]
         }
     },
     "joint": {
@@ -44,8 +43,7 @@
             "odim_encoder": 512,
             "odim_decoder": 512,
             "hdim": 512,
-            "num_classes": 4232,
-            "classical": false
+            "num_classes": 4232
         }
     },
     "scheduler": {

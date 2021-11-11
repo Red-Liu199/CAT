@@ -83,7 +83,6 @@ class LSTMPredictNet(AbsDecoder):
                  norm: bool = False,
                  variational_noise: Union[Tuple[float,
                                                 float], List[float]] = None,
-                 classical: bool = True,
                  padding_idx: int = -1,
                  *rnn_args, **rnn_kwargs):
         super().__init__(num_classes, hdim, padding_idx=padding_idx)
@@ -111,13 +110,6 @@ class LSTMPredictNet(AbsDecoder):
                     self.register_buffer(n_noise, torch.empty_like(
                         param.data), persistent=False)
                     self._noise.append((n_noise, param))
-
-        if classical:
-            self.classifier = nn.Sequential(OrderedDict([
-                ('proj', nn.Linear(hdim, hdim)),
-                ('act', nn.ReLU()),
-                ('linear', nn.Linear(hdim, num_classes))
-            ]))
 
     def forward(self, inputs: torch.LongTensor, hidden: torch.FloatTensor = None, input_lengths: torch.LongTensor = None) -> Tuple[torch.FloatTensor, Union[torch.FloatTensor, None]]:
 
@@ -203,6 +195,8 @@ https://github.com/pytorch/examples/blob/3970e068c7f18d2d54db2afee6ddd81ef3f93c2
 '''
 
 # FIXME (huahuan): deprecate this once the huggingface one is tested.
+
+
 class Transformer(AbsDecoder):
     def __init__(self, num_classes: int, dim_hid: int, num_head: int, num_layers: int, dropout: float = 0.1, padding_idx: int = -1) -> None:
         super().__init__(num_classes, dim_hid, padding_idx=padding_idx)

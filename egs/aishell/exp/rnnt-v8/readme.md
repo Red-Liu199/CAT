@@ -13,24 +13,8 @@
 
 ### WER
 ```
-Use CPU = False
-test %WER 12.19 [7856 / 64428, 1139 ins, 611 del, 6106 sub ]
-%CER 6.04 [6325 / 104765, 182 ins, 126 del, 6017 sub ]
-
-Custom checkpoint: avg_best_10.pt
-Use CPU = False
-test %WER 11.43 [7365 / 64428, 933 ins, 630 del, 5802 sub ]
-%CER 5.58 [5842 / 104765, 110 ins, 125 del, 5607 sub ]
-
-Custom checkpoint: avg_last_10.pt
-Use CPU = False
-test %WER 11.14 [7179 / 64428, 926 ins, 588 del, 5665 sub ]
-%CER 5.48 [5742 / 104765, 107 ins, 122 del, 5513 sub ]
-
-Custom checkpoint: avg_last_10_bn.pt
-Use CPU = False
-test ext_lm= %WER 11.22 [7227 / 64428, 783 ins, 707 del, 5737 sub ]
-test ext_lm= %CER 5.63 [5894 / 104765, 135 ins, 121 del, 5638 sub ]
+test    %CER 5.46 [5718 / 104765, 118 ins, 120 del, 5480 sub ]
+test    %CER 3.81 [3991 / 104765, 82 ins, 106 del, 3803 sub ]
 ```
 
 ### Monitor figure

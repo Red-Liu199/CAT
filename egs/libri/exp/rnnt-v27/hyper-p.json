@@ -28,11 +28,14 @@
             "mode": "best",
             "num": 10
         },
+        "lmdir": "exp/lm-v8",
         "decode": {
-            "algo": "lc",
+            "algo": "default",
             "beam_size": 10,
             "cpu": true,
-            "resume": "best_10.pt"
+            "nj": 80,
+            "resume": "best_10.pt",
+            "lm-weight": 0.2
         },
         "er": {
             "mode": "wer",

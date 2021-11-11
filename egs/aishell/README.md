@@ -2,26 +2,29 @@
 
 - [Github page](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell)
 - 基础设置参考[[Librispeech]]
+- 特征提取增加了3倍变速
 
-Results in `%WER/%WER on averaging model`
+Results in`%WER (%WER with LM) [%WER oracle]`
 
-| ID                                                                                    | Notes                                                                          | test %CER     | averaging | \#params (M) |
-| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ------------- | --------- | ------------ |
-| [v1](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/rnnt-v1)   | encoder: Conformer-S                                                           | -             | last 10   | 11.92        |
-| [v2](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/rnnt-v2)   | `v1` + peak factor\: 2.0 -> 1.0, warmup steps\: 10k -> 5k                      | 7.26/6.58     | best 10   | 11.92        |
-| [v3](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/rnnt-v3)   | encoder: refers to ESPNET                                                      | 6.20/5.31     | best 10   | 89.58        |
-| [v5](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/rnnt-v5)   | `v3` + units\: BPE3500 -> char(~BPE4230), gradient clipping, attention dropout | 6.66/6.17     | best 10   | 90.33        |
-| [v7](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/rnnt-v7)   | `v5` + rm gradient clipping, attention dropout\: 0.3 -> 0.2                    | 6.24/5.67     | best 10   | ↑            |
-| [v8](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/rnnt-v8)   | `v7` + attention dropout\: 0.2 -> 0.1                                          | 6.04/5.48     | last 10   | ↑            |
-| [v10](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/rnnt-v10) | `v5` + rm spaces in transcript                                                 | 5.91/5.21     | best 10   | ↑            |
-| [v11](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/rnnt-v11) | `v10` + disable time warp, stop epoch\: 100 -> 80                              | 5.91/5.24     | best 10   | ↑            |
-| [v12](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/rnnt-v12) | `v10` + PN mask, stop epoch\: 100 -> 80                                        | 5.48/4.85     | last 10   | ↑            |
-| [v13](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/rnnt-v13) | `v12` + PN mask ratio: 0.2 -> 0.3, No. PN mask: 4 -> 3, stop epochs: 80 -> 100 | 5.41/4.79     | best 10   | ↑            |
-| [v14](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/rnnt-v14) | `v12` + subsample: conv2d -> vgg2l, stop epochs: 80 -> 100                     | **5.31/4.77** | best 10   | 84.30        |
+| ID                                                                                                                                                | Notes                                                                          | test %CER         | averaging | \#params (M) |
+| ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ----------------- | --------- | ------------ |
+| [v1](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/rnnt-v1)                                                               | encoder: Conformer-S                                                           | 7.73\[5.89\]      | -         | 11.92        |
+| [v2](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/rnnt-v2)                                                               | `v1` + peak factor\: 2.0 -> 1.0, warmup steps\: 10k -> 5k                      | 6.58              | best 10   | 11.92        |
+| [v3](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/rnnt-v3)                                                               | encoder: refers to ESPNET                                                      | 5.32\[4.02\]      | best 10   | 89.58        |
+| [v5](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/rnnt-v5)                                                               | `v3` + units\: BPE3500 -> char(~BPE4230), gradient clipping, attention dropout | 6.13\[4.01\]      | best 10   | 90.33        |
+| [v7](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/rnnt-v7)                                                               | `v5` + rm gradient clipping, attention dropout\: 0.3 -> 0.2                    | 5.67\[3.80\]      | best 10   | ↑            |
+| [v8](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/rnnt-v8)                                                               | `v7` + attention dropout\: 0.2 -> 0.1                                          | 5.46\[3.81\]      | last 10   | ↑            |
+| [v10](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/rnnt-v10)                                                             | `v5` + rm spaces in transcript                                                 | 5.23\[4.00\]      | best 10   | ↑            |
+| [v11](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/rnnt-v11)                                                             | `v10` + disable time warp, stop epoch\: 100 -> 80                              | 5.19\[3.99\]      | best 10   | ↑            |
+| [v12](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/rnnt-v12)                                                             | `v10` + PN mask, stop epoch\: 100 -> 80                                        | 4.86\[3.46\]      | last 10   | ↑            |
+| [v13](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/rnnt-v13)                                                             | `v12` + PN mask ratio: 0.2 -> 0.3, No. PN mask: 4 -> 3, stop epochs: 80 -> 100 | 4.81\[3.53\]      | best 10   | ↑            |
+| [v14](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/rnnt-v14)                                                             | `v12` + subsample: conv2d -> vgg2l, stop epochs: 80 -> 100                     | **4.77** \[3.41\] | best 10   | 84.30        |
+| [ESPnet-1](https://github.com/espnet/espnet/blob/master/egs/aishell/asr1/RESULTS.md#conformer-transducer-with-auxiliary-task-ctc-weight--05)      | RNN-T + CTC                                                                    | 4.8               | ?         | ~84.30       |
+| [ESPnet-2](https://github.com/espnet/espnet/tree/master/egs2/aishell/asr1#conformer--specaug--speed-perturbation-featsraw-n_fft512-hop_length128) | CTC/Attention, result with transformer LM in `()`                              | 4.9(4.7)          | ?         | ?            |
 
 - 特别要注意的是，使用BPE3500建模时，设置的SentencePiece覆盖率为0.9995，使用char建模时覆盖率设置为1
 - `v1`和`v2`是初步的实验，主要用于验证代码，数据处理和模型平均等；
-- `v3`部分参考了ESPNET（模型、scheduler、SpecAug参数等），仍是当前最好的结果
+- `v3`部分参考了ESPNET（模型、scheduler、SpecAug参数等），~~仍是当前最好的结果~~
 - `v5`相对`v3`增加了若干措施，改变了建模单元，性能出现显著恶化，根据后续实验分析，其中梯度裁剪影响较小
 - `v5` -> `v7` -> `v8`: attention dropout似乎没有好处，奇怪的是，char建模的WER很好，但CER差
 - `v10`去除空格之后，结果有一定的提升，但是仍然达不到ESPNET的5.0，且出现明显过拟合

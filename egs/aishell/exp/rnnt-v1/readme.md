@@ -12,12 +12,9 @@
 
 ### WER
 ```
-Use CPU = False
-test %WER 14.72 [9482 / 64428, 1165 ins, 767 del, 7550 sub ]
-
-Custom checkpoint: avg_35_10.pt
-Use CPU = False
-test %WER 13.22 [8516 / 64428, 1048 ins, 724 del, 6744 sub ]
+no model averaging
+test    %CER 7.73 [8103 / 104765, 204 ins, 208 del, 7691 sub ]
+test    %CER 5.89 [6169 / 104765, 123 ins, 173 del, 5873 sub ]
 ```
 
 ### Monitor figure

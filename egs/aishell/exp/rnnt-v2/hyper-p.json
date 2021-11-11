@@ -1,0 +1,39 @@
+{
+    "data": {
+        "train": "train_sp",
+        "dev": "dev_sp",
+        "test": "test",
+        "filter": ":2000"
+    },
+    "sp": {
+        "model_type": "unigram",
+        "vocab_size": 3500,
+        "bos_id": -1,
+        "unk_id": 0,
+        "character_coverage": 0.9995,
+        "model_prefix": "sentencepiece/aishell_bpe3500/spm"
+    },
+    "train": {
+        "batch_size": 512,
+        "grad-norm": 5.0,
+        "databalance": true,
+        "checkall": true,
+        "amp": true
+    },
+    "inference": {
+        "avgmodel": {
+            "mode": "best",
+            "num": 10
+        },
+        "decode": {
+            "algo": "lc",
+            "beam_size": 10,
+            "cpu": true
+        },
+        "er": {
+            "mode": "cer",
+            "oracle": true
+        }
+    },
+    "commit": "be61b7bd78943cde2156760ef39ea292e9bd8b8f"
+}
