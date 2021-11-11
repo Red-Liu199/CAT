@@ -30,8 +30,7 @@
             "variational_noise": [
                 0.0,
                 0.075
-            ],
-            "classical": false
+            ]
         }
     },
     "joint": {
@@ -40,14 +39,13 @@
             "odim_encoder": 144,
             "odim_decoder": 320,
             "hdim": 320,
-            "num_classes": 1024,
-            "classical": false
+            "num_classes": 1024
         }
     },
     "scheduler": {
         "type": "SchedulerTransformerEarlyStop",
         "optimizer": {
-            "type_optim": "Adam",
+            "type": "Adam",
             "use_zero": false,
             "kwargs": {
                 "lr": 3e-4,

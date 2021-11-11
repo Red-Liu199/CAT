@@ -1,7 +1,6 @@
 {
     "decoder": {
         "kwargs": {
-            "classical": false,
             "hdim": 512,
             "num_classes": 1024,
             "num_layers": 1,
@@ -29,7 +28,6 @@
     },
     "joint": {
         "kwargs": {
-            "classical": false,
             "hdim": 512,
             "num_classes": 1024,
             "odim_decoder": 512,

@@ -1,0 +1,27 @@
+{
+    "data": {
+        "train": "train_sp",
+        "dev": "dev_sp",
+        "test": "test",
+        "text_processing": {
+            "truncate": 32
+        },
+        "lang": "zh-cn"
+    },
+    "sp": {
+        "model_type": "char",
+        "vocab_size": 4232,
+        "add_dummy_prefix": false,
+        "use_all_vocab": true,
+        "model_prefix": "sentencepiece/aishell_char/spm"
+    },
+    "train": {
+        "batch_size": 2048,
+        "grad-norm": 5.0,
+        "grad-accum-fold": 1,
+        "databalance": true,
+        "checkall": true,
+        "amp": true
+    },
+    "commit": "bb42e467fca4fbd08e5c0b9745da8583f56c15ad"
+}

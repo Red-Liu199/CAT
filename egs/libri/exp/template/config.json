@@ -25,7 +25,6 @@
     "decoder": {
         "type": "LSTMPredictNet",
         "kwargs": {
-            "classical": false,
             "hdim": 128,
             "num_classes": 1024,
             "num_layers": 1,
