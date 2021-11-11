@@ -16,8 +16,12 @@ from typing import Union, Literal, List, Tuple, Optional, Callable
 def resolve_sp_path(config: dict, prefix: Optional[str] = None, allow_making: bool = False):
     if 'model_prefix' in config:
         spdir = os.path.dirname(config['model_prefix'])
-        if os.path.isdir(spdir):
-            return config, (config['model_prefix']+'.model', config['model_prefix']+'.vocab')
+        if not os.path.isdir(spdir):
+            print(
+                f"Warning: trying to resolve from an empty directory: {spdir}")
+            if allow_making:
+                os.makedirs(spdir)
+        return config, (config['model_prefix']+'.model', config['model_prefix']+'.vocab')
 
     if prefix is not None:
         prefix += '_'

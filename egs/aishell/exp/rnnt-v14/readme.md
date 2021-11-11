@@ -10,18 +10,10 @@
 
 * `v12` + subsample: conv2d -> vgg2l, stop epochs: 80 -> 100
 
-### WER
+### Result
 ```
-Use CPU = False
-test ext_lm= %CER 5.31 [5565 / 104765, 135 ins, 176 del, 5254 sub ]
-
-Custom checkpoint: avg_best_10.pt
-Use CPU = False
-test ext_lm= %CER 4.77 [4998 / 104765, 118 ins, 137 del, 4743 sub ]
-
-Custom checkpoint: avg_last_10.pt
-Use CPU = False
-test ext_lm= %CER 4.77 [4993 / 104765, 102 ins, 167 del, 4724 sub ]
+test    %CER 4.77 [4998 / 104765, 140 ins, 132 del, 4726 sub ]
+test    %CER 3.41 [3575 / 104765, 79 ins, 116 del, 3380 sub ]
 ```
 
 ### Monitor figure
