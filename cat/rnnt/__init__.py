@@ -18,6 +18,8 @@ from torch.cuda.amp import autocast
 
 class PackedSequence():
     def __init__(self, xs: Union[Sequence[torch.Tensor], torch.Tensor] = None, xn: torch.LongTensor = None) -> None:
+        self._data = None   # type: torch.Tensor
+        self._lens = None   # type: torch.Tensor
         if xs is None:
             return
 

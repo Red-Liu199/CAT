@@ -75,7 +75,7 @@ def sentencepiece_train(intext: str, **kwargs):
     spm.SentencePieceTrainer.Train(**DEFAULT_SETTINGS)
 
 
-def parsingData(f_scp: str, f_label: str, f_out: str, filter: Optional[str] = None, spm=None):
+def parsingData(f_scp: str, f_label: str, f_out: str, filter: Optional[str] = None, spm=None, iszh: bool = False):
     """Parsing audio feature and text label into pickle file.
 
     Args:
@@ -112,8 +112,12 @@ def parsingData(f_scp: str, f_label: str, f_out: str, filter: Optional[str] = No
     if spm is None:
         labels = {l[0]: np.asarray([int(i) for i in l[1:]]) for l in labels}
     else:
-        labels = {l[0]: np.asarray(spm.encode(' '.join(l[1:])))
-                  for l in labels}
+        if iszh:
+            labels = {l[0]: np.asarray(spm.encode(''.join(l[1:])))
+                      for l in labels}
+        else:
+            labels = {l[0]: np.asarray(spm.encode(' '.join(l[1:])))
+                      for l in labels}
 
     total_lines = sum(1 for _ in open(f_scp, 'r'))
     assert len(
@@ -480,6 +484,11 @@ if __name__ == "__main__":
             f"missing 'data' in hyper-setting file {f_hyper_settings}")
         assert 'sp' in hyper_settings, fmt.format(
             f"missing 'sp' in hyper-setting file {f_hyper_settings}")
+        if 'lang' in hyper_settings['data']:
+            # check if it's chinese-like languages
+            iszh = ('zh' == hyper_settings['data']['lang'].split('-')[0])
+        else:
+            iszh = False
 
         _, (spmodel, _) = resolve_sp_path(hyper_settings['sp'])
         checkExist('f', spmodel)
@@ -504,7 +513,7 @@ if __name__ == "__main__":
             for f_s, f_t in zip(f_scps, f_texts):
                 f_pkl_tmp = os.path.join('/tmp', str(uuid.uuid4()))
                 parsingData(f_scp=f_s, f_label=f_t, f_out=f_pkl_tmp,
-                            filter=filter, spm=spmodel)
+                            filter=filter, spm=spmodel, iszh=iszh)
             combinePickle(f_pkl_tmp, os.path.join(
                 d_pkl, dataset+'.pkl'), rm_src=True)
 
@@ -655,6 +664,41 @@ if __name__ == "__main__":
             decode_settings['dist-url'] = f"tcp://localhost:{get_free_port()}"
             print(fmt.format(
                 f"set 'dist-url' to {decode_settings['dist-url']}"))
+        if 'algo' in decode_settings and decode_settings['algo'] == 'alsd' and 'umax-portion' not in decode_settings:
+            # trying to compute a reasonable portion value from trainset
+            from cat.shared.data import SpeechDatasetPickle
+            import numpy as np
+            f_pkl = os.path.join(args.expdir, f'pkl/train.pkl')
+            if os.path.isfile(f_pkl):
+                # since we using conformer, there's a 1/4 subsapling, if it's not, change that
+                if "subsample" in inference_settings:
+                    sub_factor = inference_settings['subsample']
+                    assert sub_factor > 1, fmt.format(
+                        f"Can't deal with 'subsample'={sub_factor} in hyper-p['inference']")
+                    print(fmt.format(
+                        f"resolving portion data from train set, might takes a while."))
+                    dataset = SpeechDatasetPickle(f_pkl)
+                    lt = np.asarray(dataset.get_seq_len()).astype(np.float64)
+                    ly = []
+                    for _, _, label in dataset.dataset:
+                        ly.append(len(label))
+                    assert len(lt) == len(ly), fmt.format(
+                        f"Unknown condition {len(lt)} != {len(ly)}")
+                    ly = np.asarray(ly).astype(np.float64)
+                    lt /= sub_factor
+                    normal_ly = ly/lt
+                    portion = np.mean(normal_ly) + 5 * np.std(normal_ly)
+                    del lt
+                    del ly
+                    del normal_ly
+                    decode_settings['umax-portion'] = portion
+                    with open(f_hyper_settings, 'r') as fi:
+                        orin_hyper_setting = json.load(fi)
+                    orin_hyper_setting['inference']['decode']['umax-portion'] = portion
+                    with open(f_hyper_settings, 'w') as fo:
+                        json.dump(orin_hyper_setting, fo, indent=4)
+                    print(fmt.format(
+                        f"set 'umax-portion' to {portion}"))
 
         testsets = hyper_settings['data']['test']
         if isinstance(testsets, str):

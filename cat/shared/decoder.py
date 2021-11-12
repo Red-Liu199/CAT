@@ -7,7 +7,7 @@
 """
 import math
 from collections import OrderedDict
-from typing import Union, Tuple, List, Optional
+from typing import Union, Tuple, List, Optional, Callable, Any
 
 import torch
 import torch.nn as nn
@@ -52,6 +52,28 @@ class AbsDecoder(nn.Module):
         self.classifier = nn.Linear(n_hid, num_classes)
         if tied:
             self.classifier.weight = self.embedding.weight
+
+    @staticmethod
+    def batching_states(*args, **kwargs):
+        raise NotImplementedError
+
+    @staticmethod
+    def get_state_from_batch(*args, **kwargs):
+        """Get state of given index (or index list) from the batched states"""
+        raise NotImplementedError
+
+    def init_states(self, N: int = 1):
+        """The tensor representation of 'None' state of given batch size N"""
+        raise NotImplementedError
+
+
+class AbsStates():
+    def __init__(self, state, decoder: AbsDecoder) -> None:
+        self._state = state
+        self.batching = decoder.batching_states
+
+    def __call__(self, *args: Any, **kwds: Any) -> Any:
+        return self._state
 
 
 class LSTMPredictNet(AbsDecoder):
@@ -154,6 +176,38 @@ class LSTMPredictNet(AbsDecoder):
             noise = getattr(self, n_noise)
             param.data -= noise
 
+    @staticmethod
+    def batching_states(states: List[AbsStates]) -> AbsStates:
+        h_0 = torch.cat([_state()[0] for _state in states], dim=1)
+        c_0 = torch.cat([_state()[1] for _state in states], dim=1)
+        return AbsStates((h_0, c_0), LSTMPredictNet)
+
+    @staticmethod
+    def get_state_from_batch(raw_batched_states, index: Union[int, List[int]]) -> Union[AbsStates, List[AbsStates]]:
+
+        if isinstance(index, int):
+            flag_squeeze = True
+            index = [index]
+        else:
+            flag_squeeze = False
+
+        o_states = []
+        for _i in index:
+            h_0 = raw_batched_states[0][:, _i:_i+1, :]
+            c_0 = raw_batched_states[1][:, _i:_i+1, :]
+            o_states.append(AbsStates((h_0, c_0), LSTMPredictNet))
+        if flag_squeeze:
+            return o_states[0]
+        else:
+            return o_states
+
+    def init_states(self, N: int = 1) -> AbsStates:
+        device = next(iter(self.parameters())).device
+        h_0 = torch.zeros(
+            (self.rnn.num_layers, N, self.rnn.hidden_size), device=device)
+        c_0 = torch.zeros_like(h_0)
+        return AbsStates((h_0, c_0), self)
+
 
 class PlainPN(AbsDecoder):
     def __init__(self, num_classes: int, hdim: int, *args, **kwargs):
@@ -247,6 +301,9 @@ class CausalTransformer(AbsDecoder):
         self.trans = GPT2Model(configuration)
         # use my own token embedding layer
         self.trans.wte = None
+        self.n_head = num_head
+        self.n_layers = num_layers
+        self.d_head = dim_hid//num_head
 
     def forward(self, src_ids: torch.Tensor, cache: torch.Tensor = None, input_lengths: Optional[torch.Tensor] = None, *args, **kwargs):
         # (N, S) -> (N, S, D])
@@ -273,3 +330,49 @@ class CausalTransformer(AbsDecoder):
             return logits, clm_out['past_key_values']
         else:
             return logits, None
+
+    @staticmethod
+    def batching_states(states: List[AbsStates]) -> AbsStates:
+        n_layers = len(states[0]())
+
+        batched_states = []
+        for l in range(n_layers):
+            _state_0 = torch.cat([_state()[l][0] for _state in states], dim=0)
+            _state_1 = torch.cat([_state()[l][1] for _state in states], dim=0)
+            batched_states.append((_state_0, _state_1))
+
+        return AbsStates(tuple(batched_states), CausalTransformer)
+
+    @staticmethod
+    def get_state_from_batch(raw_batched_states: AbsStates, index: Union[int, List[int]]) -> Union[AbsStates, List[AbsStates]]:
+
+        if isinstance(index, int):
+            flag_squeeze = True
+            index = [index]
+        else:
+            flag_squeeze = False
+
+        n_layers = len(raw_batched_states)
+        o_states = []
+        for _i in index:
+            _o_state = []
+            for l in range(n_layers):
+                s_0 = raw_batched_states[l][0][_i:_i+1, :, :, :]
+                s_1 = raw_batched_states[l][1][_i:_i+1, :, :, :]
+                _o_state.append((s_0, s_1))
+            o_states.append(AbsStates(tuple(_o_state), CausalTransformer))
+
+        if flag_squeeze:
+            return o_states[0]
+        else:
+            return o_states
+
+    def init_states(self, N: int = 1) -> AbsStates:
+        device = next(iter(self.parameters())).device
+        nested_states = []
+        for l in range(self.n_layers):
+            _state_0 = torch.zeros(
+                (N, self.n_head, 1, self.d_head), device=device)
+            _state_1 = torch.zeros_like(_state_0)
+            nested_states.append((_state_0, _state_1))
+        return AbsStates(tuple(nested_states), self)

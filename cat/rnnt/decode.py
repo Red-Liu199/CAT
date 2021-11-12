@@ -118,7 +118,7 @@ def main_worker(gpu: int, args: argparse.Namespace, fmt: str, models=None):
 
     searcher = TransducerBeamSearcher(
         model.decoder, model.joint, blank_id=0, bos_id=model.bos_id, beam_size=args.beam_size,
-        nbest=args.beam_size, algo=args.algo, prefix_merge=True,
+        nbest=args.beam_size, algo=args.algo, prefix_merge=True, umax_portion=args.umax_portion,
         state_beam=2.3, expand_beam=2.3, temperature=1.0,
         lm_module=ext_lm, lm_weight=args.lm_weight)
 
@@ -211,6 +211,8 @@ def DecoderParser():
     parser.add_argument("--spmodel", type=str, default='',
                         help="SPM model location.")
     parser.add_argument("--nj", type=int, default=None)
+    parser.add_argument("--umax-portion", type=float,
+                        default=0.35, help="Umax/T for ALSD decoding.")
     parser.add_argument("--cpu", action='store_true', default=False)
     parser.add_argument("--lower", action='store_true', default=False)
     return parser
