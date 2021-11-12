@@ -29,13 +29,15 @@
             "num": 10
         },
         "lmdir": "exp/lm-v8",
+        "subsample": 4,
         "decode": {
-            "algo": "default",
-            "beam_size": 10,
+            "algo": "alsd",
+            "beam_size": 32,
             "cpu": true,
             "nj": 80,
             "resume": "best_10.pt",
-            "lm-weight": 0.2
+            "lm-weight": 0.2,
+            "umax-portion": 0.34695994761134896
         },
         "er": {
             "mode": "wer",

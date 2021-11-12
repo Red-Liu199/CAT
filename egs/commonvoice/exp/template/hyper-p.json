@@ -26,9 +26,10 @@
             "mode": "best",
             "num": 10
         },
+        "subsample": 4,
         "decode": {
-            "algo": "lc",
-            "beam_size": 10,
+            "algo": "alsd",
+            "beam_size": 64,
             "cpu": true
         },
         "er": {

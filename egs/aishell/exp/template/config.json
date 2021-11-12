@@ -10,8 +10,7 @@
         "compact": true,
         "decoder_mask_range": 0.2,
         "fused": true,
-        "num_decoder_mask": 4,
-        "time_reduction": 2
+        "num_decoder_mask": 4
     },
     "joint": {
         "type": "JointNet",
