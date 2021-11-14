@@ -265,7 +265,6 @@ class NbestListCollate():
 
         if self.isgpt:
             # NOTE (huahuan): GPT-2 is cased.
-            texts = [t.lower() for t in texts]
             tokens = self._tokenizer(texts, return_tensors='pt', padding=True)
         else:
             tokens = {'input_ids': None, 'attention_mask': None}

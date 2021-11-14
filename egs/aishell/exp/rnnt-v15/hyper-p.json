@@ -8,19 +8,18 @@
     },
     "sp": {
         "model_type": "char",
-        "vocab_size": 4231,
-        "bos_id": -1,
-        "unk_id": 0,
+        "vocab_size": 4232,
         "add_dummy_prefix": false,
         "use_all_vocab": true,
-        "model_prefix": "sentencepiece/aishell_char_unkasblk/spm"
+        "model_prefix": "sentencepiece/aishell_char/spm"
     },
     "train": {
         "batch_size": 512,
         "grad-norm": 5.0,
         "databalance": true,
         "checkall": true,
-        "amp": true
+        "amp": true,
+        "resume": "exp/rnnt-v15/checks/checkpoint.017.pt"
     },
     "inference": {
         "avgmodel": {
@@ -28,18 +27,18 @@
             "num": 10
         },
         "subsample": 8,
+        "lmdir": "exp/lm-v2",
         "decode": {
             "algo": "alsd",
             "beam_size": 64,
             "cpu": true,
-            "nj": 40,
-            "resume": "avg_best_10.pt",
-            "umax-portion": 0.47696874273078027
+            "umax-portion": 0.47696874273078027,
+            "lm-weight": 0.2
         },
         "er": {
             "mode": "cer",
             "oracle": true
         }
     },
-    "commit": "be61b7bd78943cde2156760ef39ea292e9bd8b8f"
+    "commit": "7bc39126533ac70b178008a0d09b760d6491cda8"
 }

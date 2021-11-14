@@ -108,7 +108,9 @@ def parsingData(f_scp: str, f_label: str, f_out: str, filter: Optional[str] = No
 
     with open(f_label, 'r') as fi_label:
         labels = fi_label.readlines()
+    dummy_label = labels[0][:-1]
     labels = [l.split() for l in labels]
+    k_0 = labels[0][0]
     if spm is None:
         labels = {l[0]: np.asarray([int(i) for i in l[1:]]) for l in labels}
     else:
@@ -118,6 +120,8 @@ def parsingData(f_scp: str, f_label: str, f_out: str, filter: Optional[str] = No
         else:
             labels = {l[0]: np.asarray(spm.encode(' '.join(l[1:])))
                       for l in labels}
+    dummy_ids = labels[k_0]
+    print(f"Example of parsing:\n{dummy_label} -> {dummy_ids}")
 
     total_lines = sum(1 for _ in open(f_scp, 'r'))
     assert len(
@@ -607,8 +611,16 @@ if __name__ == "__main__":
                     raise NotImplementedError(fmt.format(
                         f"Unknown model averaging mode {avg_mode}"))
                 checkpoint = os.path.join(checkdir, suffix_avgmodel+'.pt')
-                params = average_checkpoints(f_check_list)
-                torch.save(params, checkpoint)
+                try:
+                    params = average_checkpoints(f_check_list)
+                    torch.save(params, checkpoint)
+                except Exception as e:
+                    if os.path.isfile(checkpoint):
+                        print(fmt.format(e))
+                        print(fmt.format(
+                            f"Not found raw checkpoint files, use existing {checkpoint} instead."))
+                    else:
+                        raise RuntimeError(e)
 
         checkExist('f', checkpoint)
         decode_settings['resume'] = checkpoint

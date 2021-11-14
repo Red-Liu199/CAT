@@ -216,8 +216,6 @@ def main_worker(pid: int, args: argparse.Namespace, fmt: str = "rescore.{}.tmp",
                         rescored_list[k] = (new_score, t)
 
             for key, (score, seq) in rescored_list.items():
-                if args.gpt2:
-                    seq = seq.upper()
                 fo.write(f"{key} {seq}\n")
             print("\r[{:>2}] {:>5}".format(args.pid, i+1), end='')
 

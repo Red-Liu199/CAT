@@ -1,0 +1,42 @@
+{
+    "data": {
+        "train": "train_sp",
+        "dev": "dev",
+        "test": "test",
+        "filter": ":2000",
+        "text_processing": {
+            "truncate": 128
+        }
+    },
+    "sp": {
+        "model_type": "unigram",
+        "vocab_size": 1024,
+        "user_defined_symbols": "[UH],[UM],[BREATH],[COUGH],[NOISE],[SMACK]",
+        "model_prefix": "sentencepiece/tedlium_unigram_1024/spm"
+    },
+    "train": {
+        "batch_size": 256,
+        "grad-norm": 5.0,
+        "grad-accum-fold": 1,
+        "databalance": true,
+        "checkall": true,
+        "amp": true
+    },
+    "inference": {
+        "avgmodel": {
+            "mode": "best",
+            "num": 10
+        },
+        "subsample": 4,
+        "decode": {
+            "algo": "alsd",
+            "beam_size": 32,
+            "cpu": true
+        },
+        "er": {
+            "mode": "wer",
+            "oracle": true
+        }
+    },
+    "commit": "60aa5175c9630bcb5ea1790444732fc948b05865"
+}

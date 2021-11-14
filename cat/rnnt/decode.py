@@ -150,11 +150,7 @@ def decode(args, encoder, searcher, testloader, device, local_writer):
                           for hypo, score in zip(nbest_list[0], scores_nbest[0])]
             _, best_seq = nbest[key][0]
 
-            if args.lower:
-                seq = best_seq.lower()
-            else:
-                seq = best_seq.upper()
-            fi.write("{} {}\n".format(key, seq))
+            fi.write("{} {}\n".format(key, best_seq))
             print(
                 "\r|{:<50}|[{:>5}/{:<5}]".format(int((i+1)/L*50)*'#', i+1, L), end='')
 
@@ -214,7 +210,6 @@ def DecoderParser():
     parser.add_argument("--umax-portion", type=float,
                         default=0.35, help="Umax/T for ALSD decoding.")
     parser.add_argument("--cpu", action='store_true', default=False)
-    parser.add_argument("--lower", action='store_true', default=False)
     return parser
 
 
