@@ -420,26 +420,19 @@ class TransducerBeamSearcher(torch.nn.Module):
         F = []  # type: List[Hypothesis]
         T = tn_out.size(0)
         Umax = int(T * self.u_portion)
-        dummy_token = tn_out.new_empty((1, 1), dtype=torch.long)
+        dummy_tensor = tn_out.new_empty(1)
         prefix_cache = PrefixCacheDict()
 
         for i_path in range(T+Umax):
             buffer = MaxBeamBuffer(self.beam_size)
-            # remove the invalid hypos in the beam
-            sliced_B = []
-            for hypo in B:
-                u = len(hypo) - 1
-                t = i_path - u + 1
-                if t > T - 1:
-                    continue
-                sliced_B.append(hypo)
-            del B
-            if len(sliced_B) == 0:
+            # remove the invalid hypos (t >= T) in the beam
+            sliced_B = [hypo for hypo in B if i_path - len(hypo) + 1 < T]
+            if sliced_B == []:
                 break
 
             # group B according to len(hypo.pred)
             group_B_uncached, group_B_cached = group_to_batch(
-                sliced_B, dummy_token, prefix_cache)
+                sliced_B, dummy_tensor, prefix_cache)
             sep_i = len(group_B_uncached)
             group_B = group_B_uncached + group_B_cached
 
@@ -447,23 +440,24 @@ class TransducerBeamSearcher(torch.nn.Module):
             group_pn_out = []
             group_pn_state = []
             group_tn = []
-            group_t_index = []
+            group_t = []
             map_rel_index_to_groupid = {}
             map_rel_index_to_batchid = {}
             if use_lm:
                 group_lm_out = []
                 group_lm_state = []
             for gid, (g_index, g_tokens, g_states) in enumerate(group_B):
-                n_batch = len(g_index)
+                n_g_batch = len(g_index)
                 u = len(sliced_B[g_index[0]]) - 1
-                t = i_path - u + 1
-                for bid, rel_i in enumerate(range(len(original_indices), len(original_indices)+n_batch)):
+                t = i_path - u
+                for bid, rel_i in enumerate(range(len(original_indices), len(original_indices)+n_g_batch)):
                     map_rel_index_to_groupid[rel_i] = gid
                     map_rel_index_to_batchid[rel_i] = bid
 
-                group_t_index.append(t)
+                group_t.append(t)
                 # [H] -> [B_i, 1, H]
-                group_tn.append(tn_out[t].expand(n_batch, 1, tn_out.size(-1)))
+                group_tn.append(tn_out[t].expand(
+                    n_g_batch, 1, tn_out.size(-1)))
                 original_indices += g_index
                 # decoder batching
                 # [B_i, 1, H], ...
@@ -481,9 +475,8 @@ class TransducerBeamSearcher(torch.nn.Module):
                         lm_out = g_out['lm_out']
                         lm_hidden = g_states['lm_state']()
                     else:
-                        lm_out, lm_hidden = self.lm(
-                            g_tokens, hidden=g_states['lm_state']())
-
+                        lm_out, lm_hidden = self._lm_step(
+                            g_tokens, g_states['lm_state']())
                     group_lm_out.append(lm_out)
                     group_lm_state.append(lm_hidden)
 
@@ -502,7 +495,7 @@ class TransducerBeamSearcher(torch.nn.Module):
                 cur_hypo = sliced_B[original_indices[i]].clone()
                 cur_hypo.score += _log_p
                 buffer.update(cur_hypo)
-                if group_t_index[map_rel_index_to_groupid[i]] == T-1:
+                if group_t[map_rel_index_to_groupid[i]] == T-1:
                     F.append(cur_hypo)
 
             if use_lm:
@@ -510,12 +503,13 @@ class TransducerBeamSearcher(torch.nn.Module):
                 # [B, 1, V] -> [B, V]
                 log_prob = log_prob + lm_out.squeeze(1) * self.lm_weight
 
+            # mask the blank id postion, so that we won't select it in top-k hypos
             log_prob[:, self.blank_id].fill_(float('-inf'))
-            V = log_prob.size(1)
-            # [B, V] + [B, 1] -> [B, V]
+            V = log_prob.size(1)    # type: int
             # add the hypo score here, then we can get the topk over all beams
+            # [B, V] + [B, 1] -> [B, V]
             log_prob += collect_scores([sliced_B[i]
-                                       for i in original_indices], dummy_token).unsqueeze(1)
+                                       for i in original_indices], dummy_tensor).unsqueeze(1)
             logp_targets, unnormal_tokens = torch.topk(
                 log_prob.view(-1), k=self.beam_size, dim=-1)
 
@@ -543,7 +537,6 @@ class TransducerBeamSearcher(torch.nn.Module):
                         'lm_state': cur_hypo.cache['lm_state']
                     })
                 prefix_cache.update(cur_hypo.pred, t_cache)
-
                 cur_hypo.pred.append(tok.item())
                 buffer.update(cur_hypo)
 
