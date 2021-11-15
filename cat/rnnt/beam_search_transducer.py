@@ -14,6 +14,7 @@ from ..shared.decoder import AbsDecoder, AbsStates
 
 import copy
 import yaml
+from collections import OrderedDict
 from typing import Dict, Union, List, Optional, Literal, Tuple, Any, Iterable, Callable
 
 import torch
@@ -107,13 +108,13 @@ class PrefixCacheDict():
     """
 
     def __init__(self) -> None:
-        self._cache = {}    # type: Dict[int, Dict]
+        self._cache = {}    # type: Dict[str, Dict]
 
     def update(self, pref: List[int], new_cache: dict):
         map_pref = ' '.join(map(str, pref))
 
         if map_pref in self._cache:
-            return
+            self._cache[map_pref].update(new_cache.copy())
         else:
             self._cache[map_pref] = new_cache.copy()
 
@@ -142,7 +143,9 @@ class PrefixCacheDict():
     def __str__(self) -> str:
         cache = {}
         for k in self._cache.keys():
-            cache[k] = 'cache'
+            cache[k] = {}
+            for _k in self._cache[k].keys():
+                cache[k][_k] = 'cache'
 
         return yaml.dump(cache, default_flow_style=False)
 
@@ -408,6 +411,59 @@ class TransducerBeamSearcher(torch.nn.Module):
 
         tn_output: [1, T, D]
         """
+        def _batching_from_beams(_beams, prefix_key: Literal['pn', 'lm'] = 'pn'):
+            if prefix_key == 'pn':
+                decoder = self._pn_step
+                select_batch = self.decoder.get_state_from_batch
+            elif prefix_key == 'lm':
+                decoder = self._lm_step
+                select_batch = self.lm.get_state_from_batch
+            else:
+                raise RuntimeError(f"Unknown prefix key {prefix_key}")
+
+            group_B_uncached, group_B_cached = group_to_batch(
+                _beams, dummy_tensor, prefix_cache, prefix_key)
+            i_sep = len(group_B_uncached)
+            group_B = group_B_uncached + group_B_cached
+            # e.g. [2, 3]
+            n_group_batches = torch.LongTensor(
+                [len(g[0]) for g in group_B])
+            # e.g. [0, 0, 1, 1, 1]
+            map_rel_index_to_groupid = torch.repeat_interleave(
+                n_group_batches).tolist()
+            # e.g. [0, 1, 0, 1, 2]
+            map_rel_index_to_batchid = []
+            for ng in n_group_batches:
+                map_rel_index_to_batchid += list(range(ng))
+
+            index_of_beams = []   # len: len(sliced_B)
+            group_out = []       # len: len(group_B)
+            group_state = []     # len: len(group_B)
+            for gid, (g_index, g_tokens, g_states) in enumerate(group_B):
+                index_of_beams += g_index
+                # [B_i, 1, H], ...
+                if gid >= i_sep:
+                    k_out = g_tokens[f'{prefix_key}_out']
+                    hidden = g_states[f'{prefix_key}_state']()
+                else:
+                    k_out, hidden = decoder(
+                        g_tokens,
+                        g_states[f'{prefix_key}_state']())
+                    # add cache
+                    for i, _gid in enumerate(g_index):
+                        c_pred = _beams[_gid].pred
+                        state_ = select_batch(hidden, i)
+                        prefix_cache.update(c_pred, {
+                            f'{prefix_key}_out': k_out[i:i+1],
+                            f'{prefix_key}_state': state_
+                        })
+                group_out.append(k_out)
+                group_state.append(hidden)
+
+            return (group_B, group_out, group_state), \
+                (map_rel_index_to_batchid, map_rel_index_to_groupid), \
+                (index_of_beams, n_group_batches)
+
         use_lm = self.lm_weight > 0.0
 
         tn_out = tn_out[0]
@@ -430,118 +486,72 @@ class TransducerBeamSearcher(torch.nn.Module):
             if sliced_B == []:
                 break
 
-            # group B according to len(hypo.pred)
-            group_B_uncached, group_B_cached = group_to_batch(
-                sliced_B, dummy_tensor, prefix_cache)
-            sep_i = len(group_B_uncached)
-            group_B = group_B_uncached + group_B_cached
-
-            original_indices = []
-            group_pn_out = []
-            group_pn_state = []
-            group_tn = []
-            group_t = []
-            map_rel_index_to_groupid = {}
-            map_rel_index_to_batchid = {}
-            if use_lm:
-                group_lm_out = []
-                group_lm_state = []
-            for gid, (g_index, g_tokens, g_states) in enumerate(group_B):
-                n_g_batch = len(g_index)
-                u = len(sliced_B[g_index[0]]) - 1
-                t = i_path - u
-                for bid, rel_i in enumerate(range(len(original_indices), len(original_indices)+n_g_batch)):
-                    map_rel_index_to_groupid[rel_i] = gid
-                    map_rel_index_to_batchid[rel_i] = bid
-
-                group_t.append(t)
-                # [H] -> [B_i, 1, H]
-                group_tn.append(tn_out[t].expand(
-                    n_g_batch, 1, tn_out.size(-1)))
-                original_indices += g_index
-                # decoder batching
-                # [B_i, 1, H], ...
-                if gid >= sep_i:
-                    g_out = g_tokens    # type: Dict[str, torch.Tensor]
-                    pn_out = g_out['pn_out']
-                    hidden = g_states['pn_state']()
-                else:
-                    pn_out, hidden = self.decoder(
-                        g_tokens, hidden=g_states['pn_state']())
-                group_pn_out.append(pn_out)
-                group_pn_state.append(hidden)
-                if use_lm:
-                    if gid >= sep_i:
-                        lm_out = g_out['lm_out']
-                        lm_hidden = g_states['lm_state']()
-                    else:
-                        lm_out, lm_hidden = self._lm_step(
-                            g_tokens, g_states['lm_state']())
-                    group_lm_out.append(lm_out)
-                    group_lm_state.append(lm_hidden)
+            (group_B, group_pn_out, group_pn_state), \
+                (pn_map_rel2bid, pn_map_rel2gid),\
+                (original_indices, n_group_batches) = _batching_from_beams(
+                    sliced_B, 'pn')
 
             # joint net batching
+            # time step for each group, len: len(group_B)
+            group_t = [i_path - len(sliced_B[g[0][0]]) + 1 for g in group_B]
             # [B, 1, H]
             pn_out = torch.cat(group_pn_out, dim=0)
             # [B, 1, H]
-            expand_tn_out = torch.cat(group_tn, dim=0)
+            expand_tn_out = torch.cat([
+                tn_out[t].expand(ng, 1, tn_out.size(-1))
+                for t, ng in zip(group_t, n_group_batches)], dim=0)
             # [B, 1, 1, V] -> [B, V]
             log_prob = (self.joint(expand_tn_out, pn_out)
                         ).squeeze(1).squeeze(1)
-
             # [B,]
-            distr_blank = log_prob[:, self.blank_id]
-            for i, _log_p in enumerate(distr_blank):
+            for i, _log_p in enumerate(log_prob[:, self.blank_id]):
                 cur_hypo = sliced_B[original_indices[i]].clone()
                 cur_hypo.score += _log_p
                 buffer.update(cur_hypo)
-                if group_t[map_rel_index_to_groupid[i]] == T-1:
+                if group_t[pn_map_rel2gid[i]] == T-1:
                     F.append(cur_hypo)
 
             if use_lm:
+                (_, group_lm_out, group_lm_state), _, _ = _batching_from_beams(
+                    sliced_B, 'lm')
                 lm_out = torch.cat(group_lm_out, dim=0)
-                # [B, 1, V] -> [B, V]
-                log_prob = log_prob + lm_out.squeeze(1) * self.lm_weight
+                lm_score = self.lm_weight * lm_out.squeeze(1)
+                log_prob += lm_score
 
             # mask the blank id postion, so that we won't select it in top-k hypos
             log_prob[:, self.blank_id].fill_(float('-inf'))
             V = log_prob.size(1)    # type: int
             # add the hypo score here, then we can get the topk over all beams
             # [B, V] + [B, 1] -> [B, V]
-            log_prob += collect_scores([sliced_B[i]
-                                       for i in original_indices], dummy_tensor).unsqueeze(1)
+            log_prob += collect_scores(
+                [sliced_B[i] for i in original_indices],
+                dummy_tensor).unsqueeze(1)
+
+            # [K,]
             logp_targets, unnormal_tokens = torch.topk(
                 log_prob.view(-1), k=self.beam_size, dim=-1)
-
-            rel_indices = torch.div(
-                unnormal_tokens, V, rounding_mode='floor').tolist()    # batch id
+            group_indices = torch.div(
+                unnormal_tokens, V, rounding_mode='floor').tolist()    # batch id in the whole group
             tokens = torch.remainder(unnormal_tokens, V)
-            for i, _log_p, tok in zip(rel_indices, logp_targets, tokens):
-                # this judge can be remove
-                if tok == self.blank_id:
-                    continue
-                cur_hypo = sliced_B[original_indices[i]].clone()
+            for gbid, _log_p, tok in zip(group_indices, logp_targets, tokens):
+                idx_g, idx_b_part = pn_map_rel2gid[gbid], pn_map_rel2bid[gbid]
+                cur_hypo = sliced_B[original_indices[gbid]].clone()
+                cur_hypo.pred.append(tok.item())
                 # NOTE: assign, not add
                 cur_hypo.score = _log_p
                 cur_hypo.cache['pn_state'] = self.decoder.get_state_from_batch(
-                    group_pn_state[map_rel_index_to_groupid[i]], map_rel_index_to_batchid[i])
-                t_cache = {
-                    'pn_out': pn_out[i:i+1],
-                    'pn_state': cur_hypo.cache['pn_state']
-                }
+                    group_pn_state[idx_g], idx_b_part)
+
                 if use_lm:
+                    # add lm weight here, or before top-k selection
+                    # cur_hypo.score += lm_score[gbid, tok]
                     cur_hypo.cache['lm_state'] = self.lm.get_state_from_batch(
-                        group_lm_state[map_rel_index_to_groupid[i]], map_rel_index_to_batchid[i])
-                    t_cache.update({
-                        'lm_out': lm_out[i:i+1],
-                        'lm_state': cur_hypo.cache['lm_state']
-                    })
-                prefix_cache.update(cur_hypo.pred, t_cache)
-                cur_hypo.pred.append(tok.item())
+                        group_lm_state[idx_g], idx_b_part)
                 buffer.update(cur_hypo)
 
             B = recombine_hypo(buffer.getBeam())
             prefix_cache.pruneShorterThan(min([len(hypo) for hypo in B]))
+            # prefix_cache.pruneAllBut([hypo.pred for hypo in B])
 
         if F == []:
             F = B
@@ -600,7 +610,7 @@ def collect_scores(hypos: List[Hypothesis], dummy_tensor: torch.Tensor = None) -
     return dummy_tensor.new_tensor([hyp.score for hyp in hypos], dtype=torch.float)
 
 
-def group_to_batch(hypos: List[Hypothesis], dummy_tensor: torch.Tensor = None, prefix_cache: PrefixCacheDict = None) -> Tuple[List[int], torch.Tensor, Dict[str, AbsStates]]:
+def group_to_batch(hypos: List[Hypothesis], dummy_tensor: torch.Tensor = None, prefix_cache: PrefixCacheDict = None, cache_key_prefix: Optional[str] = '') -> Tuple[List[int], torch.Tensor, Dict[str, AbsStates]]:
     """Group the hypothesis in the list into batch with their hidden states
 
     Args:
@@ -621,16 +631,18 @@ def group_to_batch(hypos: List[Hypothesis], dummy_tensor: torch.Tensor = None, p
         dummy_tensor = torch.empty(1)
 
     hypos_with_index = list(enumerate(hypos))
+    # split hypos into two groups, one with cache hit and the other the cache doesn't.
     if prefix_cache is not None:
         in_cache = []
         for id, hypo in hypos_with_index:
             trycache = prefix_cache.getCache(hypo.pred)
-            if trycache is None:
+            if trycache is None or (f'{cache_key_prefix}_state' not in trycache):
                 continue
             in_cache.append((id, hypo))
         for id, _ in in_cache[::-1]:
             hypos_with_index.pop(id)
 
+    # group that cache doesn't hit
     batched_out = []
     for _hypos_with_index in groupby(hypos_with_index, key=lambda item: len(item[1].pred)):
         _index, _hypos = list(zip(*_hypos_with_index))
@@ -640,7 +652,7 @@ def group_to_batch(hypos: List[Hypothesis], dummy_tensor: torch.Tensor = None, p
                            _state.batching([_hyp.cache[_key]
                                            for _hyp in _hypos])
                            for _key, _state in _hypos[0].cache.items()
-                           if isinstance(_state, AbsStates)}     # type: Dict[str, AbsStates]
+                           if isinstance(_state, AbsStates) and _key.startswith(cache_key_prefix)}     # type: Dict[str, AbsStates]
 
         batched_out.append((list(_index), _batched_tokens, _batched_states))
 
@@ -657,6 +669,8 @@ def group_to_batch(hypos: List[Hypothesis], dummy_tensor: torch.Tensor = None, p
             _batched_out = {}
             _batched_states = {}
             for k in caches[0].keys():
+                if not k.startswith(cache_key_prefix):
+                    continue
                 if isinstance(caches[0][k], AbsStates):
                     _batched_states[k] = caches[0][k].batching(
                         [_cache[k] for _cache in caches])
@@ -664,7 +678,7 @@ def group_to_batch(hypos: List[Hypothesis], dummy_tensor: torch.Tensor = None, p
                     # [1, 1, H]
                     _batched_out[k] = torch.cat(
                         [_cache[k] for _cache in caches], dim=0)
-            cached_out.append((_index, _batched_out, _batched_states))
+            cached_out.append((list(_index), _batched_out, _batched_states))
 
         return batched_out, cached_out
 

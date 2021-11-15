@@ -333,8 +333,12 @@ class CausalTransformer(AbsDecoder):
 
     @staticmethod
     def batching_states(states: List[AbsStates]) -> AbsStates:
-        n_layers = len(states[0]())
+        if states[0]() is None:
+            for _state in states:
+                assert _state() is None
+            return AbsStates(None, CausalTransformer)
 
+        n_layers = len(states[0]())
         batched_states = []
         for l in range(n_layers):
             _state_0 = torch.cat([_state()[l][0] for _state in states], dim=0)
@@ -368,6 +372,7 @@ class CausalTransformer(AbsDecoder):
             return o_states
 
     def init_states(self, N: int = 1) -> AbsStates:
+        return AbsStates(None, CausalTransformer)
         device = next(iter(self.parameters())).device
         nested_states = []
         for l in range(self.n_layers):
