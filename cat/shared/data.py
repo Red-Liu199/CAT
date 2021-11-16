@@ -499,13 +499,12 @@ class InferenceDistributedSampler(BalancedDistributedSampler):
 
         # Add implementation here
         partial_indices = []
-
-        batches = sorted(indices, key=lambda i: self._lens[i], reverse=True)
-        batches = utils.group_by_lens(
-            batches, [self._lens[i] for i in batches],
-            self.num_replicas, self._l_norm, False)
-
-        partial_indices = batches[self.rank]
+        sored_indices = sorted(
+            indices, key=lambda i: self._lens[i], reverse=True)
+        offset = self.rank
+        for j in range(len(sored_indices)//self.num_replicas):
+            partial_indices.append(sored_indices[offset + j*self.num_replicas])
+            offset = (offset + 1) % self.num_replicas
 
         if res_size > 0 and self.rank < res_size:
             partial_indices.append(res_indices[self.rank])

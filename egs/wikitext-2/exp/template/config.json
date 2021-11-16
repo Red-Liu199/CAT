@@ -1,9 +1,9 @@
 {
     "decoder": {
-        "type": "Transformer",
+        "type": "CausalTransformer",
         "kwargs": {
             "dim_hid": 256,
-            "dropout": 0.1,
+            "attn_dropout": 0.1,
             "num_classes": 30959,
             "num_head": 4,
             "num_layers": 8

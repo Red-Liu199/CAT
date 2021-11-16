@@ -220,78 +220,6 @@ class PlainPN(AbsDecoder):
         return out, None
 
 
-class PositionalEncoding(nn.Module):
-
-    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 5000):
-        super().__init__()
-        self.dropout = nn.Dropout(p=dropout)
-
-        position = torch.arange(max_len).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2)
-                             * (-math.log(10000.0) / d_model))
-        pe = torch.zeros(max_len, 1, d_model)
-        pe[:, 0, 0::2] = torch.sin(position * div_term)
-        pe[:, 0, 1::2] = torch.cos(position * div_term)
-        self.register_buffer('pe', pe, persistent=False)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            x: Tensor, shape [seq_len, batch_size, embedding_dim]
-        """
-        x = x + self.pe[:x.size(0)]
-        return self.dropout(x)
-
-
-'''
-Reference:
-https://github.com/pytorch/examples/blob/3970e068c7f18d2d54db2afee6ddd81ef3f93c24/word_language_model/model.py#L108
-'''
-
-# FIXME (huahuan): deprecate this once the huggingface one is tested.
-
-
-class Transformer(AbsDecoder):
-    def __init__(self, num_classes: int, dim_hid: int, num_head: int, num_layers: int, dropout: float = 0.1, padding_idx: int = -1) -> None:
-        super().__init__(num_classes, dim_hid, padding_idx=padding_idx)
-        self.src_mask = None
-        self.pos_encoder = PositionalEncoding(
-            dim_hid, dropout=0.1, max_len=5000)
-
-        encoder_layers = nn.TransformerEncoderLayer(
-            dim_hid, num_head, dropout=dropout)
-        self.transformer_encoder = nn.TransformerEncoder(
-            encoder_layers, num_layers)
-        self.ninp = dim_hid
-
-    def forward(self, src: torch.Tensor, cache: torch.Tensor = None, input_lengths: Optional[torch.Tensor] = None, *args, **kwargs):
-        # (N, S) -> (S, N)
-        src = src.transpose(0, 1)
-        # this cache way is not efficient at all, but quite simple
-        if 'hidden' in kwargs and cache is None:
-            cache = kwargs['hidden']
-        if cache is not None:
-            # FIXME (huahuan): deal with paddings for N > 1
-            src = torch.cat([cache, src], dim=1)
-            cache = src.detach()
-
-        T = src.size(0)
-        src_mask = torch.triu(src.new_ones(
-            T, T, dtype=torch.bool), diagonal=1)
-        if input_lengths is None:
-            src_key_padding_mask = None
-        else:
-            src_key_padding_mask = torch.arange(T, device=src.device)[
-                None, :] >= input_lengths[:, None].to(src.device)
-
-        embedded_src = self.embedding(src) * math.sqrt(self.ninp)
-        embedded_src = self.pos_encoder(embedded_src)
-        encoder_out = self.transformer_encoder(
-            embedded_src, src_mask, src_key_padding_mask)
-        output = self.classifier(encoder_out).transpose(0, 1)
-        return output, cache
-
-
 class CausalTransformer(AbsDecoder):
     def __init__(self, num_classes: int, dim_hid: int, num_head: int, num_layers: int, attn_dropout: float = 0.1, padding_idx: int = -1) -> None:
         super().__init__(num_classes, dim_hid, padding_idx=padding_idx)
@@ -373,11 +301,3 @@ class CausalTransformer(AbsDecoder):
 
     def init_states(self, N: int = 1) -> AbsStates:
         return AbsStates(None, CausalTransformer)
-        device = next(iter(self.parameters())).device
-        nested_states = []
-        for l in range(self.n_layers):
-            _state_0 = torch.zeros(
-                (N, self.n_head, 1, self.d_head), device=device)
-            _state_1 = torch.zeros_like(_state_0)
-            nested_states.append((_state_0, _state_1))
-        return AbsStates(tuple(nested_states), self)
