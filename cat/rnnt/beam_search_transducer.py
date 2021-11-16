@@ -12,9 +12,9 @@ Author: Huahuan Zhengh (maxwellzh@outlook.com)
 from . import JointNet
 from ..shared.decoder import AbsDecoder, AbsStates
 
-import copy
+import os
 import yaml
-from collections import OrderedDict
+import pickle
 from typing import Dict, Union, List, Optional, Literal, Tuple, Any, Iterable, Callable
 
 import torch
@@ -42,68 +42,64 @@ class Hypothesis():
         return "Hypothesis({}, {:.2e})".format(self.pred[1:], (self.score if isinstance(self.score, float) else self.score.item()))
 
 
-class PrefixCacheTree():
-    def __init__(self) -> None:
-        self._cache = {}    # type: Dict[int, Dict]
+class PrefixTree():
+    def __init__(self, _load_pth: str = None) -> None:
+        self._tree = {}    # type: Dict[int, Dict]
+        if _load_pth is not None:
+            self.load(_load_pth)
 
-    def update(self, pref: List[int], new_cache: dict):
-        tree = self._cache
+    def update(self, pref: List[int], _word: str = None):
+        tree = self._tree
         for k in pref:
             if k not in tree:
                 tree[k] = {}
             tree = tree[k]
+        tree[-1] = _word
 
-        if -1 in tree:
-            print("Prefix:", pref)
-            print(self)
-            raise RuntimeError("Trying to update existing state.")
-        else:
-            tree[-1] = new_cache.copy()
+    def load(self, pth: str):
+        assert os.path.isfile(pth)
+        with open(pth, 'rb') as fi:
+            self._tree = pickle.load(fi)
+        assert isinstance(self._tree, dict)
 
-    def getCache(self, pref: List[int]) -> Union[None, dict]:
-        '''Get cache. If there isn't such prefix, return None.
-        '''
-        tree = self._cache
-        for k in pref:
+    def save(self, pth: str):
+        with open(pth, 'wb') as fo:
+            pickle.dump(self._tree, fo)
+        return
+
+    def __contains__(self, prefix: List[int]) -> bool:
+        tree = self._tree
+        for k in prefix:
             if k not in tree:
-                return None
+                return False
             else:
                 tree = tree[k]
-
-        if -1 not in tree:
-            return None
+        if -1 in tree:
+            return True
         else:
-            return tree[-1]
+            return False
 
-    def pruneAllBut(self, legal_prefs: List[List[int]]):
-        legal_cache = []
-        for pref in legal_prefs:
-            cache = self.getCache(pref)
-            if cache is not None:
-                legal_cache.append((pref, cache))
-        del self._cache
-        self._cache = {}
-        for pref, cache in legal_cache:
-            self.update(pref, cache)
+    def __sizeof__(self) -> int:
+        return super().__sizeof__() + self._tree.__sizeof__()
 
     def __str__(self) -> str:
-        cache = copy.deepcopy(self._cache)
-        todeal = [cache]
-        while todeal != []:
-            tree = todeal.pop()
-            for k in tree:
-                if k == -1:
-                    tree[k] = 'cache'
-                else:
-                    todeal.append(tree[k])
+        return yaml.dump(self._tree, default_flow_style=False)
 
-        return yaml.dump(cache, default_flow_style=False)
+    def size(self) -> int:
+        cnt = 0
+        tocnt = [self._tree]    # type: List[Dict]
+        while tocnt != []:
+            t = tocnt.pop()
+            if -1 in t:
+                cnt += 1
+            tocnt += [v for v in t.values() if isinstance(v, dict)]
+        return cnt
 
 
 class PrefixCacheDict():
     """
     This use a map-style way to store the cache.
-    Compared to PrefixCacheTree, thie would be less efficient when the tree is 
+    Compared to tree-like structure, thie would be less efficient when the tree is 
     quite large. But more efficient when it is small.
     """
 
@@ -226,7 +222,8 @@ class TransducerBeamSearcher(torch.nn.Module):
         lm_weight: float = 0.0,
         state_beam: float = 2.3,
         expand_beam: float = 2.3,
-        temperature: float = 1.0
+        temperature: float = 1.0,
+        word_prefix_tree: Optional[str] = None
     ):
         super(TransducerBeamSearcher, self).__init__()
         assert blank_id == bos_id
@@ -253,6 +250,10 @@ class TransducerBeamSearcher(torch.nn.Module):
             self.expand_beam = expand_beam
             self.searcher = self.native_beam_search
         elif algo == 'alsd':
+            if word_prefix_tree is not None:
+                self.word_prefix_tree = PrefixTree(word_prefix_tree)
+            else:
+                self.word_prefix_tree = None
             self.is_prefix = True
             self.u_portion = umax_portion
             assert umax_portion > 0.0 and umax_portion < 1.0
@@ -314,7 +315,7 @@ class TransducerBeamSearcher(torch.nn.Module):
                 hyp.cache.update({"lm": None})
 
             beam_hyps = [hyp]
-            prefix_cache = PrefixCacheDict()  # PrefixCacheTree()
+            prefix_cache = PrefixCacheDict()
             t_cache = {'out_pn': None, 'out_lm': None}
 
             # For each time step
@@ -465,6 +466,7 @@ class TransducerBeamSearcher(torch.nn.Module):
                 (index_of_beams, n_group_batches)
 
         use_lm = self.lm_weight > 0.0
+        use_wpf = self.word_prefix_tree is not None
 
         tn_out = tn_out[0]
         B = [Hypothesis(
@@ -537,6 +539,10 @@ class TransducerBeamSearcher(torch.nn.Module):
                 idx_g, idx_b_part = pn_map_rel2gid[gbid], pn_map_rel2bid[gbid]
                 cur_hypo = sliced_B[original_indices[gbid]].clone()
                 cur_hypo.pred.append(tok.item())
+                if use_wpf:
+                    # if use word prefix tree, skip those not in the tree
+                    if cur_hypo.pred[1:] not in self.word_prefix_tree:
+                        continue
                 # NOTE: assign, not add
                 cur_hypo.score = _log_p
                 cur_hypo.cache['pn_state'] = self.decoder.get_state_from_batch(

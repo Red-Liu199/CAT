@@ -209,6 +209,8 @@ def DecoderParser():
     parser.add_argument("--nj", type=int, default=None)
     parser.add_argument("--umax-portion", type=float,
                         default=0.35, help="Umax/T for ALSD decoding.")
+    parser.add_argument("--word-tree", type=str, default=None,
+                        help="Path to word prefix tree file.")
     parser.add_argument("--cpu", action='store_true', default=False)
     return parser
 

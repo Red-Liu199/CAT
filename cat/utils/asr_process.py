@@ -494,9 +494,9 @@ if __name__ == "__main__":
         else:
             iszh = False
 
-        _, (spmodel, _) = resolve_sp_path(hyper_settings['sp'])
-        checkExist('f', spmodel)
-        spmodel = spm.SentencePieceProcessor(model_file=spmodel)
+        _, (f_spm, _) = resolve_sp_path(hyper_settings['sp'])
+        checkExist('f', f_spm)
+        spmodel = spm.SentencePieceProcessor(model_file=f_spm)
 
         data_settings = hyper_settings['data']
         if 'filter' not in data_settings:
@@ -520,6 +520,18 @@ if __name__ == "__main__":
                             filter=filter, spm=spmodel, iszh=iszh)
             combinePickle(f_pkl_tmp, os.path.join(
                 d_pkl, dataset+'.pkl'), rm_src=True)
+
+        # generate word prefix tree from train set
+        from word_prefix_tree import WordPrefixParser
+        from word_prefix_tree import main as WPTMain
+        f_text = expandPath('t', data_settings['train'], cwd)[0]
+        wpt_settings = {
+            'intext': f_text,
+            'spmodel': f_spm,
+            'stripid': True,
+            'output': os.path.join(d_pkl, 'wpt.pkl')}
+        WPTMain(updateNamespaceFromDict(wpt_settings, WordPrefixParser(), [
+                wpt_settings['intext'], wpt_settings['spmodel']]))
 
     ############ Stage 3  NN training ############
     if s_beg <= 3 and s_end >= 3:
@@ -711,6 +723,13 @@ if __name__ == "__main__":
                         json.dump(orin_hyper_setting, fo, indent=4)
                     print(fmt.format(
                         f"set 'umax-portion' to {portion}"))
+        if 'word-tree' not in decode_settings and decode_settings['algo'] == 'alsd':
+            pth_wpt = os.path.join(args.expdir, 'pkl/wpt.pkl')
+            if os.path.isfile(pth_wpt):
+                decode_settings['word-tree'] = pth_wpt
+                print(fmt.format(f"set 'word-tree' to {pth_wpt}"))
+                print(
+                    "... if you don't want to enable word prefix tree in decoding, set 'word-tree'=null")
 
         testsets = hyper_settings['data']['test']
         if isinstance(testsets, str):
