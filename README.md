@@ -88,33 +88,33 @@ In this repo, we support RNN-T, Language model and CTC/CTC-CRF model training as
 
 **Global hyper-parameter setting:**`exp/<task>/template/hyper-p.json`, example taken from `egs/libri`
 
-```json
+```
 {
-    "data": {			// data pre-processing related
+    "data": {    // data pre-processing related
         "train": ...,
         "dev": ...,
         "test": ...,
-        "filter": ":2000",		// for ASR task only, filter out sentences longer than 2000 (frames)
-        "text_processing": {	// for LM task only, truncate the sentences by 128 (tokens)
+        "filter": ":2000",    // for ASR task only, filter out sentences longer than 2000 (frames)
+        "text_processing": {  // for LM task only, truncate the sentences by 128 (tokens)
             "truncate": 128
         }
     },
-    "sp": {		// SentencePiece model training related, for supported options, refer to:
-      				// https://github.com/google/sentencepiece/blob/master/doc/options.md 
+    "sp": {    // SentencePiece model training related, for supported options, refer to:
+               // https://github.com/google/sentencepiece/blob/master/doc/options.md 
         ...
     },
-    "train": {		// NN training related setting, for supported options:
-      						// in egs/<task>/, run 'python -m cat.rnnt -h' or 'python -m cat.lm -h'
+    "train": {    // NN training related setting, for supported options:
+                  // in egs/<task>/, run 'python -m cat.rnnt -h' or 'python -m cat.lm -h'
         ...
     },
-    "inference": {		// for RNN-T only, decoding related setting
-        "avgmodel": {				// model averaging setting, optional
-            "mode": "best",	// 'best' of 'last'
-            "num": 10				// number of checkpoints to be averaged
+    "inference": {    // for RNN-T only, decoding related setting
+        "avgmodel": {        // model averaging setting, optional
+            "mode": "best",  // 'best' of 'last'
+            "num": 10        // number of checkpoints to be averaged
         },
-        "subsample": 4,			// tell the subsampling factor of RNN-T encoder, optional
-        "decode": {		// decoding setting, for support options
-          						// in egs/<task>/, run 'python -m cat.rnnt.decode -h'
+        "subsample": 4,      // tell the subsampling factor of RNN-T encoder, optional
+        "decode": {   // decoding setting, for support options
+                      // in egs/<task>/, run 'python -m cat.rnnt.decode -h'
             ...
         },
         "er": {		// WER/CER computing setting
@@ -157,7 +157,7 @@ In this repo, we support RNN-T, Language model and CTC/CTC-CRF model training as
   
 - Also, you can check the details of settings as following
 
-```json
+```
 {
     "specaug_config": {
       // for ASR only, check class 'SpecAug' in cat/shared/_specaug.py for details
@@ -168,32 +168,32 @@ In this repo, we support RNN-T, Language model and CTC/CTC-CRF model training as
         ...
     },
     "joint": {	// for RNN-T only
-        "type": ...,	// can be any of modules in cat/rnnt/__init__.py
-        "kwargs": {		// setting according to 'type'
+        "type": ...,   // can be any of modules in cat/rnnt/__init__.py
+        "kwargs": {    // setting according to 'type'
             ...
         }
     },
     "encoder": {	// for RNN-T only
-        "type": ...,	// can be any of modules in cat/shared/encoder.py
-        "kwargs": {		// setting according to 'type'
+        "type": ...,   // can be any of modules in cat/shared/encoder.py
+        "kwargs": {    // setting according to 'type'
             ...
         }
     },
     "decoder": {	// for both RNN-T and LM
-        "type": ...,	// can be any of derived classes of 'AbsDecoder' in cat/shared/decoder.py 
+        "type": ...,   // can be any of derived classes of 'AbsDecoder' in cat/shared/decoder.py 
         "kwargs": {
             ...
         }
     },
     "scheduler": {	// scheduler setting
-        "type": ...,	// can be any of derived classes of `Scheduler` in cat/shared/scheduler.py
-        "kwargs": {		// setting according to 'type'
+        "type": ...,   // can be any of derived classes of `Scheduler` in cat/shared/scheduler.py
+        "kwargs": {    // setting according to 'type'
             ...
         },
-        "optimizer": {	// optimizer settings
-            "type": ...,			// all available ones in torch.optim
-            "use_zero": true,	// flag of whether use ZeroRedundancyOptimizer for less memory usage.
-            "kwargs": {				// setting according to 'type'
+        "optimizer": {  // optimizer settings
+            "type": ...,       // all available ones in torch.optim
+            "use_zero": true,  // flag of whether use ZeroRedundancyOptimizer for less memory usage.
+            "kwargs": {        // setting according to 'type'
                 ...
             }
         }
