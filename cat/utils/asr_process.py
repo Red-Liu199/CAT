@@ -723,13 +723,13 @@ if __name__ == "__main__":
                         json.dump(orin_hyper_setting, fo, indent=4)
                     print(fmt.format(
                         f"set 'umax-portion' to {portion}"))
-        if 'word-tree' not in decode_settings and decode_settings['algo'] == 'alsd':
-            pth_wpt = os.path.join(args.expdir, 'pkl/wpt.pkl')
-            if os.path.isfile(pth_wpt):
-                decode_settings['word-tree'] = pth_wpt
-                print(fmt.format(f"set 'word-tree' to {pth_wpt}"))
-                print(
-                    "... if you don't want to enable word prefix tree in decoding, set 'word-tree'=null")
+        # if 'word-tree' not in decode_settings and decode_settings['algo'] == 'alsd':
+        #     pth_wpt = os.path.join(args.expdir, 'pkl/wpt.pkl')
+        #     if os.path.isfile(pth_wpt):
+        #         decode_settings['word-tree'] = pth_wpt
+        #         print(fmt.format(f"set 'word-tree' to {pth_wpt}"))
+        #         print(
+        #             "... if you don't want to enable word prefix tree in decoding, set 'word-tree'=null")
 
         testsets = hyper_settings['data']['test']
         if isinstance(testsets, str):

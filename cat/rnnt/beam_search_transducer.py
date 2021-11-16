@@ -25,6 +25,7 @@ class Hypothesis():
         self.pred = pred
         self.score = score
         self.cache = cache
+        self._res_word = []
 
     def clone(self):
         new_hypo = Hypothesis(
@@ -33,7 +34,12 @@ class Hypothesis():
                 self.score, float) else self.score.clone(),
             self.cache.copy()
         )
+        new_hypo._res_word = self._res_word[:]
         return new_hypo
+
+    def add_token(self, tok: int):
+        self.pred.append(tok)
+        self._res_word.append(tok)
 
     def __len__(self) -> int:
         return len(self.pred)
@@ -66,6 +72,19 @@ class PrefixTree():
         with open(pth, 'wb') as fo:
             pickle.dump(self._tree, fo)
         return
+
+    def havePref(self, prefix: List[int]) -> bool:
+        '''A not strict version of __contains__ 
+            __contains__ match whole word, 
+            while havePref() only check prefix in vocab.
+        '''
+        tree = self._tree
+        for k in prefix:
+            if k not in tree:
+                return False
+            else:
+                tree = tree[k]
+        return True
 
     def __contains__(self, prefix: List[int]) -> bool:
         tree = self._tree
@@ -383,7 +402,7 @@ class TransducerBeamSearcher(torch.nn.Module):
                                 beam_hyps, topk_hyp, self.is_prefix)
                             continue
                         if (not self.is_latency_control) or (self.is_latency_control and log_p >= best_logp - self.expand_beam):
-                            topk_hyp.pred.append(tok.item())
+                            topk_hyp.add_token(tok.item())
                             topk_hyp.cache["dec"] = hidden
                             if self.lm_weight > 0.0:
                                 topk_hyp.cache["lm"] = hidden_lm
@@ -466,7 +485,7 @@ class TransducerBeamSearcher(torch.nn.Module):
                 (index_of_beams, n_group_batches)
 
         use_lm = self.lm_weight > 0.0
-        use_wpf = self.word_prefix_tree is not None
+        use_wpt = self.word_prefix_tree is not None
 
         tn_out = tn_out[0]
         B = [Hypothesis(
@@ -538,11 +557,25 @@ class TransducerBeamSearcher(torch.nn.Module):
             for gbid, _log_p, tok in zip(group_indices, logp_targets, tokens):
                 idx_g, idx_b_part = pn_map_rel2gid[gbid], pn_map_rel2bid[gbid]
                 cur_hypo = sliced_B[original_indices[gbid]].clone()
-                cur_hypo.pred.append(tok.item())
-                if use_wpf:
+                cur_hypo.add_token(tok.item())
+                if use_wpt:
                     # if use word prefix tree, skip those not in the tree
-                    if cur_hypo.pred[1:] not in self.word_prefix_tree:
-                        continue
+                    if not self.word_prefix_tree.havePref(cur_hypo._res_word):
+                        # emit the previous word
+                        '''
+                        NOTE (huahuan): because sentencepiece take space as token (or prefix of token), 
+                        it's hard to tell whether there is a new word completed, unless introducing 
+                        the sentencepiece model. e.g. (in pratical, words are token index, replaced to text for better understanding)
+                            _res_word = ['_add', 'li'] -> '_addli' is not the prefix of any word ->
+                                emit '_add' -> '_add' in prefix tree, so won't skip this hypo (unexpected)
+
+                            _res_word = ['_add', '_li'] -> '_add_li' is not the prefix of any word ->
+                                emit '_add' -> '_add' in prefix tree, so won't skip this hypo (as expected)
+                        '''
+                        complete_word = cur_hypo._res_word[:-1]
+                        cur_hypo._res_word = cur_hypo._res_word[-1:]
+                        if complete_word not in self.word_prefix_tree:
+                            continue
                 # NOTE: assign, not add
                 cur_hypo.score = _log_p
                 cur_hypo.cache['pn_state'] = self.decoder.get_state_from_batch(
@@ -557,7 +590,6 @@ class TransducerBeamSearcher(torch.nn.Module):
 
             B = recombine_hypo(buffer.getBeam())
             prefix_cache.pruneShorterThan(min([len(hypo) for hypo in B]))
-            # prefix_cache.pruneAllBut([hypo.pred for hypo in B])
 
         if F == []:
             F = B
