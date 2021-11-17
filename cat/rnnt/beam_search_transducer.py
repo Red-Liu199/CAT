@@ -15,27 +15,64 @@ from ..shared.decoder import AbsDecoder, AbsStates
 import os
 import yaml
 import pickle
+import numpy as np
 from typing import Dict, Union, List, Optional, Literal, Tuple, Any, Iterable, Callable
 
 import torch
 
 
+def fclone(fp: Union[float, torch.FloatTensor]):
+    if isinstance(fp, float):
+        return fp
+    elif isinstance(fp, torch.Tensor):
+        return fp.clone()
+    else:
+        raise NotImplementedError(f"Invalid type of float point {fp}")
+
+
 class Hypothesis():
-    def __init__(self, pred: List[int], score: Union[torch.Tensor, float], cache: Union[Dict[str, Union[AbsStates, torch.Tensor]], None]) -> None:
+    def __init__(self,
+                 pred: List[int],
+                 log_prob: Union[torch.Tensor, float],
+                 cache: Union[Dict[str, Union[AbsStates, torch.Tensor]], None],
+                 lm_score: Union[torch.Tensor, float] = 0.0,
+                 len_norm: bool = False) -> None:
+
         self.pred = pred
-        self.score = score
+        self.log_prob = log_prob
         self.cache = cache
         self._res_word = []
+        self.lm_score = lm_score
+        self.len_norm = len_norm
+
+    @property
+    def score(self):
+        score = self.log_prob + self.lm_score
+        if self.len_norm:
+            return score/len(self)
+        else:
+            return score
 
     def clone(self):
         new_hypo = Hypothesis(
             self.pred[:],
-            self.score if isinstance(
-                self.score, float) else self.score.clone(),
-            self.cache.copy()
+            fclone(self.log_prob),
+            self.cache.copy(),
+            fclone(self.lm_score),
+            self.len_norm
         )
         new_hypo._res_word = self._res_word[:]
         return new_hypo
+
+    def __add__(self, rhypo):
+        new_hypo = self.clone()
+        new_hypo.log_prob = torch.logaddexp(new_hypo.log_prob, rhypo.log_prob)
+        return new_hypo
+
+    def add_(self, rhypo):
+        '''in-place version of __add__'''
+        self.log_prob = torch.logaddexp(self.log_prob, rhypo.log_prob)
+        return self
 
     def add_token(self, tok: int):
         self.pred.append(tok)
@@ -170,8 +207,7 @@ def beam_append(ongoing_beams: List[Hypothesis], new_beam: Hypothesis, prefix_me
     if prefix_merge:
         for _beam in ongoing_beams:
             if _beam.pred == new_beam.pred:
-                _beam.score = torch.logaddexp(
-                    _beam.score, new_beam.score)
+                _beam.add_(new_beam)
                 return ongoing_beams
 
     ongoing_beams.append(new_beam)
@@ -327,15 +363,16 @@ class TransducerBeamSearcher(torch.nn.Module):
             # First forward-pass on PN
             hyp = Hypothesis(
                 pred=[self.bos_id],
-                score=0.0,
-                cache={'dec': None}
+                log_prob=0.0,
+                cache={'pn_state': None},
+                len_norm=True
             )
             if self.lm_weight > 0:
-                hyp.cache.update({"lm": None})
+                hyp.cache.update({"lm_state": None})
 
             beam_hyps = [hyp]
             prefix_cache = PrefixCacheDict()
-            t_cache = {'out_pn': None, 'out_lm': None}
+            t_cache = {'pn_out': None, 'lm_out': None}
 
             # For each time step
             for tn_i_t in tn_i:
@@ -347,15 +384,13 @@ class TransducerBeamSearcher(torch.nn.Module):
                 while len(beam_hyps) < self.beam_size:
                     # Add norm score
                     a_best_hyp = max(
-                        process_hyps, key=lambda x: x.score / len(x))  # type: Hypothesis
+                        process_hyps, key=lambda x: x.score)  # type: Hypothesis
 
                     # Break if best_hyp in A is worse by more than state_beam than best_hyp in B
                     if self.is_latency_control and len(beam_hyps) > 0:
                         b_best_hyp = max(
-                            beam_hyps, key=lambda x: x.score / len(x))
-                        a_best_prob = a_best_hyp.score
-                        b_best_prob = b_best_hyp.score
-                        if b_best_prob >= self.state_beam + a_best_prob:
+                            beam_hyps, key=lambda x: x.score)
+                        if b_best_hyp.score >= self.state_beam + a_best_hyp.score:
                             break
 
                     # remove best hyp from process_hyps
@@ -366,17 +401,17 @@ class TransducerBeamSearcher(torch.nn.Module):
                     if hypo_cache is None:
                         input_PN[0, 0] = t_best_pref[-1]
                         pn_out, hidden = self._pn_step(
-                            input_PN, a_best_hyp.cache["dec"])
-                        t_cache['out_pn'] = (pn_out, hidden)
+                            input_PN, a_best_hyp.cache["pn_state"])
+                        t_cache['pn_out'] = (pn_out, hidden)
                         if self.lm_weight > 0:
                             log_probs_lm, hidden_lm = self._lm_step(
-                                input_PN, a_best_hyp.cache["lm"])
-                            t_cache['out_lm'] = (log_probs_lm, hidden_lm)
+                                input_PN, a_best_hyp.cache["lm_state"])
+                            t_cache['lm_out'] = (log_probs_lm, hidden_lm)
                         prefix_cache.update(t_best_pref, t_cache)
                     else:
-                        pn_out, hidden = hypo_cache['out_pn']
+                        pn_out, hidden = hypo_cache['pn_out']
                         if self.lm_weight > 0:
-                            log_probs_lm, hidden_lm = hypo_cache['out_lm']
+                            log_probs_lm, hidden_lm = hypo_cache['lm_out']
 
                     # forward jointnet
                     log_probs = self._joint_step(tn_i_t, pn_out)
@@ -394,7 +429,7 @@ class TransducerBeamSearcher(torch.nn.Module):
                     # Extend hyp by selection
                     for log_p, tok in zip(logp_targets, tokens):
                         topk_hyp = a_best_hyp.clone()  # type: Hypothesis
-                        topk_hyp.score += log_p
+                        topk_hyp.log_prob += log_p
 
                         if tok == self.blank_id:
                             # prune the beam with same prefix
@@ -403,18 +438,14 @@ class TransducerBeamSearcher(torch.nn.Module):
                             continue
                         if (not self.is_latency_control) or (self.is_latency_control and log_p >= best_logp - self.expand_beam):
                             topk_hyp.add_token(tok.item())
-                            topk_hyp.cache["dec"] = hidden
+                            topk_hyp.cache["pn_state"] = hidden
                             if self.lm_weight > 0.0:
-                                topk_hyp.cache["lm"] = hidden_lm
-                                topk_hyp.score += self.lm_weight * \
+                                topk_hyp.cache["lm_state"] = hidden_lm
+                                topk_hyp.lm_score = self.lm_weight * \
                                     log_probs_lm.view(-1)[tok]
                             process_hyps.append(topk_hyp)
 
             del prefix_cache
-            # Add norm score
-            for b in beam_hyps:
-                b.score /= len(b)
-
             nbest_hyps = sorted(
                 beam_hyps,
                 key=lambda x: x.score,
@@ -486,11 +517,12 @@ class TransducerBeamSearcher(torch.nn.Module):
 
         use_lm = self.lm_weight > 0.0
         use_wpt = self.word_prefix_tree is not None
+        beta_l = 0.6
 
         tn_out = tn_out[0]
         B = [Hypothesis(
             pred=[self.bos_id],
-            score=0.0,
+            log_prob=0.0,
             cache={'pn_state': self.decoder.init_states()})]
         if use_lm:
             B[0].cache.update({'lm_state': self.lm.init_states()})
@@ -527,7 +559,7 @@ class TransducerBeamSearcher(torch.nn.Module):
             # [B,]
             for i, _log_p in enumerate(log_prob[:, self.blank_id]):
                 cur_hypo = sliced_B[original_indices[i]].clone()
-                cur_hypo.score += _log_p
+                cur_hypo.log_prob += _log_p
                 buffer.update(cur_hypo)
                 if group_t[pn_map_rel2gid[i]] == T-1:
                     F.append(cur_hypo)
@@ -536,25 +568,27 @@ class TransducerBeamSearcher(torch.nn.Module):
                 (_, group_lm_out, group_lm_state), _, _ = _batching_from_beams(
                     sliced_B, 'lm')
                 lm_out = torch.cat(group_lm_out, dim=0)
-                lm_score = self.lm_weight * lm_out.squeeze(1)
-                log_prob += lm_score
+                lm_score = self.lm_weight * \
+                    lm_out.squeeze(1) + beta_l
+                # [B, V]
+                fused_prob = log_prob + lm_score
+            else:
+                fused_prob = log_prob.clone()
 
             # mask the blank id postion, so that we won't select it in top-k hypos
-            log_prob[:, self.blank_id].fill_(float('-inf'))
-            V = log_prob.size(1)    # type: int
-            # add the hypo score here, then we can get the topk over all beams
+            fused_prob[:, self.blank_id].fill_(float('-inf'))
+            # calculate the hypo score here, then we can get the topk over all beams
             # [B, V] + [B, 1] -> [B, V]
-            log_prob += collect_scores(
+            fused_prob += collect_scores(
                 [sliced_B[i] for i in original_indices],
                 dummy_tensor).unsqueeze(1)
 
             # [K,]
-            logp_targets, unnormal_tokens = torch.topk(
-                log_prob.view(-1), k=self.beam_size, dim=-1)
-            group_indices = torch.div(
-                unnormal_tokens, V, rounding_mode='floor').tolist()    # batch id in the whole group
-            tokens = torch.remainder(unnormal_tokens, V)
-            for gbid, _log_p, tok in zip(group_indices, logp_targets, tokens):
+            _, flatten_positions = torch.topk(
+                fused_prob.flatten(), k=self.beam_size)
+            paired_index = np.array(np.unravel_index(
+                flatten_positions.numpy(), fused_prob.shape)).T
+            for gbid, tok in paired_index:
                 idx_g, idx_b_part = pn_map_rel2gid[gbid], pn_map_rel2bid[gbid]
                 cur_hypo = sliced_B[original_indices[gbid]].clone()
                 cur_hypo.add_token(tok.item())
@@ -576,14 +610,12 @@ class TransducerBeamSearcher(torch.nn.Module):
                         cur_hypo._res_word = cur_hypo._res_word[-1:]
                         if complete_word not in self.word_prefix_tree:
                             continue
-                # NOTE: assign, not add
-                cur_hypo.score = _log_p
+                cur_hypo.log_prob += log_prob[gbid, tok]
                 cur_hypo.cache['pn_state'] = self.decoder.get_state_from_batch(
                     group_pn_state[idx_g], idx_b_part)
 
                 if use_lm:
-                    # add lm weight here, or before top-k selection
-                    # cur_hypo.score += lm_score[gbid, tok]
+                    cur_hypo.lm_score += lm_score[gbid, tok]
                     cur_hypo.cache['lm_state'] = self.lm.get_state_from_batch(
                         group_lm_state[idx_g], idx_b_part)
                 buffer.update(cur_hypo)
@@ -612,26 +644,6 @@ class TransducerBeamSearcher(torch.nn.Module):
             return torch.log_softmax(logits/self.temp, dim=-1)
 
     def _lm_step(self, inp_tokens, memory):
-        """This method should implement one step of
-        forwarding operation for language model.
-
-        Arguments
-        ---------
-        inp_tokens : torch.Tensor
-            The input tensor of the current timestep.
-        memory : No limit
-            The memory variables input for this timestep.
-            (e.g., RNN hidden states).
-
-        Return
-        ------
-        log_probs : torch.Tensor
-            Log-probabilities of the current timestep output.
-        hs : No limit
-            The memory variables are generated in this timestep.
-            (e.g., RNN hidden states).
-        """
-
         logits, hs = self.lm(inp_tokens, hidden=memory)
         log_probs = torch.log_softmax(logits, dim=-1)
         return log_probs, hs

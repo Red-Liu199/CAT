@@ -1,0 +1,34 @@
+{
+    "data": {
+        "train": [
+            "train_960",
+            "data/librispeech.txt"
+        ],
+        "dev": [
+            "dev_clean",
+            "dev_other"
+        ],
+        "test": [
+            "test_clean",
+            "test_other"
+        ],
+        "text_processing": {
+            "truncate": 128
+        }
+    },
+    "sp": {
+        "model_type": "unigram",
+        "vocab_size": 1024,
+        "model_prefix": "sentencepiece/libri_unigram_1024/spm"
+    },
+    "train": {
+        "batch_size": 2048,
+        "grad-norm": 5.0,
+        "grad-accum-fold": 1,
+        "databalance": true,
+        "checkall": true,
+        "amp": true,
+        "resume": "exp/lm-v9/checks/bestckpt.pt"
+    },
+    "commit": "67a00a43f81f799efc773720b620ca081f09070d"
+}

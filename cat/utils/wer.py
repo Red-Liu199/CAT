@@ -114,6 +114,9 @@ def main(args: argparse.Namespace):
         processor.append(lambda s: pattern.sub('', s))
         processor.append(lambda s: ' '.join(list(s)))
 
+    if args.force_cased:
+        processor.append(lambda s: s.lower())
+
     if args.oracle:
         for i, hypo in enumerate(l_hy):
             key, nbest = hypo
@@ -189,6 +192,8 @@ def WERParser():
                         help="Tell whether the sequence start with a id or not. When --oracle, this will be disable. Default: False")
     parser.add_argument("--cer", action="store_true", default=False,
                         help="Compute CER. Default: False")
+    parser.add_argument("--force-cased", action="store_true",
+                        help="Force text to be the same cased.")
     parser.add_argument("--oracle", action="store_true", default=False,
                         help="Compute Oracle WER/CER. This requires the `hy` to be N-best list instead of text. Default: False")
     return parser

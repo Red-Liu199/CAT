@@ -1,0 +1,30 @@
+{
+    "decoder": {
+        "type": "CausalTransformer",
+        "kwargs": {
+            "attn_dropout": 0.1,
+            "dim_hid": 768,
+            "num_classes": 1024,
+            "num_head": 12,
+            "num_layers": 12
+        }
+    },
+    "scheduler": {
+        "type": "SchedulerTransformer",
+        "optimizer": {
+            "type": "Adam",
+            "use_zero": true,
+            "kwargs": {
+                "lr": 0.001,
+                "weight_decay": 1e-06
+            }
+        },
+        "kwargs": {
+            "d_model": 768,
+            "epoch_max": 20,
+            "peak_factor": 1.0,
+            "warmup_steps": 25000,
+            "reverse_metric_direc": true
+        }
+    }
+}

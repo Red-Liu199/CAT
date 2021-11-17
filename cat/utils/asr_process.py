@@ -108,9 +108,7 @@ def parsingData(f_scp: str, f_label: str, f_out: str, filter: Optional[str] = No
 
     with open(f_label, 'r') as fi_label:
         labels = fi_label.readlines()
-    dummy_label = labels[0][:-1]
     labels = [l.split() for l in labels]
-    k_0 = labels[0][0]
     if spm is None:
         labels = {l[0]: np.asarray([int(i) for i in l[1:]]) for l in labels}
     else:
@@ -120,14 +118,14 @@ def parsingData(f_scp: str, f_label: str, f_out: str, filter: Optional[str] = No
         else:
             labels = {l[0]: np.asarray(spm.encode(' '.join(l[1:])))
                       for l in labels}
-    dummy_ids = labels[k_0]
-    print(f"Example of parsing:\n{dummy_label} -> {dummy_ids}")
 
     total_lines = sum(1 for _ in open(f_scp, 'r'))
     assert len(
         labels) == total_lines, f"parsingData: f_scp and f_label should match on the # lines, instead {total_lines} {len(labels)}"
 
     f_opened = {}
+    cnt_frames = 0
+    cnt_tokens = 0
     with open(f_scp, 'r') as fi_scp:
         for line in tqdm(fi_scp, total=total_lines):
             key, loc_ark = line.split()
@@ -140,6 +138,8 @@ def parsingData(f_scp: str, f_label: str, f_out: str, filter: Optional[str] = No
                 continue
 
             pkl_data.append([key, loc_ark, tag])
+            cnt_frames += feature.shape[0]
+            cnt_tokens += tag.shape[0]
 
     for f in f_opened.values():
         f.close()
@@ -148,6 +148,8 @@ def parsingData(f_scp: str, f_label: str, f_out: str, filter: Optional[str] = No
         pickle.dump(pkl_data, fo)
 
     print(f"parsingData: remove {cnt_rm} unqualified sequences.")
+    print(
+        f"...# frames: {cnt_frames} | # tokens: {cnt_tokens} | # seqs: {len(pkl_data)}")
 
 
 def combinePickle(f_in: Union[List[str], str], f_out: str, rm_src: bool = False):
@@ -507,7 +509,7 @@ if __name__ == "__main__":
         for dataset in ['train', 'dev', 'test']:
             assert dataset in data_settings, fmt.format(
                 f"missing '{dataset}' in hyper-p['data']")
-
+            print(fmt.format(f" parsing {dataset} data..."))
             f_texts = expandPath('t', data_settings[dataset], cwd)
             f_scps = expandPath('s', data_settings[dataset], cwd)
             if dataset == 'train':
