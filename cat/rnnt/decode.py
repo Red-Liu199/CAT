@@ -12,8 +12,7 @@ from .beam_search_transducer import TransducerBeamSearcher
 from ..shared import coreutils as utils
 from ..shared.data import (
     ScpDataset,
-    TestPadCollate,
-    InferenceDistributedSampler
+    TestPadCollate
 )
 
 import re
@@ -53,21 +52,24 @@ def main(args):
 
     cachedir = '/tmp'
     fmt = os.path.join(cachedir, str(uuid.uuid4())+r".{}.tmp")
-    t_beg = time.time()
+    try:
+        mp.set_start_method('spawn')
+    except RuntimeError as re:
+        print(re)
+
+    q = mp.Queue(maxsize=world_size*2)
     if args.cpu:
         model, ext_lm = build_model(args, 'cpu')
         model.share_memory()
         if ext_lm is not None:
             ext_lm.share_memory()
 
-        mp.spawn(main_worker, nprocs=world_size,
-                 args=(args, fmt, (model, ext_lm)))
+        mp.spawn(main_worker, nprocs=world_size+1,
+                 args=(args, q, fmt, (model, ext_lm)))
     else:
-        mp.spawn(main_worker, nprocs=world_size, args=(args, fmt))
+        mp.spawn(main_worker, nprocs=world_size+1, args=(args, q, fmt))
 
-    t_end = time.time()
-    print("\nTime of searching: {:.2f}s".format(t_end-t_beg))
-
+    del q
     with open(args.output_prefix, 'w') as fo:
         for i in range(world_size):
             with open(fmt.format(i), 'r') as fi:
@@ -86,8 +88,32 @@ def main(args):
         pickle.dump(all_nbest, fo)
 
 
-def main_worker(gpu: int, args: argparse.Namespace, fmt: str, models=None):
+def dataserver(args, q: mp.Queue):
+    testset = ScpDataset(args.input_scp)
+    testloader = DataLoader(
+        testset, batch_size=1, shuffle=False,
+        num_workers=args.world_size//8,
+        collate_fn=TestPadCollate())
+    L = sum([1 for _ in testloader])
+    t_beg = time.time()
+    for i, batch in enumerate(testloader):
+        key, x, x_lens = batch
+        x.share_memory_()
+        x_lens.share_memory_()
+        q.put((key, x, x_lens), block=True)
+        print(
+            "\r|{:<50}|[{:>5}/{:<5}]".format(int((i+1)/L*50)*'#', i+1, L), end='')
+    t_end = time.time()
+    print("\nTime of searching: {:.2f}s".format(t_end-t_beg))
 
+    for i in range(args.world_size*2):
+        q.put(None, block=True)
+    time.sleep(2)
+
+
+def main_worker(gpu: int, args: argparse.Namespace, q: mp.Queue, fmt: str, models=None):
+    if gpu == args.world_size:
+        return dataserver(args, q)
     args.gpu = gpu
     # only support one node
     args.rank = gpu
@@ -110,52 +136,33 @@ def main_worker(gpu: int, args: argparse.Namespace, fmt: str, models=None):
 
         model, ext_lm = build_model(args, device)
 
-    testset = ScpDataset(args.input_scp)
-    data_sampler = InferenceDistributedSampler(testset)
-    testloader = DataLoader(
-        testset, batch_size=1, shuffle=False,
-        num_workers=1, sampler=data_sampler, collate_fn=TestPadCollate())
-
     searcher = TransducerBeamSearcher(
         model.decoder, model.joint, blank_id=0, bos_id=model.bos_id, beam_size=args.beam_size,
         nbest=args.beam_size, algo=args.algo, prefix_merge=True, umax_portion=args.umax_portion,
         state_beam=2.3, expand_beam=2.3, temperature=1.0, word_prefix_tree=args.word_tree,
         lm_module=ext_lm, lm_weight=args.lm_weight)
 
-    decode(args, model.encoder, searcher, testloader,
-           device=device, local_writer=fmt.format(gpu))
-
-    return None
-
-
-@torch.no_grad()
-def decode(args, encoder, searcher, testloader, device, local_writer):
-
+    local_writer = fmt.format(gpu)
     sp = spm.SentencePieceProcessor(model_file=args.spmodel)
-    L = sum([1 for _ in testloader])
     nbest = {}
-    cnt_frame = 0
-    # t_beg = time.time()
-    with autocast(enabled=(True if device != 'cpu' else False)), open(local_writer, 'w') as fi:
-        for i, batch in enumerate(testloader):
+    with torch.no_grad(), autocast(enabled=(True if device != 'cpu' else False)), open(local_writer, 'w') as fi:
+        while True:
+            batch = q.get(block=True)
+            if batch is None:
+                break
             key, x, x_lens = batch
             key = key[0]
             x = x.to(device)
-            enc_o, _ = encoder(x, x_lens)
-            nbest_list, scores_nbest = searcher(
-                enc_o)
-
-            cnt_frame += enc_o.size(1)
+            nbest_list, scores_nbest = searcher(model.encoder(x, x_lens)[0])
             nbest[key] = [(score.item(), sp.decode(hypo))
                           for hypo, score in zip(nbest_list[0], scores_nbest[0])]
             _, best_seq = nbest[key][0]
-
             fi.write("{} {}\n".format(key, best_seq))
-            print(
-                "\r|{:<50}|[{:>5}/{:<5}]".format(int((i+1)/L*50)*'#', i+1, L), end='')
+            del batch
 
     with open(f"{local_writer}.nbest", 'wb') as fi:
         pickle.dump(nbest, fi)
+    q.get()
 
 
 def build_model(args, device) -> Tuple[torch.nn.Module, Union[torch.nn.Module, None]]:
