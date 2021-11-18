@@ -28,7 +28,11 @@ NOTE (huahuan):
 
 from ..shared import coreutils as utils
 from . import lm_builder
-from ..shared.data import NbestListDataset, NbestListCollate, InferenceDistributedSampler
+from ..shared.data import (
+    NbestListDataset,
+    NbestListCollate,
+    InferenceDistributedSampler
+)
 
 import os
 import json
@@ -152,7 +156,7 @@ def main_worker(pid: int, args: argparse.Namespace, fmt: str = "rescore.{}.tmp",
             world_size=world_size, rank=args.rank)
 
     if models is None:
-        models = build_lm(model_configs, 'cpu')
+        models = build_lm(model_configs, device)
 
     dataset = NbestListDataset(args.nbest)
     data_sampler = InferenceDistributedSampler(dataset)
@@ -178,8 +182,8 @@ def main_worker(pid: int, args: argparse.Namespace, fmt: str = "rescore.{}.tmp",
         for i, batch in enumerate(dataloader):
             rescored_list = {}
             keys, texts, scores, tokens = batch
-            tokens['input_ids'] = tokens['input_ids'].to(device)
-            input, mask = tokens['input_ids'], tokens['attention_mask']
+            input, mask = tokens['input_ids'].to(
+                device), tokens['attention_mask'].to(device)
             if args.gpt2:
                 mask = 1 - mask
 
@@ -197,15 +201,9 @@ def main_worker(pid: int, args: argparse.Namespace, fmt: str = "rescore.{}.tmp",
                 log_p_lm += _lamb * ll.sum(dim=-1)
 
             # length norm
-            log_p_lm /= input.size(1) - mask.sum(dim=-1)
-
-            ########## DEBUG CODE ###########
-            # print("AC score")
-            # print(scores)
-            # print("LM score")
-            # print(log_p_lm)
-            # raise KeyboardInterrupt
-            #################################
+            l_y = input.size(1) - mask.sum(dim=-1)
+            # log_p_lm /= input.size(1) - mask.sum(dim=-1)
+            log_p_lm += 2.0 * l_y
 
             for k, t, ac_score, lm_score in zip(keys, texts, scores, log_p_lm.cpu()):
                 new_score = ac_score + lm_score

@@ -103,11 +103,11 @@ def dataserver(args, q: mp.Queue):
         q.put((key, x, x_lens), block=True)
         print(
             "\r|{:<50}|[{:>5}/{:<5}]".format(int((i+1)/L*50)*'#', i+1, L), end='')
-    t_end = time.time()
-    print("\nTime of searching: {:.2f}s".format(t_end-t_beg))
 
     for i in range(args.world_size*2):
         q.put(None, block=True)
+    t_end = time.time()
+    print("\nTime of searching: {:.2f}s".format(t_end-t_beg))
     time.sleep(2)
 
 
