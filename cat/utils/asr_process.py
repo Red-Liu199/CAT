@@ -662,19 +662,22 @@ if __name__ == "__main__":
                 "'lm-weight' > 0 in hyper-p['inference']['decode'] should be used with 'lmdir' in hyper-p['inference']")
             lmdir = inference_settings['lmdir']
             checkExist('d', lmdir)
-            if 'ext-lm-config' not in decode_settings:
-                decode_settings['ext-lm-config'] = os.path.join(
+            if 'lm-config' not in decode_settings:
+                decode_settings['lm-config'] = os.path.join(
                     lmdir, 'config.json')
                 print(fmt.format(
-                    f"set 'ext-lm-config' to {decode_settings['ext-lm-config']}"))
-                checkExist('f', decode_settings['ext-lm-config'])
-            if 'ext-lm-check' not in decode_settings:
-                decode_settings['ext-lm-check'] = os.path.join(
+                    f"set 'lm-config' to {decode_settings['lm-config']}"))
+                checkExist('f', decode_settings['lm-config'])
+            if 'lm-check' not in decode_settings:
+                decode_settings['lm-check'] = os.path.join(
                     lmdir, 'checks/bestckpt.pt')
                 print(fmt.format(
-                    f"set 'ext-lm-check' to {decode_settings['ext-lm-check']}"))
-                checkExist('f', decode_settings['ext-lm-check'])
-            suffix_lm = f"lm-{decode_settings['lm-weight']}"
+                    f"set 'lm-check' to {decode_settings['lm-check']}"))
+                checkExist('f', decode_settings['lm-check'])
+            if 'rescore' in decode_settings and decode_settings['rescore']:
+                suffix_lm = f"lm-rescore-{decode_settings['lm-weight']}"
+            else:
+                suffix_lm = f"lm-fusion-{decode_settings['lm-weight']}"
         else:
             suffix_lm = "nolm"
         if 'output_prefix' not in decode_settings:

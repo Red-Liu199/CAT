@@ -229,16 +229,11 @@ class NbestListDataset(AbsDataset):
 
 
 class NbestListCollate():
-    def __init__(self, tokenizer, isGPT: bool = False, bos_id: int = 0) -> None:
+    def __init__(self, tokenizer, bos_id: int = 0) -> None:
         self._tokenizer = tokenizer
         assert isinstance(
             bos_id, int) and bos_id >= 0, f"ValueError: bos_id={bos_id}"
         self.bos_id = bos_id
-        if isGPT:
-            self.isgpt = True
-        else:
-            # sentencepiece model
-            self.isgpt = False
 
     def __call__(self, batches: List[Tuple[str, List[float], List[str]]]):
         """
@@ -263,21 +258,16 @@ class NbestListCollate():
             scores += s
             texts += t
 
-        if self.isgpt:
-            # NOTE (huahuan): GPT-2 is cased.
-            tokens = self._tokenizer(texts, return_tensors='pt', padding=True)
-        else:
-            tokens = {'input_ids': None, 'attention_mask': None}
-            ids = [[self.bos_id] +
-                   self._tokenizer.encode(seqs) for seqs in texts]
-            tokens['input_ids'] = utils.pad_list(
-                [torch.LongTensor(i) for i in ids])
-            lens = torch.LongTensor([len(x) for x in ids])
-            tokens['attention_mask'] = torch.arange(
-                lens.max())[None, :] >= lens[:, None]
+        ids = [[self.bos_id] +
+               self._tokenizer.encode(seqs) for seqs in texts]
+        token_ids = utils.pad_list(
+            [torch.LongTensor(i) for i in ids])
+        lens = torch.LongTensor([len(x) for x in ids])
+        token_mask = torch.arange(
+            lens.max())[None, :] >= lens[:, None]
 
         scores = torch.FloatTensor(scores)
-        return keys, texts, scores, tokens
+        return keys, texts, scores, token_ids, token_mask
 
 
 class sortedPadCollate():
@@ -370,6 +360,9 @@ class sortedPadCollateLM():
         (labels_with_bos, label_lengths, labels_with_eos, `torch.empty(1)`)
     """
 
+    def __init__(self, flatten_target: bool = True) -> None:
+        self.flatten_target = flatten_target
+
     def __call__(self, batch: Sequence[torch.LongTensor]):
         batches = [(label, label.size(0)) for label in batch]
 
@@ -382,7 +375,10 @@ class sortedPadCollateLM():
 
         # labels -> labels + <s>
         labels = [torch.cat([x, x.new_zeros(1)]) for x, _ in batch_sorted]
-        labels = torch.cat(labels)
+        if self.flatten_target:
+            labels = torch.cat(labels)
+        else:
+            labels = utils.pad_list(labels)
 
         input_lengths = torch.LongTensor([l+1 for _, l in batch_sorted])
 

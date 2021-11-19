@@ -15,7 +15,6 @@ from ..shared.data import (
     TestPadCollate
 )
 
-import re
 import os
 import json
 import time
@@ -23,6 +22,7 @@ import uuid
 import pickle
 import argparse
 import sentencepiece as spm
+from tqdm import tqdm
 from typing import Union, Tuple
 
 import torch
@@ -50,13 +50,17 @@ def main(args):
         world_size = torch.cuda.device_count()
     args.world_size = world_size
 
+    if args.rescore and args.lm_weight <= 0.0:
+        raise RuntimeError(
+            f"Trying to do rescoring with lm-weight={args.lm_weight}")
+
     cachedir = '/tmp'
     fmt = os.path.join(cachedir, str(uuid.uuid4())+r".{}.tmp")
+
     try:
         mp.set_start_method('spawn')
     except RuntimeError as re:
         print(re)
-
     q = mp.Queue(maxsize=world_size*2)
     if args.cpu:
         model, ext_lm = build_model(args, 'cpu')
@@ -94,15 +98,13 @@ def dataserver(args, q: mp.Queue):
         testset, batch_size=1, shuffle=False,
         num_workers=args.world_size//8,
         collate_fn=TestPadCollate())
-    L = sum([1 for _ in testloader])
+
     t_beg = time.time()
-    for i, batch in enumerate(testloader):
-        key, x, x_lens = batch
-        x.share_memory_()
-        x_lens.share_memory_()
-        q.put((key, x, x_lens), block=True)
-        print(
-            "\r|{:<50}|[{:>5}/{:<5}]".format(int((i+1)/L*50)*'#', i+1, L), end='')
+    for batch in tqdm(testloader, total=len(testloader)):
+        for k in batch:
+            if isinstance(k, torch.Tensor):
+                k.share_memory_()
+        q.put(batch, block=True)
 
     for i in range(args.world_size*2):
         q.put(None, block=True)
@@ -140,7 +142,7 @@ def main_worker(gpu: int, args: argparse.Namespace, q: mp.Queue, fmt: str, model
         model.decoder, model.joint, blank_id=0, bos_id=model.bos_id, beam_size=args.beam_size,
         nbest=args.beam_size, algo=args.algo, prefix_merge=True, umax_portion=args.umax_portion,
         state_beam=2.3, expand_beam=2.3, temperature=1.0, word_prefix_tree=args.word_tree,
-        lm_module=ext_lm, lm_weight=args.lm_weight)
+        lm_module=ext_lm, lm_weight=args.lm_weight, rescore=args.rescore)
 
     local_writer = fmt.format(gpu)
     sp = spm.SentencePieceProcessor(model_file=args.spmodel)
@@ -179,16 +181,16 @@ def build_model(args, device) -> Tuple[torch.nn.Module, Union[torch.nn.Module, N
     model = utils.load_checkpoint(model, args.resume)
     model.eval()
 
-    if args.lm_weight == 0.0 or args.ext_lm_config is None or args.ext_lm_check is None:
+    if args.lm_weight == 0.0 or args.lm_config is None or args.lm_check is None:
         return model, None
     else:
-        assert args.ext_lm_check is not None
+        assert args.lm_check is not None
 
-        with open(args.ext_lm_config, 'r') as fi:
+        with open(args.lm_config, 'r') as fi:
             lm_configures = json.load(fi)
         ext_lm_model = lm_builder(args, lm_configures, dist=False)
         ext_lm_model = utils.load_checkpoint(
-            ext_lm_model.to(device), args.ext_lm_check)
+            ext_lm_model.to(device), args.lm_check)
         ext_lm_model = ext_lm_model.lm
         ext_lm_model.eval()
         return model, ext_lm_model
@@ -199,9 +201,9 @@ def DecoderParser():
     parser = utils.BasicDDPParser(
         istraining=False, prog='RNN-Transducer decoding.')
 
-    parser.add_argument("--ext-lm-config", type=str, default=None,
+    parser.add_argument("--lm-config", type=str, default=None,
                         help="Config of external LM.")
-    parser.add_argument("--ext-lm-check", type=str, default=None,
+    parser.add_argument("--lm-check", type=str, default=None,
                         help="Checkpoint of external LM.")
     parser.add_argument("--lm-weight", type=float, default=0.0,
                         help="Weight of external LM.")
@@ -219,6 +221,7 @@ def DecoderParser():
     parser.add_argument("--word-tree", type=str, default=None,
                         help="Path to word prefix tree file.")
     parser.add_argument("--cpu", action='store_true', default=False)
+    parser.add_argument("--rescore", action='store_true', default=False)
     return parser
 
 

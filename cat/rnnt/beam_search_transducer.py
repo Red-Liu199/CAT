@@ -11,6 +11,7 @@ Author: Huahuan Zhengh (maxwellzh@outlook.com)
 
 from . import JointNet
 from ..shared.decoder import AbsDecoder, AbsStates
+from ..shared.data import sortedPadCollateLM
 
 import os
 import yaml
@@ -270,7 +271,7 @@ class TransducerBeamSearcher(torch.nn.Module):
         bos_id: int = 0,
         beam_size: int = 5,
         nbest: int = 1,
-        algo: Literal['default', 'lc', 'alsd'] = 'default',
+        algo: Literal['default', 'lc', 'alsd', 'osc'] = 'default',
         umax_portion: float = 0.35,  # for alsd, librispeech
         prefix_merge: bool = True,
         lm_module: Optional[AbsDecoder] = None,
@@ -278,7 +279,8 @@ class TransducerBeamSearcher(torch.nn.Module):
         state_beam: float = 2.3,
         expand_beam: float = 2.3,
         temperature: float = 1.0,
-        word_prefix_tree: Optional[str] = None
+        word_prefix_tree: Optional[str] = None,
+        rescore: bool = False
     ):
         super(TransducerBeamSearcher, self).__init__()
         assert blank_id == bos_id
@@ -296,6 +298,11 @@ class TransducerBeamSearcher(torch.nn.Module):
 
         self.is_latency_control = False
         self.is_prefix = prefix_merge
+        self.rescore = rescore and self.lm_weight > 0.0
+        if self.rescore:
+            # disable fusion
+            self.lm_weight = 0.0
+            self.rescore_weight = lm_weight
         if algo == 'default':
             self.searcher = self.native_beam_search
         elif algo == 'lc':
@@ -313,26 +320,35 @@ class TransducerBeamSearcher(torch.nn.Module):
             self.u_portion = umax_portion
             assert umax_portion > 0.0 and umax_portion < 1.0
             self.searcher = self.align_length_sync_decode
+        elif algo == 'osc':
+            self.is_prefix = True
+            self.searcher = self.one_step_sync_decode
         else:
             raise RuntimeError(f"Unknown beam search algorithm: {algo}.")
 
         self.temp = temperature
 
     def forward(self, tn_output):
-        """
-        Arguments
-        ----------
-        tn_output : torch.tensor
-            Output from transcription network with shape
-            [batch, time_len, hiddens].
-
-        Returns
-        -------
-        Topk hypotheses
-        """
 
         hyps = self.searcher(tn_output)
-        return hyps
+
+        if self.rescore:
+            pred_list, score_list = hyps[0][0], hyps[1][0]
+            collate_fn = sortedPadCollateLM(flatten_target=False)
+            tokens, token_length, target, _ = collate_fn(
+                [torch.LongTensor(p) for p in pred_list])
+            logits, _ = self.lm(tokens, input_lengths=token_length)
+            log_prob_lm = logits.log_softmax(
+                dim=-1).gather(index=target.unsqueeze(2), dim=-1).squeeze(-1)
+            final_scores = []
+            for i in range(len(pred_list)):
+                final_scores.append((score_list[i] + self.lm_weight * log_prob_lm[i,
+                                    :token_length[i]].mean()))  # + beta_l*token_length[i]))
+            pair = sorted(list(zip(pred_list, final_scores)),
+                          key=lambda item: item[1], reverse=True)
+            return list(zip(*pair))
+        else:
+            return hyps
 
     def native_beam_search(self, tn_output: torch.Tensor):
         """Transducer beam search decoder is a beam search decoder over batch which apply Transducer rules:
@@ -462,62 +478,10 @@ class TransducerBeamSearcher(torch.nn.Module):
 
         tn_output: [1, T, D]
         """
-        def _batching_from_beams(_beams, prefix_key: Literal['pn', 'lm'] = 'pn'):
-            if prefix_key == 'pn':
-                decoder = self._pn_step
-                select_batch = self.decoder.get_state_from_batch
-            elif prefix_key == 'lm':
-                decoder = self._lm_step
-                select_batch = self.lm.get_state_from_batch
-            else:
-                raise RuntimeError(f"Unknown prefix key {prefix_key}")
-
-            group_B_uncached, group_B_cached = group_to_batch(
-                _beams, dummy_tensor, prefix_cache, prefix_key)
-            i_sep = len(group_B_uncached)
-            group_B = group_B_uncached + group_B_cached
-            # e.g. [2, 3]
-            n_group_batches = torch.LongTensor(
-                [len(g[0]) for g in group_B])
-            # e.g. [0, 0, 1, 1, 1]
-            map_rel_index_to_groupid = torch.repeat_interleave(
-                n_group_batches).tolist()
-            # e.g. [0, 1, 0, 1, 2]
-            map_rel_index_to_batchid = []
-            for ng in n_group_batches:
-                map_rel_index_to_batchid += list(range(ng))
-
-            index_of_beams = []   # len: len(sliced_B)
-            group_out = []       # len: len(group_B)
-            group_state = []     # len: len(group_B)
-            for gid, (g_index, g_tokens, g_states) in enumerate(group_B):
-                index_of_beams += g_index
-                # [B_i, 1, H], ...
-                if gid >= i_sep:
-                    k_out = g_tokens[f'{prefix_key}_out']
-                    hidden = g_states[f'{prefix_key}_state']()
-                else:
-                    k_out, hidden = decoder(
-                        g_tokens,
-                        g_states[f'{prefix_key}_state']())
-                    # add cache
-                    for i, _gid in enumerate(g_index):
-                        c_pred = _beams[_gid].pred
-                        state_ = select_batch(hidden, i)
-                        prefix_cache.update(c_pred, {
-                            f'{prefix_key}_out': k_out[i:i+1],
-                            f'{prefix_key}_state': state_
-                        })
-                group_out.append(k_out)
-                group_state.append(hidden)
-
-            return (group_B, group_out, group_state), \
-                (map_rel_index_to_batchid, map_rel_index_to_groupid), \
-                (index_of_beams, n_group_batches)
 
         use_lm = self.lm_weight > 0.0
         use_wpt = self.word_prefix_tree is not None
-        beta_l = 0.6
+        beta_l = 0.0
 
         tn_out = tn_out[0]
         B = [Hypothesis(
@@ -539,10 +503,60 @@ class TransducerBeamSearcher(torch.nn.Module):
             if sliced_B == []:
                 break
 
-            (group_B, group_pn_out, group_pn_state), \
-                (pn_map_rel2bid, pn_map_rel2gid),\
-                (original_indices, n_group_batches) = _batching_from_beams(
-                    sliced_B, 'pn')
+            group_B_uncached, group_B_cached = group_to_batch(
+                sliced_B, dummy_tensor, prefix_cache)
+            i_sep = len(group_B_uncached)
+            group_B = group_B_uncached + group_B_cached
+            # e.g. [2, 3]
+            n_group_batches = torch.LongTensor(
+                [len(g[0]) for g in group_B])
+            # e.g. [0, 0, 1, 1, 1]
+            map_relidx2gid = torch.repeat_interleave(
+                n_group_batches).tolist()
+            # e.g. [0, 1, 0, 1, 2]
+            map_relidx2bid = []
+            for ng in n_group_batches:
+                map_relidx2bid += list(range(ng))
+
+            index_of_beams = []   # len: len(sliced_B)
+            group_pn_out = []       # len: len(group_B)
+            group_pn_state = []     # len: len(group_B)
+            if use_lm:
+                group_lm_out, group_lm_state = [], []
+            for gid, (g_index, g_tokens, g_states) in enumerate(group_B):
+                index_of_beams += g_index
+                # [B_i, 1, H], ...
+                if gid >= i_sep:
+                    pn_out = g_tokens['pn_out']
+                    pn_state = g_states['pn_state']()
+                    if use_lm:
+                        lm_out = g_tokens['lm_out']
+                        lm_state = g_states['lm_state']()
+                else:
+                    pn_out, pn_state = self.decoder(
+                        g_tokens,
+                        g_states['pn_state']())
+                    if use_lm:
+                        lm_out, lm_state = self._lm_step(
+                            g_tokens,
+                            g_states['lm_state']())
+                    # add cache
+                    for i, _gid in enumerate(g_index):
+                        c_pred = sliced_B[_gid].pred
+                        prefix_cache.update(c_pred, {
+                            'pn_out': pn_out[i:i+1],
+                            'pn_state': self.decoder.get_state_from_batch(pn_state, i)
+                        })
+                        if use_lm:
+                            prefix_cache.update(c_pred, {
+                                'lm_out': lm_out[i:i+1],
+                                'lm_state': self.lm.get_state_from_batch(lm_state, i)
+                            })
+                group_pn_out.append(pn_out)
+                group_pn_state.append(pn_state)
+                if use_lm:
+                    group_lm_out.append(lm_out)
+                    group_lm_state.append(lm_state)
 
             # joint net batching
             # time step for each group, len: len(group_B)
@@ -558,15 +572,13 @@ class TransducerBeamSearcher(torch.nn.Module):
                         ).squeeze(1).squeeze(1)
             # [B,]
             for i, _log_p in enumerate(log_prob[:, self.blank_id]):
-                cur_hypo = sliced_B[original_indices[i]].clone()
+                cur_hypo = sliced_B[index_of_beams[i]].clone()
                 cur_hypo.log_prob += _log_p
                 buffer.update(cur_hypo)
-                if group_t[pn_map_rel2gid[i]] == T-1:
+                if group_t[map_relidx2gid[i]] == T-1:
                     F.append(cur_hypo)
 
             if use_lm:
-                (_, group_lm_out, group_lm_state), _, _ = _batching_from_beams(
-                    sliced_B, 'lm')
                 lm_out = torch.cat(group_lm_out, dim=0)
                 lm_score = self.lm_weight * \
                     lm_out.squeeze(1) + beta_l
@@ -580,7 +592,7 @@ class TransducerBeamSearcher(torch.nn.Module):
             # calculate the hypo score here, then we can get the topk over all beams
             # [B, V] + [B, 1] -> [B, V]
             fused_prob += collect_scores(
-                [sliced_B[i] for i in original_indices],
+                [sliced_B[i] for i in index_of_beams],
                 dummy_tensor).unsqueeze(1)
 
             # [K,]
@@ -589,8 +601,8 @@ class TransducerBeamSearcher(torch.nn.Module):
             paired_index = np.array(np.unravel_index(
                 flatten_positions.numpy(), fused_prob.shape)).T
             for gbid, tok in paired_index:
-                idx_g, idx_b_part = pn_map_rel2gid[gbid], pn_map_rel2bid[gbid]
-                cur_hypo = sliced_B[original_indices[gbid]].clone()
+                idx_g, idx_b_part = map_relidx2gid[gbid], map_relidx2bid[gbid]
+                cur_hypo = sliced_B[index_of_beams[gbid]].clone()
                 cur_hypo.add_token(tok.item())
                 if use_wpt:
                     # if use word prefix tree, skip those not in the tree
@@ -627,6 +639,161 @@ class TransducerBeamSearcher(torch.nn.Module):
             F = B
         Nbest = sorted(F, key=lambda item: item.score,
                        reverse=True)[:self.nbest]
+        pred_list, score_list = [hypo.pred[1:]
+                                 for hypo in Nbest], [hypo.score for hypo in Nbest]
+
+        return [pred_list], [score_list]
+
+    def one_step_sync_decode(self, tn_out: torch.Tensor):
+
+        use_lm = self.lm_weight > 0.0
+        beta_l = 0.6
+
+        tn_out = tn_out[0]
+        B = [Hypothesis(
+            pred=[self.bos_id],
+            log_prob=0.0,
+            cache={'pn_state': self.decoder.init_states()},
+            len_norm=not use_lm)]
+
+        T = tn_out.size(0)
+        dummy_tensor = tn_out.new_empty(1)
+        cache_pn = PrefixCacheDict()
+        if use_lm:
+            B[0].cache.update({'lm_state': self.lm.init_states()})
+            cache_lm = PrefixCacheDict()
+
+        for t in range(T):
+            buffer = MaxBeamBuffer(self.beam_size)
+            A_emit = B
+
+            for step in range(2):
+                group_B_uncached, group_B_cached = group_to_batch(
+                    A_emit, dummy_tensor, cache_pn)
+                i_sep = len(group_B_uncached)
+                group_B = group_B_uncached + group_B_cached
+                # e.g. [2, 3]
+                n_group_batches = torch.LongTensor(
+                    [len(g[0]) for g in group_B])
+                # e.g. [0, 0, 1, 1, 1]
+                map_relidx2gid = torch.repeat_interleave(
+                    n_group_batches).tolist()
+                # e.g. [0, 1, 0, 1, 2]
+                map_relidx2bid = []
+                for ng in n_group_batches:
+                    map_relidx2bid += list(range(ng))
+
+                index_of_beams = []   # len: len(sliced_B)
+                group_pn_out = []       # len: len(group_B)
+                group_pn_state = []     # len: len(group_B)
+                for g_index, g_tokens, g_states in group_B[:i_sep]:
+                    index_of_beams += g_index
+                    pn_out, pn_state = self.decoder(
+                        g_tokens,
+                        g_states['pn_state']())
+                    group_pn_out.append(pn_out)
+                    group_pn_state.append(pn_state)
+                    # add cache
+                    if step == 1 and use_lm:
+                        continue
+                    for i, _gid in enumerate(g_index):
+                        c_pred = A_emit[_gid].pred
+                        cache_pn.update(c_pred, {
+                            'pn_out': pn_out[i:i+1],
+                            'pn_state': self.decoder.get_state_from_batch(pn_state, i)
+                        })
+                for g_index, g_out, g_states in group_B[i_sep:]:
+                    index_of_beams += g_index
+                    # [B_i, 1, H], ...
+                    pn_out = g_out['pn_out']
+                    pn_state = g_states['pn_state']()
+                    group_pn_out.append(pn_out)
+                    group_pn_state.append(pn_state)
+
+                # joint net batching
+                # [B, 1, H]
+                pn_out = torch.cat(group_pn_out, dim=0)
+                # [B, 1, H]
+                expand_tn_out = tn_out[t].expand(
+                    pn_out.size(0), 1, tn_out.size(-1))
+                # [B, 1, 1, V] -> [B, V]
+                log_prob = (self.joint(expand_tn_out, pn_out)
+                            ).squeeze(1).squeeze(1)
+                # [B,]
+                for i, _log_p in enumerate(log_prob[:, self.blank_id]):
+                    cur_hypo = A_emit[index_of_beams[i]].clone()
+                    cur_hypo.log_prob += _log_p
+                    buffer.update(cur_hypo)
+                if step >= 1:
+                    break
+
+                if use_lm:
+                    group_B_uncached, group_B_cached = group_to_batch(
+                        A_emit, dummy_tensor, cache_lm)
+                    i_sep = len(group_B_uncached)
+                    group_B = group_B_uncached + group_B_cached
+                    group_lm_out, group_lm_state = [], []
+                    for g_index, g_tokens, g_states in group_B[:i_sep]:
+                        lm_out, lm_state = self._lm_step(
+                            g_tokens,
+                            g_states['lm_state']())
+                        group_lm_out.append(lm_out)
+                        group_lm_state.append(lm_state)
+                        # add cache
+                        for i, _gid in enumerate(g_index):
+                            c_pred = A_emit[_gid].pred
+                            cache_lm.update(c_pred, {
+                                'lm_out': lm_out[i:i+1],
+                                'lm_state': self.lm.get_state_from_batch(lm_state, i)
+                            })
+                    for g_index, g_out, g_states in group_B[i_sep:]:
+                        lm_out = g_out['lm_out']
+                        lm_state = g_states['lm_state']()
+                        group_lm_out.append(lm_out)
+                        group_lm_state.append(lm_state)
+
+                    lm_out = torch.cat(group_lm_out, dim=0)
+                    lm_score = self.lm_weight * lm_out.squeeze(1) + beta_l
+                    # [B, V]
+                    fused_prob = log_prob + lm_score
+                else:
+                    fused_prob = log_prob.clone()
+
+                # calculate the hypo score here, then we can get the topk over all beams
+                # [B, V] + [B, 1] -> [B, V]
+                fused_prob += collect_scores(
+                    [A_emit[i] for i in index_of_beams],
+                    dummy_tensor).unsqueeze(1)
+                # mask the blank id postion, so that we won't select it in top-k hypos
+                fused_prob[:, self.blank_id].fill_(float('-inf'))
+
+                # [K,]
+                A_emit_tmp = []
+                _, flatten_positions = torch.topk(
+                    fused_prob.flatten(), k=self.beam_size)
+                paired_index = np.array(np.unravel_index(
+                    flatten_positions.numpy(), fused_prob.shape)).T
+                for gbid, tok in paired_index:
+                    idx_g, idx_b_part = map_relidx2gid[gbid], map_relidx2bid[gbid]
+                    cur_hypo = A_emit[index_of_beams[gbid]].clone()
+                    cur_hypo.add_token(tok.item())
+                    cur_hypo.log_prob += log_prob[gbid, tok]
+                    cur_hypo.cache['pn_state'] = self.decoder.get_state_from_batch(
+                        group_pn_state[idx_g], idx_b_part)
+                    if use_lm:
+                        cur_hypo.lm_score += lm_score[gbid, tok]
+                        cur_hypo.cache['lm_state'] = self.lm.get_state_from_batch(
+                            group_lm_state[idx_g], idx_b_part)
+                    A_emit_tmp.append(cur_hypo)
+                A_emit = A_emit_tmp
+
+            B = recombine_hypo(buffer.getBeam())
+            cache_pn.pruneShorterThan(min([len(hypo) for hypo in B]))
+            if use_lm:
+                cache_lm.pruneShorterThan(min([len(hypo) for hypo in B]))
+
+        Nbest = sorted(B, key=lambda item: item.score,
+                       reverse=True)[:self.nbest]
 
         return ([[hypo.pred[1:] for hypo in Nbest]], [[hypo.score for hypo in Nbest]])
 
@@ -660,7 +827,7 @@ def collect_scores(hypos: List[Hypothesis], dummy_tensor: torch.Tensor = None) -
     return dummy_tensor.new_tensor([hyp.score for hyp in hypos], dtype=torch.float)
 
 
-def group_to_batch(hypos: List[Hypothesis], dummy_tensor: torch.Tensor = None, prefix_cache: PrefixCacheDict = None, cache_key_prefix: Optional[str] = '') -> Tuple[List[int], torch.Tensor, Dict[str, AbsStates]]:
+def group_to_batch(hypos: List[Hypothesis], dummy_tensor: torch.Tensor = None, prefix_cache: PrefixCacheDict = None) -> Tuple[List[int], torch.Tensor, Dict[str, AbsStates]]:
     """Group the hypothesis in the list into batch with their hidden states
 
     Args:
@@ -686,7 +853,7 @@ def group_to_batch(hypos: List[Hypothesis], dummy_tensor: torch.Tensor = None, p
         in_cache = []
         for id, hypo in hypos_with_index:
             trycache = prefix_cache.getCache(hypo.pred)
-            if trycache is None or (f'{cache_key_prefix}_state' not in trycache):
+            if trycache is None:
                 continue
             in_cache.append((id, hypo))
         for id, _ in in_cache[::-1]:
@@ -702,7 +869,7 @@ def group_to_batch(hypos: List[Hypothesis], dummy_tensor: torch.Tensor = None, p
                            _state.batching([_hyp.cache[_key]
                                            for _hyp in _hypos])
                            for _key, _state in _hypos[0].cache.items()
-                           if isinstance(_state, AbsStates) and _key.startswith(cache_key_prefix)}     # type: Dict[str, AbsStates]
+                           if isinstance(_state, AbsStates)}     # type: Dict[str, AbsStates]
 
         batched_out.append((list(_index), _batched_tokens, _batched_states))
 
@@ -719,8 +886,6 @@ def group_to_batch(hypos: List[Hypothesis], dummy_tensor: torch.Tensor = None, p
             _batched_out = {}
             _batched_states = {}
             for k in caches[0].keys():
-                if not k.startswith(cache_key_prefix):
-                    continue
                 if isinstance(caches[0][k], AbsStates):
                     _batched_states[k] = caches[0][k].batching(
                         [_cache[k] for _cache in caches])
