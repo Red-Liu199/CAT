@@ -5,9 +5,8 @@
 """Decoder module impl
 
 """
-import math
-from collections import OrderedDict
-from typing import Union, Tuple, List, Optional, Callable, Any
+import kenlm
+from typing import Union, Tuple, List, Optional, Any
 
 import torch
 import torch.nn as nn
@@ -276,7 +275,7 @@ class CausalTransformer(AbsDecoder):
         return AbsStates(tuple(batched_states), CausalTransformer)
 
     @staticmethod
-    def get_state_from_batch(raw_batched_states: AbsStates, index: Union[int, List[int]]) -> Union[AbsStates, List[AbsStates]]:
+    def get_state_from_batch(raw_batched_states, index: Union[int, List[int]]) -> Union[AbsStates, List[AbsStates]]:
 
         if isinstance(index, int):
             flag_squeeze = True
@@ -301,3 +300,99 @@ class CausalTransformer(AbsDecoder):
 
     def init_states(self, N: int = 1) -> AbsStates:
         return AbsStates(None, CausalTransformer)
+
+
+class NGram(AbsDecoder):
+    def __init__(self, gram_n: int, num_classes: int, f_binlm: str) -> None:
+        super().__init__(1, 1)
+        del self.embedding
+        del self.classifier
+        self.gram_n = gram_n
+        self.vocab = [str(x) for x in range(num_classes)]
+        # set 0 -> </s>, 1 -> <unk>
+        self.vocab[0] = '</s>'
+        self.vocab[1] = '<unk>'
+        self.ngram = kenlm.Model(f_binlm)
+        # scale: convert log10 -> loge
+        self.register_buffer('scale', torch.tensor(
+            10.).log_(), persistent=False)
+
+    def forward(self, src_ids: torch.Tensor, hidden: torch.Tensor = None, input_lengths: Optional[torch.Tensor] = None):
+        if self.training:
+            raise NotImplementedError
+
+        if input_lengths is not None:
+            B = src_ids.size(0)
+            pred_logp = src_ids.new_full(
+                src_ids.size()+(self.vocab,), float('-inf'))
+            for b, (seq, l) in enumerate(zip(src_ids.cpu().tolist(), input_lengths.cpu().tolist())):
+                seq = [str(x) for x in seq[:l]]
+                if seq[0] == '0':
+                    seq[0] = '<s>'
+                if seq[-1] != '0':
+                    seq.append('</s>')
+                pred_logp[b] = [float('-inf') for _ in range(l)]
+                for t, pb in enumerate(self.ngram.full_scores(' '.join(seq), bos=False, eos=False)):
+                    if t == 0:
+                        continue
+                    pred_logp[b, t-1, src_ids[b, t-1]] = pb[0]
+
+            # [B, T, V]
+            pred_logp *= self.scale
+            return pred_logp, None
+
+        B = src_ids.size(0)
+        if hidden is not None:
+            assert hidden.size(0) == B
+            input_ids = torch.cat([hidden, src_ids], dim=1)
+        else:
+            input_ids = src_ids
+
+        # keep N-1 ids
+        input_ids = input_ids[:, -(self.gram_n-1):]
+
+        pred_logp = [[] for _ in range(B)]
+        for b, seq in enumerate(input_ids.cpu().tolist()):
+            seq = [str(x) for x in seq]
+            if seq[0] == '0':
+                seq[0] = '<s>'
+            state = init_state(self.ngram, seq)
+            # TODO: replace 1 -> <unk>
+            for tok in self.vocab:
+                pred_logp[b].append(update_state(self.ngram, state, tok)[0])
+
+        return self.scale*self.scale.new_tensor(pred_logp), input_ids
+
+    @staticmethod
+    def batching_states(states: List[AbsStates]) -> AbsStates:
+        if states[0]() is None:
+            for _state in states:
+                assert _state() is None
+            return AbsStates(None, NGram)
+        o_state = torch.cat([_s() for _s in states], dim=0)
+        return AbsStates(o_state, NGram)
+
+    @staticmethod
+    def get_state_from_batch(raw_batched_states, index: Union[int, List[int]]) -> Union[AbsStates, List[AbsStates]]:
+
+        if isinstance(index, int):
+            return AbsStates(raw_batched_states[index:index+1, :], NGram)
+        else:
+            return [AbsStates(raw_batched_states[i:i+1, :], NGram) for i in index]
+
+    def init_states(self, N: int = 1):
+        return AbsStates(None, self)
+
+
+def init_state(model: kenlm.Model, pre_toks: List[str]):
+    state, state2 = kenlm.State(),  kenlm.State()
+    for tok in pre_toks:
+        model.BaseScore(state, tok, state2)
+        state, state2 = state2, state
+    return state
+
+
+def update_state(model: kenlm.Model, prev_state: kenlm.State, token: str):
+    new_state = kenlm.State()
+    log_p = model.BaseScore(prev_state, token, new_state)
+    return log_p, new_state

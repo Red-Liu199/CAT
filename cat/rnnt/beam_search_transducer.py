@@ -481,7 +481,7 @@ class TransducerBeamSearcher(torch.nn.Module):
 
         use_lm = self.lm_weight > 0.0
         use_wpt = self.word_prefix_tree is not None
-        beta_l = 0.0
+        beta_l = 0.6
 
         tn_out = tn_out[0]
         B = [Hypothesis(

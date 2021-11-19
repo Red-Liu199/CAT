@@ -673,7 +673,8 @@ if __name__ == "__main__":
                     lmdir, 'checks/bestckpt.pt')
                 print(fmt.format(
                     f"set 'lm-check' to {decode_settings['lm-check']}"))
-                checkExist('f', decode_settings['lm-check'])
+                # skip checking for n-gram model
+                # checkExist('f', decode_settings['lm-check'])
             if 'rescore' in decode_settings and decode_settings['rescore']:
                 suffix_lm = f"lm-rescore-{decode_settings['lm-weight']}"
             else:

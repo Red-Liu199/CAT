@@ -14,6 +14,7 @@ from ..shared.data import (
     ScpDataset,
     TestPadCollate
 )
+from ..shared.decoder import NGram
 
 import os
 import json
@@ -123,7 +124,7 @@ def main_worker(gpu: int, args: argparse.Namespace, q: mp.Queue, fmt: str, model
 
     if args.cpu:
         device = 'cpu'
-        torch.set_num_threads(1)
+        torch.set_num_threads(args.thread_per_woker)
         dist.init_process_group(
             backend='gloo', init_method=args.dist_url,
             world_size=world_size, rank=args.rank)
@@ -189,8 +190,9 @@ def build_model(args, device) -> Tuple[torch.nn.Module, Union[torch.nn.Module, N
         with open(args.lm_config, 'r') as fi:
             lm_configures = json.load(fi)
         ext_lm_model = lm_builder(args, lm_configures, dist=False)
-        ext_lm_model = utils.load_checkpoint(
-            ext_lm_model.to(device), args.lm_check)
+        if lm_configures['decoder']['type'] != "NGram":
+            ext_lm_model = utils.load_checkpoint(
+                ext_lm_model.to(device), args.lm_check)
         ext_lm_model = ext_lm_model.lm
         ext_lm_model.eval()
         return model, ext_lm_model
@@ -216,6 +218,7 @@ def DecoderParser():
     parser.add_argument("--spmodel", type=str, default='',
                         help="SPM model location.")
     parser.add_argument("--nj", type=int, default=None)
+    parser.add_argument("--thread-per-woker", type=int, default=1)
     parser.add_argument("--umax-portion", type=float,
                         default=0.35, help="Umax/T for ALSD decoding.")
     parser.add_argument("--word-tree", type=str, default=None,

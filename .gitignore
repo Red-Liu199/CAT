@@ -9,8 +9,8 @@ tools/CAT
 *.tmp
 tmp/
 
-# tmp settings
-scripts/cat/
+# settings
+src/bin/
 test_*
 
 # Byte-compiled / optimized / DLL files
