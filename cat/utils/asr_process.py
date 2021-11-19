@@ -377,13 +377,14 @@ def priorResolvePath(dataset: Union[str, List[str]], local_dir: str = 'data/text
             else:
                 outside_text.append(_set)
 
-    try:
-        outside_text = expandPath('t', outside_text)
-        checkExist('f', outside_text)
-    except FileNotFoundError as fe:
-        print(fe)
-        print("Resolve outside path as empty.")
-        outside_text = []
+    if outside_text != []:
+        try:
+            outside_text = expandPath('t', outside_text)
+            checkExist('f', outside_text)
+        except FileNotFoundError as fe:
+            print(fe)
+            print("Resolve outside path as empty.")
+            outside_text = []
     return local_text, outside_text
 
 

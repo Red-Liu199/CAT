@@ -84,13 +84,24 @@ if __name__ == "__main__":
         if 'spm' not in processing_settings:
             processing_settings['spm'] = spmodel
             print(fmt.format(f"set 'spm' to {spmodel}"))
+        
+        if 'lang' in hyper_settings['data']:
+            # check if it's chinese-like languages
+            iszh = ('zh' == hyper_settings['data']['lang'].split('-')[0])
+        else:
+            iszh = False
+
+        if iszh:
+            seperator = ''
+        else:
+            seperator = ' '
 
         pkldir = os.path.join(args.expdir, 'lmbin')
         os.makedirs(pkldir, exist_ok=True)
         for part in ['train', 'dev', 'test']:
             assert part in data_settings, fmt.format(
                 f"missing '{part}' in hyper-p['data']")
-            part_text = combineText(data_settings[part])
+            part_text = combineText(data_settings[part], seperator=seperator)
             if part != 'train':
                 setting = processing_settings.copy()
                 if 'concat' in setting:

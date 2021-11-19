@@ -16,6 +16,10 @@ opts=$(python utils/parseopt.py '{
             "default": 5,
             "dest": "order",
             "help": "Max order of n-gram. default: 5"
+        },
+        "--arpa":{
+            "action": "store_true",
+            "help": "Store n-gram file as .arpa instead of binary."
         }
     }' $0 $*) && eval $opts || exit 1
 
@@ -29,6 +33,11 @@ if [ ! $(command -v build_binary) ]; then
     exit 1
 fi
 
-python utils/readtextbin.py $textbin |
-    lmplz -o $order -S 80% --discount_fallback |
-    build_binary /dev/stdin $export
+if [ $arpa == "True" ]; then
+    python utils/readtextbin.py $textbin |
+        lmplz -o $order -S 80% --discount_fallback >$export
+else
+    python utils/readtextbin.py $textbin |
+        lmplz -o $order -S 80% --discount_fallback |
+        build_binary /dev/stdin $export
+fi

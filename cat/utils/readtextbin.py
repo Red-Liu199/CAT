@@ -16,7 +16,7 @@ if __name__ == "__main__":
     libri = CorpusDataset(args.input)
     try:
         for i in range(len(libri)):
-            sys.stdout.write(' '.join([str(x)
-                             for x in libri[i].tolist()])+'\n')
+            l = [str(x) if x != 1 else ' ' for x in libri[i].tolist()]
+            sys.stdout.write(' '.join(l)+'\n')
     except IOError:
         exit(0)
