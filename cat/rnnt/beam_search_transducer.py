@@ -161,27 +161,26 @@ class PrefixCacheDict():
     """
 
     def __init__(self) -> None:
-        self._cache = {}    # type: Dict[str, Dict]
+        self._cache = {}    # type: Dict[tuple, Dict]
 
     def update(self, pref: List[int], new_cache: dict):
-        map_pref = ' '.join(map(str, pref))
-
-        if map_pref in self._cache:
-            self._cache[map_pref].update(new_cache.copy())
+        hased_pref = tuple(pref)
+        if hased_pref in self._cache:
+            self._cache[hased_pref].update(new_cache.copy())
         else:
-            self._cache[map_pref] = new_cache.copy()
+            self._cache[hased_pref] = new_cache.copy()
 
     def getCache(self, pref: List[int]) -> Union[None, dict]:
         '''Get cache. If there isn't such prefix, return None.
         '''
-        map_pref = ' '.join(map(str, pref))
-        if map_pref in self._cache:
-            return self._cache[map_pref]
+        hased_pref = tuple(pref)
+        if hased_pref in self._cache:
+            return self._cache[hased_pref]
         else:
             return None
 
     def pruneAllBut(self, legal_prefs: List[List[int]]):
-        legal_maps = [' '.join(map(str, pref)) for pref in legal_prefs]
+        legal_maps = [tuple(pref) for pref in legal_prefs]
 
         new_cache = {pref: self._cache[pref]
                      for pref in legal_maps if pref in self._cache}
@@ -189,7 +188,7 @@ class PrefixCacheDict():
         self._cache = new_cache
 
     def pruneShorterThan(self, L: int):
-        torm = [key for key in self._cache if len(key) < 2*L-1]
+        torm = [key for key in self._cache if len(key) < L]
         for k in torm:
             del self._cache[k]
 
@@ -540,18 +539,6 @@ class TransducerBeamSearcher(torch.nn.Module):
                         lm_out, lm_state = self._lm_step(
                             g_tokens,
                             g_states['lm_state']())
-                    # add cache
-                    for i, _gid in enumerate(g_index):
-                        c_pred = sliced_B[_gid].pred
-                        prefix_cache.update(c_pred, {
-                            'pn_out': pn_out[i:i+1],
-                            'pn_state': self.decoder.get_state_from_batch(pn_state, i)
-                        })
-                        if use_lm:
-                            prefix_cache.update(c_pred, {
-                                'lm_out': lm_out[i:i+1],
-                                'lm_state': self.lm.get_state_from_batch(lm_state, i)
-                            })
                 group_pn_out.append(pn_out)
                 group_pn_state.append(pn_state)
                 if use_lm:
@@ -572,9 +559,19 @@ class TransducerBeamSearcher(torch.nn.Module):
                         ).squeeze(1).squeeze(1)
             # [B,]
             for i, _log_p in enumerate(log_prob[:, self.blank_id]):
+                gid, rbid = map_relidx2gid[i], map_relidx2bid[i]
                 cur_hypo = sliced_B[index_of_beams[i]].clone()
                 cur_hypo.log_prob += _log_p
                 buffer.update(cur_hypo)
+                prefix_cache.update(cur_hypo.pred, {
+                    'pn_out': group_pn_out[gid][rbid:rbid+1],
+                    'pn_state': self.decoder.get_state_from_batch(group_pn_state[gid], rbid)
+                })
+                if use_lm:
+                    prefix_cache.update(cur_hypo.pred, {
+                        'lm_out': group_lm_out[gid][rbid:rbid+1],
+                        'lm_state': self.lm.get_state_from_batch(group_lm_state[gid], rbid)
+                    })
                 if group_t[map_relidx2gid[i]] == T-1:
                     F.append(cur_hypo)
 
@@ -632,8 +629,10 @@ class TransducerBeamSearcher(torch.nn.Module):
                         group_lm_state[idx_g], idx_b_part)
                 buffer.update(cur_hypo)
 
+            del B
             B = recombine_hypo(buffer.getBeam())
-            prefix_cache.pruneShorterThan(min([len(hypo) for hypo in B]))
+            # prune all cache with pred shorter than min([len(hypo) for hypo in B])
+            prefix_cache.pruneShorterThan(i_path-max(group_t)+1)
 
         if F == []:
             F = B

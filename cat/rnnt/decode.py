@@ -95,6 +95,7 @@ def main(args):
 
 def dataserver(args, q: mp.Queue):
     testset = ScpDataset(args.input_scp)
+    n_frames = sum(testset.get_seq_len())
     testloader = DataLoader(
         testset, batch_size=1, shuffle=False,
         num_workers=args.world_size//8,
@@ -109,8 +110,10 @@ def dataserver(args, q: mp.Queue):
 
     for i in range(args.world_size*2):
         q.put(None, block=True)
-    t_end = time.time()
-    print("\nTime of searching: {:.2f}s".format(t_end-t_beg))
+    t_dur = time.time() - t_beg
+
+    print("\nTime = {:.2f} s | RTF = {:.2f} ".format(
+        t_dur, t_dur*args.world_size / n_frames * 100))
     time.sleep(2)
 
 
