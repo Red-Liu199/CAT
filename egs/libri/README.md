@@ -1,4 +1,4 @@
-960 hour英文数据集，阅读类型
+[960 hour英文数据集，阅读类型
 
 - [Github page](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/libri)
 - 特征提取：80维FBank+CMVN
@@ -25,12 +25,14 @@ Results in `%WER (%WER with LM) / %WER on averaging model [%WER oracle]`
 | [v25](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/libri/exp/rnnt-v25)                | `v24` + adjust scheduler                                                                                 | 3.01/2.70        | 7.46/6.70        | -              | ↑                       |
 | [v26](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/libri/exp/rnnt-v26)                | same encoder as the ASRU advancing libri model                                                           | 2.68\[1.99\]     | 6.28\[5.22\]     | -              | 62.24                   |
 | [v27](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/libri/exp/rnnt-v27)                | 2048 batch size + large conformer                                                                        | **2.37\[2.00\]** | **5.46\[4.63\]** | -              | 120.42                  |
+| [v28](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/libri/exp/rnnt-v28)                | `v27` + Conformer: large -> medium                                                                       | 2.72\[2.18\]     | 6.45\[5.82\]     | -              | 32.48                   | 
 | [ESPNET-2](https://github.com/espnet/espnet/tree/master/egs2/librispeech/asr1#with-transformer-lm) | Conformer encoder                                                                                        | 2.6(2.1)         | 6.0(4.7)         | transformer LM | ?                       |
 
 - `v24` 训得不太好，学习率太小
 - `v25` 仍有改进空间，～100epoch即过拟合
 
-Beam search, test-clean, `# frames=1940626` -> `total time=19406.26 s`
+## Beam search
+test-clean, `# frames=1940626` -> `total time=19406.26 s`
 - GPU: 8 $\times$ RTX 3090
 - CPU: 48-core Intel(R) Xeon(R) CPU E5-2678 v3 @ 2.50GHz
 
@@ -47,3 +49,36 @@ Beam search, test-clean, `# frames=1940626` -> `total time=19406.26 s`
 | LC     | ✔            | 10   | 2.70 | 2.20   | 253.27   | **GPU**  | 0.10 |
 | LC     | ✔            | 10   | 2.70 | 2.20   | 223.56   | CPU      | 0.55 | 
 | LC     | ✔            | 20   | 2.79 | 2.25   | 401.39   | **GPU**  | 0.17 |
+
+
+## Decode and LM fusion
+
+- Time is measured on server15 with 80 processes
+
+Fusion, fix $\beta=0.6$ in experiments:
+$$
+\begin{aligned}
+&\text{without LM: } \hat{y} = \mathop{\arg\max}_y (\log P_{RNN-T}(Y|X)) \\
+&\text{with LM: } \hat{y} = \mathop{\arg\max}_y (\log P_{RNN-T}(Y|X) + \lambda \log P_{LM}(Y) + \beta |Y|)
+\end{aligned}
+$$
+
+Language model
+
+| ID                                                                                    | LM          | Data                                | \#param      | ppl   | word level ppl |
+| ------------------------------------------------------------------------------------- | ----------- | ----------------------------------- | ------------ | ----- | -------------- |
+| [lm-v8](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/libri/exp/lm-v8)    | Transformer | Libri transcript                    | 10.27M       | 27.39 | 220.53         |
+| [lm-v9](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/libri/exp/lm-v9)    | Transformer | Libri transcript + text book corpus | 87.42M       | 15.74 | 89.39          |
+| [lm-5gram](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/libri/exp/5gram) | 5-gram      | Libri transcript + text book corpus | 15GB on disk | 25.58 | 197.32         |
+
+
+| Model | $\lambda$         | beam size | test-clean | time    | test-other | time    |
+| ----- | ----------------- | --------- | ---------- | ------- | ---------- | ------- |
+| no lm | 0.0               | 8         | 2.38       | 127.48  | 5.42       | 126.23  |
+| no lm | 0.0               | 16        | 2.38       | 142.44  | 5.40       | 140.31  |
+| lm-v8 | 0.2               | 8         | 2.31       | 401.47  | 5.17       | 381.06  |
+| lm-v9 | 0.2               | 8         | 2.11       | ~2300   | 4.82       | ~2300   |
+| lm-v9 | 0.35              | 16        | 1.99       | 3992.16 | 4.52       | 3201.48 |
+| lm-v9 | 0.40              | 16        | 1.97       | -       | 4.47       | -       |
+| lm-v9 | 0.45              | 16        | 1.96       | -       | 4.44       | -       |
+| 5gram | 0.35 (well-tuned) | 16        | 2.14       | 191.54  | 4.80       | 187.82  |

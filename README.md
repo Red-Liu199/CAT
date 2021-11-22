@@ -2,8 +2,8 @@
 
 ## In-house SOTA Results 
 
-- [Librispeech](egs/libri): 2.37/5.46 WER% for test-clean/test-other
-- [AIshell-1](egs/aishell): 4.77 CER%
+- [Librispeech](egs/libri): 1.96/4.44, WER% for test-clean/test-other
+- [AIshell-1](egs/aishell): 4.69 | 3.67 with extra corpus, CER%
 
 ## Installation
 

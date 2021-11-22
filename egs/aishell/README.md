@@ -32,3 +32,29 @@ Results in`%WER (%WER with LM) [%WER oracle]`
 - `v12`基于`v10`过拟合的观察，在PN到Joint network之间增加了类似SpecAug的mask，其参数是经验选取的，没有微调，CER相对下降明显（~7% rel，5.21->4.85）。比较意思的是，增加了PN mask之后，在训练初始阶段`v12`模型dev loss反而更好，这一点是反直觉的：
    ![[compare-v10-v10+PN_mask.png]]
    结合此前一些其他的工作，我认为可能由于当前PN和TN均采用了同一学习率和优化器，而PN往往使用较浅的网络，使得PN模型的参数更新相对TN而言方差较大，以至于PN参数更新初始不稳定，增加PN mask之后，可以认为PN参数更新时梯度变小了，其参数更新的方差也就相应减小了。如果这一思考是正确的，那么理论上给PN使用更小的学习率也可以达到类似的效果。
+   
+## LM fusion
+- Extra corpus: [THUCNEWS](http://thuctc.thunlp.org/#%E8%8E%B7%E5%8F%96%E9%93%BE%E6%8E%A5)
+	- ~20M lines (include empty lines) in total.
+	- unclean corpus, including Chinese/English punctuations, numbers (will be cast into `<unk>` using AISHELL-1 tokenizer).
+
+- Processing of `<unk>`	: replaced to white space. e.g.
+	- `你好，世界` -> `你好 世界`
+
+- Fusion formula, fix $\beta=0.6$ in experiments:
+$$
+\begin{aligned}
+&\text{without LM: } \hat{y} = \mathop{\arg\max}_y (\log P_{RNN-T}(Y|X)) \\
+&\text{with LM: } \hat{y} = \mathop{\arg\max}_y (\log P_{RNN-T}(Y|X) + \lambda \log P_{LM}(Y) + \beta |Y|)
+\end{aligned}
+$$
+
+- LM:
+	- [lm-v4](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/lm-v4): trained on extra corpus, 5-gram, 11GB on disk.
+	- [lm-v5](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/lm-v5): trained on aishell-1 training set, 5-gram, 73MB on disk.
+
+| Model | $\lambda$ | ppl   | CER (%) | RTF  |
+| ----- | --------- | ----- | ------- | ---- |
+| no lm | -         | -     | 4.82    | 0.53 | 
+| lm-v4 | 0.15      | 77.22 | 4.69    | 1.11 |
+| lm-v5 | 0.50      | 64.97 | 3.67    | 1.30 |
