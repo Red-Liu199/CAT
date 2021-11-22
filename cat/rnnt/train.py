@@ -130,11 +130,7 @@ class TransducerTrainer(nn.Module):
                 joint_out = self.joint(packed_enc, packed_dec)
             targets = PackedSequence(targets, target_lengths).data
         else:
-            if self.isfused:
-                joint_out = self.joint.skip_softmax_forward(
-                    output_encoder, output_decoder)
-            else:
-                joint_out = self.joint(output_encoder, output_decoder)
+            joint_out = self.joint(output_encoder, output_decoder)
 
         return joint_out, targets, o_lens, target_lengths
 
