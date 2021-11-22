@@ -27,8 +27,7 @@
         "grad-accum-fold": 1,
         "databalance": true,
         "checkall": true,
-        "amp": true,
-        "resume": "exp/lm-v9/checks/bestckpt.pt"
+        "amp": true
     },
-    "commit": "67a00a43f81f799efc773720b620ca081f09070d"
+    "commit": "32b024b548adb4e8ab0aadf6df9b3bdd14249ef3"
 }

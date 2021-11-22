@@ -1,0 +1,16 @@
+{
+    "data": {
+        "train": "data/thucnews.txt",
+        "dev": "dev",
+        "test": "test",
+        "lang": "zh-cn"
+    },
+    "sp": {
+        "model_type": "char",
+        "vocab_size": 4232,
+        "add_dummy_prefix": false,
+        "use_all_vocab": true,
+        "model_prefix": "sentencepiece/aishell_char/spm"
+    },
+    "commit": "bb42e467fca4fbd08e5c0b9745da8583f56c15ad"
+}

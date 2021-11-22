@@ -13,8 +13,8 @@
 ### Result
 ```
 Perplexity over dataset is 
-word piece level: 15.74
-word level: ~ 89.39  (exp(log(15.74)*180796/110909))
+word piece level: 15.54
+word level: ~ 87.54  (exp(log(15.54)*180796/110909))
 ```
 
 ### Monitor figure

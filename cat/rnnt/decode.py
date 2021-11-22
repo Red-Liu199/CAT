@@ -14,7 +14,6 @@ from ..shared.data import (
     ScpDataset,
     TestPadCollate
 )
-from ..shared.decoder import NGram
 
 import os
 import json
@@ -62,7 +61,7 @@ def main(args):
         mp.set_start_method('spawn')
     except RuntimeError as re:
         print(re)
-    q = mp.Queue(maxsize=world_size*2)
+    q = mp.Queue(maxsize=world_size)
     if args.cpu:
         model, ext_lm = build_model(args, 'cpu')
         model.share_memory()
@@ -95,7 +94,13 @@ def main(args):
 
 def dataserver(args, q: mp.Queue):
     testset = ScpDataset(args.input_scp)
-    n_frames = sum(testset.get_seq_len())
+    # sort the dataset in desencding order
+    testset_ls = testset.get_seq_len()
+    len_match = sorted(list(zip(testset_ls, testset._dataset)),
+                       key=lambda item: item[0])
+    testset._dataset = [data for _, data in len_match]
+    n_frames = sum(testset_ls)
+    del len_match, testset_ls
     testloader = DataLoader(
         testset, batch_size=1, shuffle=False,
         num_workers=args.world_size//8,

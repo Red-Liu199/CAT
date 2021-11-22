@@ -27,18 +27,19 @@
             "num": 10
         },
         "subsample": 8,
-        "lmdir": "exp/lm-v2",
+        "lmdir": "exp/lm-v4",
         "decode": {
             "algo": "alsd",
-            "beam_size": 64,
+            "beam_size": 16,
             "cpu": true,
+            "nj": 80,
             "umax-portion": 0.47696874273078027,
-            "lm-weight": 0.2
+            "lm-weight": 0.50
         },
         "er": {
             "mode": "cer",
             "oracle": true
         }
     },
-    "commit": "7bc39126533ac70b178008a0d09b760d6491cda8"
+    "commit": "32b024b548adb4e8ab0aadf6df9b3bdd14249ef3"
 }

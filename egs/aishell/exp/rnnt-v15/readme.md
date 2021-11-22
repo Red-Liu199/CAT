@@ -12,9 +12,15 @@
 
 ### Result
 ```
-Time of searching: 1069.89s
+baseline
 test    %CER 4.82 [5051 / 104765, 157 ins, 131 del, 4763 sub ]
 test    %CER 1.63 [1705 / 104765, 58 ins, 69 del, 1578 sub ]
+
+fusion with 0.5 lm-v4
+test    %CER 3.67
+
+fusion with 0.15 lm-v5 
+test    %CER 4.69
 ```
 
 ### Monitor figure

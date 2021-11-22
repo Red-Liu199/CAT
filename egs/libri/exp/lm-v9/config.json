@@ -21,7 +21,7 @@
         },
         "kwargs": {
             "d_model": 768,
-            "epoch_max": 20,
+            "epoch_max": 30,
             "peak_factor": 1.0,
             "warmup_steps": 25000,
             "reverse_metric_direc": true

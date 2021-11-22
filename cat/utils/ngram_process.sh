@@ -2,14 +2,14 @@
 # Author: Huahuan Zheng (maxwellzh@outlook.com)
 set -u
 opts=$(python utils/parseopt.py '{
-        "textbin":{
+        "dir":{
             "type": "str",
-            "help": "Path to the tokenized text file (normally *.pkl)"
+            "help": "Path to the working directory."
         },
-        "export":{
+        "outlm":{
             "type":"str",
-            "default": "./",
-            "help": "Path to outout file. Usually in format .klm"
+            "default": "ngram.klm",
+            "help": "Name of output N-gram file. Default: ngram.klm"
         },
         "-o":{
             "type":"int",
@@ -33,11 +33,30 @@ if [ ! $(command -v build_binary) ]; then
     exit 1
 fi
 
+if [ ! -d $dir ]; then
+    echo "No such directory: $dir"
+    exit 1
+fi
+
+if [ ! -d $outlm ]; then
+    outlm=$dir/$outlm
+fi
+
+# train sentence piece tokenizer
+python utils/lm_process.py $dir --sta 1 --sto 1 || exit 1
+
+textbin=$dir/lmbin/train.pkl
+if [ ! -f $textbin ]; then
+    python utils/lm_process.py $dir --sta 2 --sto 2 || exit 1
+else
+    echo "$textbin found, skip generating."
+fi
+
 if [ $arpa == "True" ]; then
     python utils/readtextbin.py $textbin |
-        lmplz -o $order -S 80% --discount_fallback >$export
+        lmplz -o $order -S 80% --discount_fallback >$outlm
 else
     python utils/readtextbin.py $textbin |
         lmplz -o $order -S 80% --discount_fallback |
-        build_binary /dev/stdin $export
+        build_binary /dev/stdin $outlm
 fi
