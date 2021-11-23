@@ -8,13 +8,14 @@
 
 ### Appendix
 
-* 
+* trained 35 epochs
+* '36 epochs' in the figure is due to some plotting error.
 
 ### Result
 ```
 Perplexity over dataset is 
-word piece level: 15.54
-word level: ~ 87.54  (exp(log(15.54)*180796/110909))
+word piece level: 15.44
+word level: ~ 86.63  (exp(log(15.44)*180796/110909))
 ```
 
 ### Monitor figure
