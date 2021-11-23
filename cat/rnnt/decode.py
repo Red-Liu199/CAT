@@ -166,7 +166,7 @@ def main_worker(gpu: int, args: argparse.Namespace, q: mp.Queue, fmt: str, model
             x = x.to(device)
             nbest_list, scores_nbest = searcher(model.encoder(x, x_lens)[0])
             nbest[key] = [(score.item(), sp.decode(hypo))
-                          for hypo, score in zip(nbest_list[0], scores_nbest[0])]
+                          for hypo, score in zip(nbest_list, scores_nbest)]
             _, best_seq = nbest[key][0]
             fi.write("{} {}\n".format(key, best_seq))
             del batch

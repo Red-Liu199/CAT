@@ -51,6 +51,7 @@
     # install python module kenlm==0.0.0
     python setup.py install
     # link executable binary files
-    cd ../../src/bin/
+    cd ../../src/
+    mkdir -p bin/ && cd bin/
     ln -s ../../tools/kenlm/build/bin/* ./
     ```
