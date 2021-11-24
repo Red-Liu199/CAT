@@ -30,19 +30,6 @@ if torch.__version__ >= '1.8.0':
     from torch.distributed.optim import ZeroRedundancyOptimizer
 
 
-def check_parser(args: argparse.Namespace, expected_attrs: List[str]):
-    unseen = []
-    for attr in expected_attrs:
-        if attr not in args:
-            unseen.append(attr)
-
-    if len(unseen) > 0:
-        raise RuntimeError(
-            f"Expect parser to have these arguments, but not found:\n    {' '.join(unseen)}")
-    else:
-        return None
-
-
 class Manager(object):
     def __init__(
             self,
@@ -54,8 +41,8 @@ class Manager(object):
             func_eval: Optional[Callable] = None):
         super().__init__()
 
-        check_parser(args, ['rank', 'gpu', 'workers', 'trset', 'devset', 'databalance',
-                     'batch_size', 'grad_accum_fold', 'config', 'dir', 'debug', 'logsdir', 'resume'])
+        utils.check_parser(args, ['rank', 'gpu', 'workers', 'trset', 'devset', 'databalance',
+                                  'batch_size', 'grad_accum_fold', 'config', 'dir', 'debug', 'logsdir', 'resume'])
 
         # setup dataloader
         tr_set = Dataset(args.trset)
@@ -125,13 +112,7 @@ class Manager(object):
 
         # Initial scheduler and optimizer
         assert 'scheduler' in configures
-
-        if isinstance(self.model, nn.parallel.DistributedDataParallel):
-            _model = self.model.module
-        else:
-            _model = self.model
-
-        if hasattr(_model, "requires_slice") and _model.requires_slice:
+        if hasattr(self.model, "requires_slice") and self.model.requires_slice:
             parameters = filter(lambda x: x.requires_grad,
                                 self.model.parameters())
             self.scheduler = GetScheduler(
@@ -139,7 +120,6 @@ class Manager(object):
         else:
             self.scheduler = GetScheduler(
                 configures['scheduler'], self.model.parameters())
-        del _model
 
         self.monitor = MonitorWriter(args.logsdir)
         self.monitor.addWriter(['train:loss', 'train:lr', 'eval:loss'])
@@ -165,7 +145,8 @@ class Manager(object):
 
     def run(self, args: argparse.Namespace):
 
-        check_parser(args, ['checksdir', 'rank', 'gpu', 'dir', 'checkall'])
+        utils.check_parser(
+            args, ['checksdir', 'rank', 'gpu', 'dir', 'checkall'])
 
         self.model.train()
         while True:
@@ -279,20 +260,21 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
     def _go_step(detach_loss, n_batch):
         # we divide loss with fold since we want the gradients to be divided by fold
         with autocast(enabled=enableAMP):
-            loss = model(logits, labels, input_lengths, label_lengths)/fold
+            loss = model(features, labels, input_lengths, label_lengths)/fold
+        print(loss)
 
-        normalized_loss = loss.detach() * logits.size(0)
+        normalized_loss = loss.detach() * features.size(0)
         if 'databalance' in args and args.databalance:
             '''
             get current global size
             efficiently, we can set t_batch_size=args.batch_size, 
             but current impl is more robust
             '''
-            t_batch_size = logits.new_tensor(logits.size(0))
+            t_batch_size = features.new_tensor(features.size(0))
             dist.all_reduce(t_batch_size)
             loss.data = normalized_loss * (world_size / t_batch_size)
         else:
-            t_batch_size = logits.size(0) * world_size
+            t_batch_size = features.size(0) * world_size
 
         scaler.scale(loss).backward()
 
@@ -302,8 +284,8 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
 
         return detach_loss, n_batch
 
-    check_parser(args, ['grad_accum_fold', 'n_steps',
-                 'print_freq', 'rank', 'gpu', 'debug', 'amp', 'grad_norm'])
+    utils.check_parser(args, ['grad_accum_fold', 'n_steps',
+                              'print_freq', 'rank', 'gpu', 'debug', 'amp', 'grad_norm'])
 
     model = manager.model
     scheduler = manager.scheduler
@@ -321,12 +303,12 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
     for i, minibatch in tqdm(enumerate(trainloader), desc=f'Epoch {manager.epoch} | train',
                              unit='batch', total=fold*args.n_steps, disable=(args.gpu != 0), leave=False):
 
-        logits, input_lengths, labels, label_lengths = minibatch
-        logits, labels, input_lengths, label_lengths = logits.cuda(
+        features, input_lengths, labels, label_lengths = minibatch
+        features, labels, input_lengths, label_lengths = features.cuda(
             args.gpu, non_blocking=True), labels, input_lengths, label_lengths
 
         if manager.specaug is not None:
-            logits, input_lengths = manager.specaug(logits, input_lengths)
+            features, input_lengths = manager.specaug(features, input_lengths)
 
         # update every fold times and drop the last few batches (number of which <= fold)
         if fold == 1 or (i+1) % fold == 0:
@@ -386,8 +368,8 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
 @torch.no_grad()
 def update_bn(trainloader, args: argparse.Namespace, manager: Manager):
 
-    check_parser(args, ['n_steps', 'print_freq',
-                 'rank', 'gpu', 'debug', 'amp'])
+    utils.check_parser(args, ['n_steps', 'print_freq',
+                              'rank', 'gpu', 'debug', 'amp'])
 
     model = manager.model
     if not hasattr(model.module, 'impl_forward'):
@@ -400,13 +382,13 @@ def update_bn(trainloader, args: argparse.Namespace, manager: Manager):
     for i, minibatch in tqdm(enumerate(trainloader), desc=f'Update BN',
                              unit='batch', total=args.n_steps, disable=(args.gpu != 0), leave=False):
         # measure data loading time
-        logits, input_lengths, labels, label_lengths = minibatch
-        logits, labels, input_lengths, label_lengths = logits.cuda(
+        features, input_lengths, labels, label_lengths = minibatch
+        features, labels, input_lengths, label_lengths = features.cuda(
             args.gpu, non_blocking=True), labels, input_lengths, label_lengths
 
         with autocast(enabled=enableAMP):
             _ = model.module.impl_forward(
-                logits, labels, input_lengths, label_lengths)
+                features, labels, input_lengths, label_lengths)
 
 
 @torch.no_grad()
@@ -421,17 +403,17 @@ def evaluate(testloader, args: argparse.Namespace, manager: Manager) -> float:
             dist.barrier()
             break
 
-        logits, input_lengths, labels, label_lengths = minibatch
-        logits, labels, input_lengths, label_lengths = logits.cuda(
+        features, input_lengths, labels, label_lengths = minibatch
+        features, labels, input_lengths, label_lengths = features.cuda(
             args.gpu, non_blocking=True), labels, input_lengths, label_lengths
 
         '''
         Suppose the loss is reduced by mean
         '''
-        loss = model(logits, labels, input_lengths, label_lengths)
+        loss = model(features, labels, input_lengths, label_lengths)
 
-        real_loss = loss * logits.size(0)  # type: torch.Tensor
-        n_batch = real_loss.new_tensor(logits.size(0), dtype=torch.long)
+        real_loss = loss * features.size(0)  # type: torch.Tensor
+        n_batch = real_loss.new_tensor(features.size(0), dtype=torch.long)
 
         dist.all_reduce(real_loss, dist.ReduceOp.SUM)
         dist.all_reduce(n_batch, dist.ReduceOp.SUM)

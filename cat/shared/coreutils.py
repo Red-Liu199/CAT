@@ -17,6 +17,19 @@ import torch.multiprocessing as mp
 from torch.nn.utils.rnn import pad_sequence
 
 
+def check_parser(args: argparse.Namespace, expected_attrs: List[str]):
+    unseen = []
+    for attr in expected_attrs:
+        if attr not in args:
+            unseen.append(attr)
+
+    if len(unseen) > 0:
+        raise RuntimeError(
+            f"Expect parser to have these arguments, but not found:\n    {' '.join(unseen)}")
+    else:
+        return None
+
+
 def pad_list(xs: torch.Tensor, pad_value=0, dim=0) -> torch.Tensor:
     """Perform padding for the list of tensors.
 

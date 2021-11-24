@@ -158,7 +158,7 @@ class TransducerTrainer(nn.Module):
 
 
 @torch.no_grad()
-def build_model(args, configuration: dict, dist: bool = True, verbose: bool = True) -> Union[nn.Module, nn.parallel.DistributedDataParallel]:
+def build_model(args, configuration: dict, dist: bool = True, verbose: bool = True, wrapped: bool = True) -> Union[nn.Module, nn.parallel.DistributedDataParallel]:
     def _load_and_immigrate(orin_dict_path: str, str_src: str, str_dst: str) -> OrderedDict:
         if not os.path.isfile(orin_dict_path):
             raise FileNotFoundError(f"{orin_dict_path} is not a valid file.")
@@ -216,7 +216,7 @@ def build_model(args, configuration: dict, dist: bool = True, verbose: bool = Tr
             _model.load_state_dict(state_dict, strict=False)
             if sum(param.data.sum()for param in _model.parameters()) == init_sum:
                 utils.highlight_msg(
-                    "WARNING: It seems decoder pretrained model is not properly loaded.")
+                    f"WARNING: It seems {module} pretrained model is not properly loaded.")
 
         if module in ['encoder', 'decoder']:
             # FIXME: this is a hack, since we just feed the hidden output into joint network
@@ -258,6 +258,9 @@ def build_model(args, configuration: dict, dist: bool = True, verbose: bool = Tr
     if all(_model.freeze for _model in [encoder, decoder, jointnet]):
         raise RuntimeError("It's illegal to freeze all parts of Transducer.")
 
+    if not wrapped:
+        return encoder, decoder, jointnet
+
     # for compatible of old settings
     if 'transducer' in configuration:
         transducer_kwargs = configuration["transducer"]     # type: dict
@@ -267,10 +270,9 @@ def build_model(args, configuration: dict, dist: bool = True, verbose: bool = Tr
     model = TransducerTrainer(encoder=encoder, decoder=decoder,
                               jointnet=jointnet, **transducer_kwargs)
 
-    if not all(not _model.freeze for _model in [encoder, decoder, jointnet]):
-        setattr(model, 'requires_slice', True)
-
     if not dist:
+        if not all(not _model.freeze for _model in [encoder, decoder, jointnet]):
+            setattr(model, 'requires_slice', True)
         return model
 
     # make batchnorm synced across all processes
@@ -279,7 +281,8 @@ def build_model(args, configuration: dict, dist: bool = True, verbose: bool = Tr
     model.cuda(args.gpu)
     model = torch.nn.parallel.DistributedDataParallel(
         model, device_ids=[args.gpu])
-
+    if not all(not _model.freeze for _model in [encoder, decoder, jointnet]):
+        setattr(model, 'requires_slice', True)
     return model
 
 

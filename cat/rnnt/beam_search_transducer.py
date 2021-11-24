@@ -280,7 +280,7 @@ class MaxBeamBuffer():
                          [f"{key} {hypo}" for key, hypo in self._buffer.items()])
 
 
-class TransducerBeamSearcher(torch.nn.Module):
+class TransducerBeamSearcher():
 
     def __init__(
         self,
@@ -344,7 +344,7 @@ class TransducerBeamSearcher(torch.nn.Module):
 
         self.temp = temperature
 
-    def forward(self, tn_output):
+    def __call__(self, tn_output):
 
         hyps = self.searcher(tn_output)     # type:List[Hypothesis]
 

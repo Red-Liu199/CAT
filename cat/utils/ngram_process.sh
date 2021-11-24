@@ -1,6 +1,7 @@
 # Copyright Tsinghua University 2021
 # Author: Huahuan Zheng (maxwellzh@outlook.com)
 set -u
+set -o errexit
 opts=$(python utils/parseopt.py '{
         "dir":{
             "type": "str",
@@ -20,6 +21,10 @@ opts=$(python utils/parseopt.py '{
         "--arpa":{
             "action": "store_true",
             "help": "Store n-gram file as .arpa instead of binary."
+        },
+        "--large-corpus":{
+            "action": "store_true",
+            "help": "Use on-the-fly encoding for large corpus."
         }
     }' $0 $*) && eval $opts || exit 1
 
@@ -45,18 +50,34 @@ fi
 # train sentence piece tokenizer
 python utils/lm_process.py $dir --sta 1 --sto 1 || exit 1
 
-textbin=$dir/lmbin/train.pkl
-if [ ! -f $textbin ]; then
-    python utils/lm_process.py $dir --sta 2 --sto 2 || exit 1
+if [ $large_corpus=="True" ]; then
+    spmodel=$(cat exp/template/hyper-p.json | python -c "import sys;import json;print(json.load(sys.stdin)['sp']['model_prefix'])").model
+    f_text=$(cat exp/template/hyper-p.json | python -c "import sys;import json;print(json.load(sys.stdin)['data']['train'])")
+
+    if [ ! -f $f_text ] || [ ! -f $spmodel ]; then
+        echo "Make sure '$f_text' and '$spmodel' exist."
+        exit 1
+    fi
+    processing="cat $f_text | python utils/readtextbin.py . -t --spm $spmodel"
 else
-    echo "$textbin found, skip generating."
+    textbin=$dir/lmbin/train.pkl
+    if [ ! -f $textbin ]; then
+        python utils/lm_process.py $dir --sta 2 --sto 2 || exit 1
+    else
+        echo "$textbin found, skip generating."
+    fi
+    if [ ! -f $textbin ]; then
+        echo "Make sure '$textbin' exists."
+        exit 1
+    fi
+    processing="python utils/readtextbin.py $textbin"
 fi
 
 if [ $arpa == "True" ]; then
-    python utils/readtextbin.py $textbin |
-        lmplz -o $order -S 80% --discount_fallback >$outlm
+    eval "$processing |
+        lmplz -o $order -S 80% --discount_fallback >$outlm"
 else
-    python utils/readtextbin.py $textbin |
+    eval "$processing |
         lmplz -o $order -S 80% --discount_fallback |
-        build_binary /dev/stdin $outlm
+        build_binary /dev/stdin $outlm"
 fi
