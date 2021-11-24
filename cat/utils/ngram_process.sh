@@ -51,8 +51,8 @@ fi
 python utils/lm_process.py $dir --sta 1 --sto 1 || exit 1
 
 if [ $large_corpus=="True" ]; then
-    spmodel=$(cat exp/template/hyper-p.json | python -c "import sys;import json;print(json.load(sys.stdin)['sp']['model_prefix'])").model
-    f_text=$(cat exp/template/hyper-p.json | python -c "import sys;import json;print(json.load(sys.stdin)['data']['train'])")
+    spmodel=$(cat $dir/hyper-p.json | python -c "import sys;import json;print(json.load(sys.stdin)['sp']['model_prefix'])").model
+    f_text=$(cat $dir/hyper-p.json | python -c "import sys;import json;print(json.load(sys.stdin)['data']['train'])")
 
     if [ ! -f $f_text ] || [ ! -f $spmodel ]; then
         echo "Make sure '$f_text' and '$spmodel' exist."

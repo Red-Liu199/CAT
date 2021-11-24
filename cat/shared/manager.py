@@ -261,7 +261,6 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
         # we divide loss with fold since we want the gradients to be divided by fold
         with autocast(enabled=enableAMP):
             loss = model(features, labels, input_lengths, label_lengths)/fold
-        print(loss)
 
         normalized_loss = loss.detach() * features.size(0)
         if 'databalance' in args and args.databalance:

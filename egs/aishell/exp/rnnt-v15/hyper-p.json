@@ -18,8 +18,7 @@
         "grad-norm": 5.0,
         "databalance": true,
         "checkall": true,
-        "amp": true,
-        "resume": "exp/rnnt-v15/checks/checkpoint.017.pt"
+        "amp": true
     },
     "inference": {
         "avgmodel": {
@@ -34,7 +33,7 @@
             "cpu": true,
             "nj": 80,
             "umax-portion": 0.47696874273078027,
-            "lm-weight": 0.50
+            "lm-weight": 0.5
         },
         "er": {
             "mode": "cer",
