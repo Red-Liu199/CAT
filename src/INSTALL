@@ -1,7 +1,7 @@
 # Fetch modules
 git submodule init && git submodule update
 
-# warp-rnnt >= 0.7.0
+# warp-rnnt >= 0.7.1
 cd warp-rnnt/pytorch_binding/
 git checkout -t origin/dev
 python setup.py install

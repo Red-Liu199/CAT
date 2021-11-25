@@ -52,9 +52,10 @@ class AbsDecoder(nn.Module):
         if tied:
             self.classifier.weight = self.embedding.weight
 
-    def score(self, input_ids: torch.LongTensor, input_lengths: torch.LongTensor, targets: torch.LongTensor, *args):
+    def score(self, input_ids: torch.LongTensor, input_lengths: torch.LongTensor, *args):
         # [N, U, K]
         logits, _ = self.forward(input_ids, input_lengths=input_lengths, *args)
+        targets = input_ids.roll(-1, 1)
         # [N, U]
         log_prob = logits.log_softmax(
             dim=-1).gather(index=targets.unsqueeze(2), dim=-1).squeeze(-1)
@@ -331,29 +332,33 @@ class NGram(AbsDecoder):
         self.register_buffer('scale', torch.tensor(
             10.).log_(), persistent=False)
 
+    def score(self, input_ids: torch.LongTensor, input_lengths: torch.LongTensor):
+        # [N, ]
+        log_prob = input_ids.new_full(
+            input_ids.size()[:1], 0.0, dtype=torch.float)
+        for b, (seq, l) in enumerate(zip(input_ids.cpu().tolist(), input_lengths.cpu().tolist())):
+            seq = [str(x) for x in seq[:l]]
+            if seq[0] == '0':
+                seq[0] = '<s>'
+            seq.append('</s>')
+
+            for t, pb in enumerate(self.ngram.full_scores(' '.join(seq), bos=False, eos=False)):
+                if t == 0:
+                    continue
+                log_prob[b] += pb[0]
+
+        log_prob *= self.scale
+
+        return log_prob
+
     def forward(self, src_ids: torch.Tensor, hidden: torch.Tensor = None, input_lengths: Optional[torch.Tensor] = None):
         if self.training:
-            raise NotImplementedError
+            raise NotImplementedError(
+                "N-gram model doesn't support training like NN model.")
 
         if input_lengths is not None:
-            B = src_ids.size(0)
-            pred_logp = src_ids.new_full(
-                src_ids.size()+(self.vocab,), float('-inf'))
-            for b, (seq, l) in enumerate(zip(src_ids.cpu().tolist(), input_lengths.cpu().tolist())):
-                seq = [str(x) for x in seq[:l]]
-                if seq[0] == '0':
-                    seq[0] = '<s>'
-                if seq[-1] != '0':
-                    seq.append('</s>')
-                pred_logp[b] = [float('-inf') for _ in range(l)]
-                for t, pb in enumerate(self.ngram.full_scores(' '.join(seq), bos=False, eos=False)):
-                    if t == 0:
-                        continue
-                    pred_logp[b, t-1, src_ids[b, t-1]] = pb[0]
-
-            # [B, T, V]
-            pred_logp *= self.scale
-            return pred_logp, None
+            raise NotImplementedError(
+                "N-gram model for long sequences likelihood calculation is of poor efficiency.")
 
         B = src_ids.size(0)
         if hidden is not None:

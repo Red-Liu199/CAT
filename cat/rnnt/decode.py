@@ -165,9 +165,13 @@ def main_worker(gpu: int, args: argparse.Namespace, q: mp.Queue, fmt: str, model
             key = key[0]
             x = x.to(device)
             nbest_list, scores_nbest = searcher(model.encoder(x, x_lens)[0])
-            nbest[key] = [(score.item(), sp.decode(hypo))
-                          for hypo, score in zip(nbest_list, scores_nbest)]
-            _, best_seq = nbest[key][0]
+            if args.token_nbest:
+                nbest[key] = [(score.item(), hypo)
+                              for hypo, score in zip(nbest_list, scores_nbest)]
+            else:
+                nbest[key] = [(score.item(), sp.decode(hypo))
+                              for hypo, score in zip(nbest_list, scores_nbest)]
+            best_seq = sp.decode(nbest_list[0])
             fi.write("{} {}\n".format(key, best_seq))
             del batch
 
@@ -233,6 +237,8 @@ def DecoderParser():
                         help="Path to word prefix tree file.")
     parser.add_argument("--cpu", action='store_true', default=False)
     parser.add_argument("--rescore", action='store_true', default=False)
+    parser.add_argument("--token-nbest", action="store_true",
+                        help="Store N-best list in tokens intead of text.")
     return parser
 
 

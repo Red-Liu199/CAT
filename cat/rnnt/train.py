@@ -27,8 +27,8 @@ import argparse
 from collections import OrderedDict
 from warp_rnnt import rnnt_loss as RNNTLoss
 import warp_rnnt
-if warp_rnnt.__version__ >= '0.7.0':
-    from warp_rnnt import fused_rnnt_loss as RNNTFusedLoss
+if warp_rnnt.__version__ >= '0.7.1':
+    from warp_rnnt import fused_rnnt_loss_ as RNNTFusedLoss
 from typing import Union
 
 import torch

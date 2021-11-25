@@ -47,7 +47,7 @@
    git submodule init && git submodule update
    cd src/
    
-   # warp-rnnt >= 0.7.0
+   # warp-rnnt >= 0.7.1
    cd warp-rnnt/pytorch_binding/
    git checkout -t origin/dev
    python setup.py install
@@ -127,7 +127,7 @@ In this repo, we support RNN-T, Language model and CTC/CTC-CRF model training as
 }
 ```
 
-**NN configuration:	**`exp/<task>/template/config.json`
+**NN configuration:** `exp/<task>/template/config.json`
 
 - If you have installed all dependencies (including `warp-rnnt` and `torch-gather`), and you're using Visual-Studio Code as working environment, you can generate json schema for syntax intellisense via (in `egs/<task>/`):
 

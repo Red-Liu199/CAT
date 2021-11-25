@@ -269,6 +269,14 @@ class MaxBeamBuffer():
                     self._buffer.keys(), key=lambda k: self._buffer[k].score)
         self._iner_cnt += 1
 
+    def isfull(self) -> bool:
+        return self._res == 0
+
+    def min(self) -> Union[None, float, torch.Tensor]:
+        if self._res == self._buffer:
+            return None
+        return self._buffer[self._min_index].score
+
     def getBeam(self) -> List[Hypothesis]:
         return list(self._buffer.values())
 
@@ -658,6 +666,174 @@ class TransducerBeamSearcher():
                        reverse=True)[:self.nbest]
 
         return Nbest
+
+    def batch_alsd(self, tn_out: torch.Tensor, lt: torch.LongTensor):
+        """
+        "ALIGNMENT-LENGTH SYNCHRONOUS DECODING FOR RNN TRANSDUCER"
+
+        tn_output: [N, T, D]
+        """
+
+        use_lm = self.lm_weight > 0.0
+        beta_l = 0.6
+        N = tn_out.size(0)
+        B = [[Hypothesis(
+            pred=[self.bos_id],
+            log_prob=0.0,
+            cache={'pn_state': self.decoder.init_states()})] for _ in range(N)]
+        if use_lm:
+            for n in range(N):
+                B[n][0].cache.update({'lm_state': self.lm.init_states()})
+        Final = [[] for _ in range(N)]  # type: List[List[Hypothesis]]
+        ly = (lt*self.u_portion).to(torch.long)
+        Tmax = lt.max()
+        Umax = ly.max()
+        dummy_tensor = tn_out.new_empty(1)
+        prefix_cache = PrefixCacheDict()
+        buffers = [MaxBeamBuffer(self.beam_size) for _ in range(N)]
+
+        for i_path in range(Tmax+Umax):
+
+            sqz_beams = []  # type: List[Hypothesis]
+            # remove the invalid hypos (t >= T) in the beam
+            map_idxbeam2orin = []
+            for n in range(N):
+                buffers[n].reset()
+                sliced_beams = [hypo for hypo in B[n]
+                                if i_path - len(hypo) + 1 < lt[n] and i_path < lt[n] + ly[n]]
+                sqz_beams += sliced_beams
+                map_idxbeam2orin += [n] * len(sliced_beams)
+            if sqz_beams == []:
+                break
+
+            group_uncached, group_cached = group_to_batch(
+                sqz_beams, dummy_tensor, prefix_cache)
+            i_sep = len(group_uncached)
+            group_B = group_uncached + group_cached
+            n_group_batches = torch.LongTensor(
+                [len(g[0]) for g in group_B])
+            num_batches = n_group_batches.sum()
+            map_relidx2gid = torch.repeat_interleave(
+                n_group_batches).tolist()
+            map_relidx2bid = []
+            for ng in n_group_batches:
+                map_relidx2bid += list(range(ng))
+
+            index_of_beams = []   # len: len(sliced_B)
+            group_pn_out = []       # len: len(group_B)
+            group_pn_state = []     # len: len(group_B)
+            if use_lm:
+                group_lm_out, group_lm_state = [], []
+            for gid, (g_index, g_tokens, g_states) in enumerate(group_B):
+                index_of_beams += g_index
+                # [B_i, 1, H], ...
+                if gid >= i_sep:
+                    pn_out = g_tokens['pn_out']
+                    pn_state = g_states['pn_state']()
+                    if use_lm:
+                        lm_out = g_tokens['lm_out']
+                        lm_state = g_states['lm_state']()
+                else:
+                    pn_out, pn_state = self.decoder(
+                        g_tokens,
+                        g_states['pn_state']())
+                    if use_lm:
+                        lm_out, lm_state = self._lm_step(
+                            g_tokens,
+                            g_states['lm_state']())
+                group_pn_out.append(pn_out)
+                group_pn_state.append(pn_state)
+                if use_lm:
+                    group_lm_out.append(lm_out)
+                    group_lm_state.append(lm_state)
+
+            map_rel2orin = [map_idxbeam2orin[index_of_beams[i]]
+                            for i in range(num_batches)]
+
+            # joint net batching
+            group_t = [i_path - len(sqz_beams[index_of_beams[i]]) +
+                       1 for i in range(num_batches)]
+            # [B, 1, H]
+            pn_out = torch.cat(group_pn_out, dim=0)
+            # [B, 1, H]
+            expand_tn_out = torch.cat([tn_out[map_rel2orin[i], group_t[i]] for i in range(
+                num_batches)], dim=0).view_as(pn_out)
+
+            # [B, 1, 1, V] -> [B, V]
+            log_prob = (self.joint(expand_tn_out, pn_out)
+                        ).squeeze(1).squeeze(1)
+            # [B,]
+            for i, _log_p in enumerate(log_prob[:, self.blank_id]):
+                cur_hypo = sqz_beams[index_of_beams[i]].clone()
+                cur_hypo.log_prob += _log_p
+                idx_orin = map_rel2orin[i]
+                buffers[idx_orin].update(cur_hypo)
+                gid, rbid = map_relidx2gid[i], map_relidx2bid[i]
+                prefix_cache.update(cur_hypo.pred, {
+                    'pn_out': group_pn_out[gid][rbid:rbid+1],
+                    'pn_state': self.decoder.get_state_from_batch(group_pn_state[gid], rbid)
+                })
+                if use_lm:
+                    prefix_cache.update(cur_hypo.pred, {
+                        'lm_out': group_lm_out[gid][rbid:rbid+1],
+                        'lm_state': self.lm.get_state_from_batch(group_lm_state[gid], rbid)
+                    })
+                if group_t[i] == lt[idx_orin]-1:
+                    Final[idx_orin].append(cur_hypo)
+
+            if use_lm:
+                lm_out = torch.cat(group_lm_out, dim=0)
+                lm_score = self.lm_weight * \
+                    lm_out.squeeze(1) + beta_l
+                # [B, V]
+                fused_prob = log_prob + lm_score
+            else:
+                fused_prob = log_prob.clone()
+
+            # mask the blank id postion, so that we won't select it in top-k hypos
+            fused_prob[:, self.blank_id].fill_(float('-inf'))
+            # calculate the hypo score here, then we can get the topk over all beams
+            # [B, V] + [B, 1] -> [B, V]
+            fused_prob += collect_scores(
+                [sqz_beams[i] for i in index_of_beams],
+                dummy_tensor).unsqueeze(1)
+
+            # [K,]
+            scores, tokens = torch.topk(
+                fused_prob, k=self.beam_size, dim=1)
+
+            for b in range(num_batches):
+                for k in range(self.beam_size):
+                    idx_orin = map_rel2orin[b]
+                    if buffers[idx_orin].isfull() and scores[b, k] < buffers[idx_orin].min():
+                        break
+                    cur_hypo = sqz_beams[index_of_beams[b]].clone()
+                    tok = tokens[b, k].item()
+                    cur_hypo.add_token(tok)
+                    cur_hypo.log_prob += log_prob[b, tok]
+                    idx_g, idx_b_part = map_relidx2gid[b], map_relidx2bid[b]
+                    cur_hypo.cache['pn_state'] = self.decoder.get_state_from_batch(
+                        group_pn_state[idx_g], idx_b_part)
+
+                    if use_lm:
+                        cur_hypo.lm_score += lm_score[b, tok]
+                        cur_hypo.cache['lm_state'] = self.lm.get_state_from_batch(
+                            group_lm_state[idx_g], idx_b_part)
+
+                    buffers[idx_orin].update(cur_hypo)
+            del B
+            B = [recombine_hypo(buffers[n].getBeam()) for n in range(N)]
+            prefix_cache.pruneShorterThan(i_path-max(group_t)+1)
+
+        batch_nbest = []
+        for n in range(N):
+            if Final[n] == []:
+                Final[n] = B[n]
+            Nbest = sorted(Final[n], key=lambda item: item.score,
+                           reverse=True)[:self.nbest]
+            batch_nbest.append(Nbest)
+
+        return batch_nbest
 
     def _joint_step(self, tn_out: torch.Tensor, pn_out: torch.Tensor):
         """Join predictions (TN & PN)."""
