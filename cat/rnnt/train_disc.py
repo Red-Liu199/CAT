@@ -10,7 +10,7 @@ from ..shared.decoder import AbsDecoder
 from .train import build_model as rnnt_builder
 from ..lm import lm_builder
 from ..shared.decoder import NGram
-from . import JointNet, SimJointNet
+from .joint import AbsJointNet
 from ..shared.data import (
     SpeechDatasetPickle,
     sortedPadCollateTransducer
@@ -51,7 +51,7 @@ class DiscTransducerTrainer(nn.Module):
     def __init__(self,
                  encoder: nn.Module,
                  decoder: AbsDecoder,
-                 joint: JointNet,
+                 joint: AbsJointNet,
                  den_lm: AbsDecoder,
                  searcher: TransducerBeamSearcher) -> None:
         super().__init__()
@@ -129,7 +129,7 @@ class DiscTransducerTrainer(nn.Module):
         packed_encoder_out = PackedSequence(
             sampled_encoder_out, sampled_encoder_lens)
 
-        joint_out = self.joint.skip_softmax_forward(
+        joint_out = self.joint.impl_forward(
             packed_encoder_out, packed_decoder_out)
         target_lengths = (
             merge_lengths - 1).to(device=joint_out.device, dtype=torch.int32)

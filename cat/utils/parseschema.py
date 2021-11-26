@@ -2,13 +2,21 @@
 This script is used for parsing the json schema for experiment settings.
 '''
 # %%
-from ..shared.scheduler import Scheduler
-from ..shared.decoder import AbsDecoder
-from ..shared import scheduler, SpecAug
-from ..shared import decoder as pn_zoo
-from ..shared import encoder as tn_zoo
-from . import JointNet, SimJointNet
-from .train import TransducerTrainer
+
+try:
+    import cat
+except ModuleNotFoundError:
+    import os
+    import sys
+    sys.path.append(os.getcwd())
+from cat.shared import decoder as pn_zoo
+from cat.shared import encoder as tn_zoo
+from cat.shared import scheduler, SpecAug
+from cat.shared.scheduler import Scheduler
+from cat.shared.decoder import AbsDecoder
+from cat.rnnt import joint as joint_zoo
+from cat.rnnt.joint import AbsJointNet
+from cat.rnnt.train import TransducerTrainer
 
 import inspect
 import json
@@ -184,7 +192,12 @@ schema['properties']['specaug_config'] = processing
 
 
 processing = gen_object(dict)  # type:OrderedDict
-parse_processing(processing, [JointNet, SimJointNet])
+modules = []
+for m in dir(joint_zoo):
+    _m = getattr(joint_zoo, m)
+    if inspect.isclass(_m) and issubclass(_m, AbsJointNet):
+        modules.append(_m)
+parse_processing(processing, modules)
 
 processing['description'] = 'Configuration of Transducer joint network'
 schema['properties']['joint'] = processing

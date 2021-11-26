@@ -9,7 +9,7 @@ Support:
 Author: Huahuan Zhengh (maxwellzh@outlook.com)
 """
 
-from . import JointNet
+from .joint import AbsJointNet
 from ..shared.decoder import AbsDecoder, AbsStates
 from ..shared.data import sortedPadCollateLM
 
@@ -293,7 +293,7 @@ class TransducerBeamSearcher():
     def __init__(
         self,
         decoder: AbsDecoder,
-        joint: JointNet,
+        joint: AbsJointNet,
         blank_id: int = 0,
         bos_id: int = 0,
         beam_size: int = 5,
@@ -844,7 +844,7 @@ class TransducerBeamSearcher():
         if self.temp == 1.0:
             return self.joint(tn_out, pn_out)
         else:
-            logits = self.joint.skip_softmax_forward(
+            logits = self.joint.impl_forward(
                 tn_out, pn_out)
             return torch.log_softmax(logits/self.temp, dim=-1)
 

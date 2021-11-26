@@ -2,13 +2,7 @@
 
 import sys
 import argparse
-try:
-    import cat
-except ModuleNotFoundError:
-    import os
-    sys.path.append(os.getcwd())
-from cat.shared.data import CorpusDataset
-import sentencepiece as spm
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -19,6 +13,7 @@ if __name__ == "__main__":
                         help="SentencePiece model to tokenize text.")
     args = parser.parse_args()
     if args.istext:
+        import sentencepiece as spm
         assert args.spm is not None
         sp = spm.SentencePieceProcessor(model_file=args.spm)
         try:
@@ -29,6 +24,12 @@ if __name__ == "__main__":
         except IOError:
             exit(0)
     else:
+        try:
+            import cat
+        except ModuleNotFoundError:
+            import os
+            sys.path.append(os.getcwd())
+        from cat.shared.data import CorpusDataset
         libri = CorpusDataset(args.input)
         try:
             for i in range(len(libri)):

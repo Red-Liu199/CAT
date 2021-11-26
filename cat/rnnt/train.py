@@ -12,14 +12,15 @@ from ..shared import encoder as tn_zoo
 from ..shared import decoder as pn_zoo
 from ..shared.layer import TimeReduction
 from ..shared import SpecAug
+from ..shared.decoder import AbsDecoder
 from ..shared.data import (
     SpeechDatasetPickle,
     sortedPadCollateTransducer
 )
-from . import (
+from . import joint as joint_zoo
+from .joint import (
     PackedSequence,
-    JointNet,
-    SimJointNet
+    AbsJointNet
 )
 
 import os
@@ -67,8 +68,8 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
 class TransducerTrainer(nn.Module):
     def __init__(self,
                  encoder: nn.Module = None,
-                 decoder: nn.Module = None,
-                 jointnet: nn.Module = None,
+                 decoder: AbsDecoder = None,
+                 jointnet: AbsJointNet = None,
                  compact: bool = False,
                  fused: bool = False,
                  time_reduction: int = 1,
@@ -80,10 +81,6 @@ class TransducerTrainer(nn.Module):
         self.decoder = decoder
         self.joint = jointnet
         self._compact = compact
-
-        if fused and not hasattr(self.joint, 'skip_softmax_forward'):
-            raise RuntimeError(
-                f"class {self.joint.__name__} doesn't have method \'skip_softmax_forward\' implemented.")
 
         self.isfused = fused
         if self.isfused and not self._compact:
@@ -124,7 +121,7 @@ class TransducerTrainer(nn.Module):
             packed_enc = PackedSequence(output_encoder, o_lens)
             packed_dec = PackedSequence(output_decoder, target_lengths+1)
             if self.isfused:
-                joint_out = self.joint.skip_softmax_forward(
+                joint_out = self.joint.impl_forward(
                     packed_enc, packed_dec)
             else:
                 joint_out = self.joint(packed_enc, packed_dec)
@@ -173,30 +170,27 @@ def build_model(args, configuration: dict, dist: bool = True, verbose: bool = Tr
     def _build(config: dict, module: str) -> nn.Module:
         assert 'kwargs' in config
 
-        settings = config['kwargs']     # type: dict
         if module == 'encoder':
-            _model = getattr(tn_zoo, config['type'])(
-                **settings)  # type: nn.Module
-
+            zoo = tn_zoo
         elif module == 'decoder':
+            zoo = pn_zoo
             if "type" not in config:
                 # compatibility to older config
                 config["type"] = "LSTMPredictNet"
-            _model = getattr(pn_zoo, config['type'])(
-                **settings)  # type: nn.Module
-
         elif module == 'joint':
             """
                 The joint network accept the concatence of outputs of the 
                 encoder and decoder. So the input dimensions MUST match that.
             """
+            zoo = joint_zoo
             if 'type' not in config:
-                AbsNet = JointNet
-            else:
-                AbsNet = eval(config['type'])  # type: JointNet
-            _model = AbsNet(**settings)
+                config['type'] = 'JointNet'
+
         else:
             raise ValueError(f"Unknow module: {module}")
+
+        _model = getattr(zoo, config['type'])(
+            **config['kwargs'])  # type: AbsJointNet
 
         if "pretrained" in config:
             if module == "encoder":

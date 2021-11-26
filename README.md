@@ -132,7 +132,7 @@ In this repo, we support RNN-T, Language model and CTC/CTC-CRF model training as
 - If you have installed all dependencies (including `warp-rnnt` and `torch-gather`), and you're using Visual-Studio Code as working environment, you can generate json schema for syntax intellisense via (in `egs/<task>/`):
 
   ```bash
-  python -m cat.rnnt.parseschema
+  python utils/parseschema.py
   ```
 
   It would auto-generate a file `.vscode/schemas.json`. Add following contents into the file `.vscode/settings.json`:
