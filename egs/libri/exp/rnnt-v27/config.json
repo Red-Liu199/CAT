@@ -29,7 +29,8 @@
             "kernel_size": 32,
             "num_cells": 17,
             "num_classes": 1024,
-            "num_heads": 8
+            "num_heads": 8,
+            "with_head": false
         }
     },
     "decoder": {
@@ -38,6 +39,7 @@
             "hdim": 640,
             "num_classes": 1024,
             "num_layers": 1,
+            "with_head": false,
             "variational_noise": [
                 0.0,
                 0.075

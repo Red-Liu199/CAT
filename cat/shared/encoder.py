@@ -23,69 +23,76 @@ def get_vgg2l_odim(idim, in_channel=1, out_channel=128):
     return int(idim) * out_channel  # numer of channels
 
 
-class LSTM(nn.Module):
+class AbsEncoder(nn.Module):
+    def __init__(self, with_head: bool = True, num_classes: int = -1, n_hid: int = -1) -> None:
+        super().__init__()
+        if with_head:
+            assert num_classes > 0, f"Vocab size should be > 0, instead {num_classes}"
+            assert n_hid > 0, f"Hidden size should be > 0, instead {n_hid}"
+            self.classifier = nn.Linear(n_hid, num_classes)
+        else:
+            self.classifier = nn.Identity()
+
+    def impl_forward(self, *args, **kwargs):
+        '''Implement the forward funcion w/o classifier'''
+        raise NotImplementedError
+
+    def forward(self, *args, **kwargs):
+        out = self.impl_forward(*args, **kwargs)
+        if isinstance(out, tuple):
+            _co = self.classifier(out[0])
+            return (_co,)+out[1:]
+        else:
+            return self.classifier(out)
+
+
+class LSTM(AbsEncoder):
     def __init__(self,
                  idim: int,
                  hdim: int,
                  n_layers: int,
                  num_classes: int,
                  dropout: float,
+                 with_head: bool = True,
                  bidirectional: bool = False):
-        super().__init__()
+        super().__init__(with_head=with_head, num_classes=num_classes,
+                         n_hid=(2*hdim if bidirectional else hdim))
+
         self.lstm = c_layers._LSTM(
             idim, hdim, n_layers, dropout, bidirectional=bidirectional)
 
-        if bidirectional:
-            self.linear = nn.Linear(hdim * 2, num_classes)
-        else:
-            self.linear = nn.Linear(hdim, num_classes)
-
-    def forward(self, x: torch.Tensor, ilens: torch.Tensor, hidden=None):
-        lstm_out, olens = self.lstm(x, ilens, hidden)
-        out = self.linear(lstm_out)
-        return out, olens
-
-
-class BLSTM(LSTM):
-    def __init__(self, idim: int, hdim: int, n_layers: int, num_classes: int, dropout: float):
-        super().__init__(idim, hdim, n_layers, num_classes, dropout, bidirectional=True)
+    def impl_forward(self, x: torch.Tensor, ilens: torch.Tensor, hidden=None):
+        return self.lstm(x, ilens, hidden)
 
 
 class VGGLSTM(LSTM):
-    def __init__(self, idim: int, hdim: int, n_layers: int, num_classes: int, dropout: float, in_channel: int = 3, bidirectional: int = False):
-        super().__init__(get_vgg2l_odim(idim, in_channel=in_channel), hdim,
-                         n_layers, num_classes, dropout, bidirectional=bidirectional)
+    def __init__(self, idim: int, hdim: int, n_layers: int, num_classes: int, dropout: float, with_head: bool = True, in_channel: int = 3, bidirectional: int = False):
+        super().__init__(get_vgg2l_odim(idim, in_channel),
+                         hdim, n_layers, num_classes, dropout, with_head, bidirectional)
 
         self.VGG = c_layers.VGG2L(in_channel)
 
-    def forward(self, x: torch.Tensor, ilens: torch.Tensor):
+    def impl_forward(self, x: torch.Tensor, ilens: torch.Tensor):
         vgg_o, vgg_lens = self.VGG(x, ilens)
-        return super().forward(vgg_o, vgg_lens)
+        return super().impl_forward(vgg_o, vgg_lens)
 
 
-class VGGBLSTM(VGGLSTM):
-    def __init__(self, idim: int, hdim: int, n_layers: int, num_classes: int, dropout: float, in_channel: int = 3):
-        super().__init__(idim, hdim, n_layers, num_classes,
-                         dropout, in_channel=in_channel, bidirectional=True)
-
-
-class LSTMrowCONV(nn.Module):
-    def __init__(self, idim: int, hdim: int, n_layers: int, num_classes: int, dropout: float):
-        super().__init__()
+class LSTMrowCONV(AbsEncoder):
+    def __init__(self, idim: int, hdim: int, n_layers: int, dropout: float, with_head: bool = True,  num_classes: int = -1) -> None:
+        super().__init__(with_head=with_head, num_classes=num_classes, n_hid=hdim)
 
         self.lstm = c_layers._LSTM(idim, hdim, n_layers, dropout)
         self.lookahead = c_layers.Lookahead(hdim, context=5)
-        self.linear = nn.Linear(hdim, num_classes)
 
-    def forward(self, x: torch.Tensor, ilens: torch.Tensor, hidden=None):
+    def impl_forward(self, x: torch.Tensor, ilens: torch.Tensor, hidden=None):
         lstm_out, olens = self.lstm(x, ilens, hidden)
         ahead_out = self.lookahead(lstm_out)
-        return self.linear(ahead_out), olens
+        return ahead_out, olens
 
 
-class TDNN_NAS(torch.nn.Module):
-    def __init__(self, idim: int, hdim: int,  num_classes: int, dropout: float = 0.5):
-        super().__init__()
+class TDNN_NAS(AbsEncoder):
+    def __init__(self, idim: int, hdim: int, dropout: float = 0.5, num_classes: int = -1, with_head: bool = True) -> None:
+        super().__init__(with_head=with_head, num_classes=num_classes, n_hid=hdim)
 
         self.dropout = nn.Dropout(dropout)
         self.tdnns = nn.ModuleDict(OrderedDict([
@@ -98,21 +105,19 @@ class TDNN_NAS(torch.nn.Module):
             ('tdnn6', c_layers.TDNN(idim, hdim, half_context=2, dilation=2))
         ]))
 
-        self.linear = nn.Linear(hdim, num_classes)
-
-    def forward(self, x: torch.Tensor, ilens: torch.Tensor):
+    def impl_forward(self, x: torch.Tensor, ilens: torch.Tensor):
         tmp_x, tmp_lens = x, ilens
         for i, tdnn in enumerate(self.tdnns.values):
             if i < len(self.tdnns)-1:
                 tmp_x = self.dropout(x)
             tmp_x, tmp_lens = tdnn(tmp_x, tmp_lens)
 
-        return self.linear(tmp_x), tmp_lens
+        return tmp_x, tmp_lens
 
 
-class TDNN_LSTM(torch.nn.Module):
-    def __init__(self, idim: int, hdim: int, n_layers: int, num_classes: int,  dropout: float):
-        super().__init__()
+class TDNN_LSTM(AbsEncoder):
+    def __init__(self, idim: int, hdim: int, n_layers: int, dropout: float, num_classes: int = -1, with_head: bool = True) -> None:
+        super().__init__(with_head=with_head, num_classes=num_classes, n_hid=hdim)
 
         self.tdnn_init = c_layers.TDNN(idim, hdim)
         assert n_layers > 0
@@ -126,12 +131,8 @@ class TDNN_LSTM(torch.nn.Module):
                 hdim, eps=1e-5, affine=True)
             self.cells[f"dropout{i}"] = nn.Dropout(dropout)
 
-        self.linear = nn.Linear(hdim, num_classes)
-
-    def forward(self, x: torch.Tensor, ilens: torch.Tensor):
-
-        tmp_x, tmp_lens = self.tdnn_init(x, ilens)
-
+    def impl_forward(self, x: torch.Tensor, ilens: torch.Tensor):
+        tmpx, tmp_lens = self.tdnn_init(x, ilens)
         for i in range(self.n_layers):
             tmpx, tmp_lens = self.cells[f"tdnn{i}-0"](tmpx, tmp_lens)
             tmpx, tmp_lens = self.cells[f"tdnn{i}-1"](tmpx, tmp_lens)
@@ -139,12 +140,13 @@ class TDNN_LSTM(torch.nn.Module):
             tmpx = self.cells[f"bn{i}"](tmpx, tmp_lens)
             tmpx = self.cells[f"dropout{i}"](tmpx)
 
-        return self.linear(tmpx), tmp_lens
+        return tmpx, tmp_lens
 
 
-class BLSTMN(torch.nn.Module):
-    def __init__(self, idim: int, hdim: int, n_layers: int, num_classes: int,  dropout: float):
-        super(BLSTMN, self).__init__()
+class BLSTMN(AbsEncoder):
+    def __init__(self, idim: int, hdim: int, n_layers: int, dropout: float, num_classes: int = -1, with_head: bool = True) -> None:
+        super().__init__(with_head=with_head, num_classes=num_classes, n_hid=hdim)
+
         assert n_layers > 0
         self.cells = nn.ModuleDict()
         self.n_layers = n_layers
@@ -159,19 +161,17 @@ class BLSTMN(torch.nn.Module):
                 hdim*2, eps=1e-5, affine=True)
             self.cells[f"dropout{i}"] = nn.Dropout(dropout)
 
-        self.linear = nn.Linear(hdim, num_classes)
-
-    def forward(self, x: torch.Tensor, ilens: torch.Tensor):
+    def impl_forward(self, x: torch.Tensor, ilens: torch.Tensor):
         tmp_x, tmp_lens = x, ilens
         for i in range(self.n_layers):
             tmp_x, tmp_lens = self.cells[f"lstm{i}"](tmp_x, tmp_lens)
             tmp_x = self.cells[f"bn{i}"](tmp_x, tmp_lens)
             tmp_x = self.cells[f"dropout{i}"](tmp_x)
 
-        return self.linear(tmp_x), tmp_lens
+        return tmp_x, tmp_lens
 
 
-class ConformerNet(nn.Module):
+class ConformerNet(AbsEncoder):
     """The conformer model with convolution subsampling
 
     Args:
@@ -207,8 +207,9 @@ class ConformerNet(nn.Module):
             dropout: float = 0.1,
             dropout_attn: float = 0.0,
             delta_feats: bool = False,
+            with_head: bool = True,
             subsample_norm: str = 'none'):
-        super().__init__()
+        super().__init__(with_head=with_head, num_classes=num_classes, n_hid=hdim)
 
         if delta_feats:
             in_channel = 3
@@ -240,17 +241,14 @@ class ConformerNet(nn.Module):
                 hdim, pe, res_factor, d_head, num_heads, kernel_size, multiplier, dropout, dropout_attn)
             self.cells.append(cell)
 
-        self.classifier = nn.Linear(hdim, num_classes)
-
-    def forward(self, x: torch.Tensor, lens: torch.Tensor):
+    def impl_forward(self, x: torch.Tensor, lens: torch.Tensor):
         x_subsampled, ls_subsampled = self.conv_subsampling(x, lens)
         out = self.linear_drop(x_subsampled)
         ls = ls_subsampled
         for cell in self.cells:
             out, ls = cell(out, ls)
-        logits = self.classifier(out)
 
-        return logits, ls
+        return out, ls
 
 
 class ConformerLSTM(ConformerNet):
@@ -265,8 +263,8 @@ class ConformerLSTM(ConformerNet):
         self.lstm = c_layers._LSTM(idim=self.linear_drop.linear.out_channels,
                                    hdim=hdim_lstm, n_layers=num_lstm_layers, dropout=dropout_lstm)
 
-    def forward(self, x: torch.Tensor, lens: torch.Tensor):
-        conv_x, conv_ls = super().forward(x, lens)
+    def impl_forward(self, x: torch.Tensor, lens: torch.Tensor):
+        conv_x, conv_ls = super().impl_forward(x, lens)
         return self.lstm(conv_x, conv_ls)
 
 # TODO: (Huahuan) I removed all chunk-related modules.

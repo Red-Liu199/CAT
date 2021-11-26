@@ -194,15 +194,13 @@ def build_model(args, configuration: dict, dist: bool = True, verbose: bool = Tr
 
         if "pretrained" in config:
             if module == "encoder":
-                # 'module.infer.' will be deprecated soon, -> 'module.am.'
-                prefix = 'module.infer.'
+                prefix = 'module.am.'
             elif module == "decoder":
                 prefix = 'module.lm.'
             else:
                 raise RuntimeError(
                     "Unknown module with 'pretrained' option: {}".format(module))
 
-            del _model.classifier
             init_sum = sum(param.data.sum()
                            for param in _model.parameters())
             state_dict = _load_and_immigrate(
@@ -211,10 +209,6 @@ def build_model(args, configuration: dict, dist: bool = True, verbose: bool = Tr
             if sum(param.data.sum()for param in _model.parameters()) == init_sum:
                 utils.highlight_msg(
                     f"WARNING: It seems {module} pretrained model is not properly loaded.")
-
-        if module in ['encoder', 'decoder']:
-            # FIXME: this is a hack, since we just feed the hidden output into joint network
-            _model.classifier = nn.Identity()
 
         # NOTE (Huahuan): In a strict sense, we should avoid invoke model.train() if we want to freeze the model
         #                 ...for which would enable the operations like dropout during training.

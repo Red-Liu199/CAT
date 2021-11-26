@@ -25,7 +25,8 @@
             "dropout": 0.3,
             "dropout_attn": 0.3,
             "kernel_size": 15,
-            "num_classes": 4232
+            "num_classes": 4232,
+            "with_head": false
         }
     },
     "decoder": {
@@ -34,6 +35,7 @@
             "num_classes": 4232,
             "hdim": 512,
             "num_layers": 1,
+            "with_head": false,
             "variational_noise": [
                 0.0,
                 0.075

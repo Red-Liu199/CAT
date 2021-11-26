@@ -28,11 +28,12 @@ class AbsDecoder(nn.Module):
 
     """
 
-    def __init__(self, num_classes: int, n_emb: int, n_hid: int = -1, padding_idx: int = -1, tied: bool = False) -> None:
+    def __init__(self, n_emb: int, num_classes: int = -1, n_hid: int = -1, padding_idx: int = -1, tied: bool = False, with_head: bool = True) -> None:
         super().__init__()
         if n_hid == -1:
             n_hid = n_emb
 
+        assert (with_head and num_classes > 0) or not with_head
         assert n_emb > 0 and isinstance(
             n_emb, int), f"{self.__class__.__name__}: Invalid embedding size: {n_emb}"
         assert n_hid > 0 and isinstance(
@@ -48,9 +49,12 @@ class AbsDecoder(nn.Module):
             self.embedding = nn.Embedding(
                 num_classes, n_emb, padding_idx=padding_idx)
 
-        self.classifier = nn.Linear(n_hid, num_classes)
-        if tied:
-            self.classifier.weight = self.embedding.weight
+        if not with_head:
+            self.classifier = nn.Identity()
+        else:
+            self.classifier = nn.Linear(n_hid, num_classes)
+            if tied:
+                self.classifier.weight = self.embedding.weight
 
     def score(self, input_ids: torch.LongTensor, input_lengths: torch.LongTensor, *args):
         # [N, U, K]
@@ -120,8 +124,10 @@ class LSTMPredictNet(AbsDecoder):
                  variational_noise: Union[Tuple[float,
                                                 float], List[float]] = None,
                  padding_idx: int = -1,
+                 with_head: bool = True,
                  *rnn_args, **rnn_kwargs):
-        super().__init__(num_classes, hdim, padding_idx=padding_idx)
+        super().__init__(n_emb=hdim, num_classes=num_classes,
+                         padding_idx=padding_idx, with_head=with_head)
 
         rnn_kwargs['batch_first'] = True
         if norm:
@@ -224,19 +230,31 @@ class LSTMPredictNet(AbsDecoder):
 
 
 class PlainPN(AbsDecoder):
-    def __init__(self, num_classes: int, hdim: int, *args, **kwargs):
-        super().__init__(num_classes, hdim)
+    def __init__(self, n_emb: int, num_classes: int = -1, n_hid: int = -1, padding_idx: int = -1, tied: bool = False, with_head: bool = True) -> None:
+        super().__init__(n_emb, num_classes=num_classes, n_hid=n_hid,
+                         padding_idx=padding_idx, tied=tied, with_head=with_head)
         self.act = nn.ReLU()
+        self.with_head = with_head
 
     def forward(self, x: torch.Tensor, *args, **kwargs):
         embed_x = self.embedding(x)
-        out = self.classifier(self.act(embed_x))
-        return out, None
+        if self.with_head:
+            return self.classifier(self.act(embed_x)), None
+        else:
+            return embed_x, None
 
 
 class CausalTransformer(AbsDecoder):
-    def __init__(self, num_classes: int, dim_hid: int, num_head: int, num_layers: int, attn_dropout: float = 0.1, padding_idx: int = -1) -> None:
-        super().__init__(num_classes, dim_hid, padding_idx=padding_idx)
+    def __init__(self,
+                 num_classes: int,
+                 dim_hid: int,
+                 num_head: int,
+                 num_layers: int,
+                 attn_dropout: float = 0.1,
+                 with_head: bool = True,
+                 padding_idx: int = -1) -> None:
+        super().__init__(n_emb=dim_hid, num_classes=num_classes,
+                         padding_idx=padding_idx, with_head=with_head)
         configuration = GPT2Config(
             vocab_size=num_classes, n_embd=dim_hid,
             n_layer=num_layers, n_head=num_head, attn_pdrop=attn_dropout)
@@ -319,7 +337,7 @@ class CausalTransformer(AbsDecoder):
 
 class NGram(AbsDecoder):
     def __init__(self, gram_n: int, num_classes: int, f_binlm: str) -> None:
-        super().__init__(1, 1)
+        super().__init__(n_emb=1, with_head=False)
         del self.embedding
         del self.classifier
         self.gram_n = gram_n
