@@ -33,7 +33,7 @@ def fclone(fp: Union[float, torch.FloatTensor]):
 
 class Hypothesis():
     def __init__(self,
-                 pred: List[int],
+                 pred: torch.LongTensor,
                  log_prob: Union[torch.Tensor, float],
                  cache: Union[Dict[str, Union[AbsStates, torch.Tensor]], None],
                  lm_score: Union[torch.Tensor, float] = 0.0,
@@ -56,7 +56,7 @@ class Hypothesis():
 
     def clone(self):
         new_hypo = Hypothesis(
-            self.pred[:],
+            self.pred.clone(),
             fclone(self.log_prob),
             self.cache.copy(),
             fclone(self.lm_score),
@@ -75,8 +75,8 @@ class Hypothesis():
         self.log_prob = torch.logaddexp(self.log_prob, rhypo.log_prob)
         return self
 
-    def add_token(self, tok: int):
-        self.pred.append(tok)
+    def add_token(self, tok: torch.LongTensor):
+        self.pred = torch.cat([self.pred, tok.view(1)])
         self._res_word.append(tok)
 
     def __len__(self) -> int:
@@ -171,34 +171,30 @@ class PrefixCacheDict():
     """
 
     def __init__(self) -> None:
-        self._cache = {}    # type: Dict[tuple, Dict]
+        self._cache = {}    # type: Dict[torch.LongTensor, Dict]
 
-    def update(self, pref: List[int], new_cache: dict):
-        hased_pref = tuple(pref)
-        if hased_pref in self._cache:
-            self._cache[hased_pref].update(new_cache.copy())
+    def update(self, pref: torch.LongTensor, new_cache: dict):
+        if pref in self._cache:
+            self._cache[pref].update(new_cache.copy())
         else:
-            self._cache[hased_pref] = new_cache.copy()
+            self._cache[pref] = new_cache.copy()
 
-    def getCache(self, pref: List[int]) -> Union[None, dict]:
+    def getCache(self, pref: torch.LongTensor) -> Union[None, dict]:
         '''Get cache. If there isn't such prefix, return None.
         '''
-        hased_pref = tuple(pref)
-        if hased_pref in self._cache:
-            return self._cache[hased_pref]
+        if pref in self._cache:
+            return self._cache[pref]
         else:
             return None
 
-    def pruneAllBut(self, legal_prefs: List[List[int]]):
-        legal_maps = [tuple(pref) for pref in legal_prefs]
-
+    def pruneAllBut(self, legal_prefs: List[torch.LongTensor]):
         new_cache = {pref: self._cache[pref]
-                     for pref in legal_maps if pref in self._cache}
+                     for pref in legal_prefs if pref in self._cache}
         del self._cache
         self._cache = new_cache
 
     def pruneShorterThan(self, L: int):
-        torm = [key for key in self._cache if len(key) < L]
+        torm = [key for key in self._cache if key.size(0) < L]
         for k in torm:
             del self._cache[k]
 
@@ -216,7 +212,7 @@ def beam_append(ongoing_beams: List[Hypothesis], new_beam: Hypothesis, prefix_me
     """Append the new hypothesis into ongoing_beams w/ or w/o prefix merging"""
     if prefix_merge:
         for _beam in ongoing_beams:
-            if _beam.pred == new_beam.pred:
+            if torch.equal(_beam.pred, new_beam.pred):
                 _beam.add_(new_beam)
                 return ongoing_beams
 
@@ -361,8 +357,7 @@ class TransducerBeamSearcher():
 
         if self.rescore:
             collate_fn = sortedPadCollateLM(flatten_target=False)
-            tokens, token_length, target, _ = collate_fn(
-                [torch.LongTensor(p) for p in pred_list])
+            tokens, token_length, target, _ = collate_fn(pred_list)
             logits, _ = self.lm(tokens, input_lengths=token_length)
             log_prob_lm = logits.log_softmax(
                 dim=-1).gather(index=target.unsqueeze(2), dim=-1).squeeze(-1)
@@ -399,13 +394,13 @@ class TransducerBeamSearcher():
         # min between beam and max_target_lent
         tn_i = tn_output[0]
         dummy_tensor = torch.empty(
-            (1, 1), device=tn_output.device, dtype=torch.int32)
+            (1, 1), device=tn_output.device, dtype=torch.long)
         blank = self.blank_id * torch.ones_like(dummy_tensor)
 
         input_PN = torch.ones_like(dummy_tensor) * self.bos_id
         # First forward-pass on PN
         hyp = Hypothesis(
-            pred=[self.bos_id],
+            pred=dummy_tensor.new_tensor([self.bos_id]),
             log_prob=0.0,
             cache={'pn_state': None},
             len_norm=True
@@ -480,7 +475,7 @@ class TransducerBeamSearcher():
                             beam_hyps, topk_hyp, self.is_prefix)
                         continue
                     if (not self.is_latency_control) or (self.is_latency_control and log_p >= best_logp - self.expand_beam):
-                        topk_hyp.add_token(tok.item())
+                        topk_hyp.add_token(tok)
                         topk_hyp.cache["pn_state"] = hidden
                         if self.lm_weight > 0.0:
                             topk_hyp.cache["lm_state"] = hidden_lm
@@ -509,8 +504,9 @@ class TransducerBeamSearcher():
         beta_l = 0.6
 
         tn_out = tn_out[0]
+        dummy_tensor = tn_out.new_empty(1, dtype=torch.long)
         B = [Hypothesis(
-            pred=[self.bos_id],
+            pred=dummy_tensor.new_tensor([self.bos_id]),
             log_prob=0.0,
             cache={'pn_state': self.decoder.init_states()})]
         if use_lm:
@@ -518,7 +514,6 @@ class TransducerBeamSearcher():
         F = []  # type: List[Hypothesis]
         T = tn_out.size(0)
         Umax = int(T * self.u_portion)
-        dummy_tensor = tn_out.new_empty(1)
         prefix_cache = PrefixCacheDict()
         buffer = MaxBeamBuffer(self.beam_size)
 
@@ -615,6 +610,7 @@ class TransducerBeamSearcher():
             fused_prob[:, self.blank_id].fill_(float('-inf'))
             # calculate the hypo score here, then we can get the topk over all beams
             # [B, V] + [B, 1] -> [B, V]
+            V = fused_prob.size(-1)
             fused_prob += collect_scores(
                 [sliced_B[i] for i in index_of_beams],
                 dummy_tensor).unsqueeze(1)
@@ -622,12 +618,14 @@ class TransducerBeamSearcher():
             # [K,]
             _, flatten_positions = torch.topk(
                 fused_prob.flatten(), k=self.beam_size)
-            paired_index = np.array(np.unravel_index(
-                flatten_positions.cpu().numpy(), fused_prob.shape)).T
-            for gbid, tok in paired_index:
+
+            index_batch = torch.div(
+                flatten_positions, V, rounding_mode='floor')
+            tokens = flatten_positions % V
+            for gbid, tok in zip(index_batch, tokens):
                 idx_g, idx_b_part = map_relidx2gid[gbid], map_relidx2bid[gbid]
                 cur_hypo = sliced_B[index_of_beams[gbid]].clone()
-                cur_hypo.add_token(tok.item())
+                cur_hypo.add_token(tok)
                 if use_wpt:
                     # if use word prefix tree, skip those not in the tree
                     if not self.word_prefix_tree.havePref(cur_hypo._res_word):
@@ -676,9 +674,10 @@ class TransducerBeamSearcher():
 
         use_lm = self.lm_weight > 0.0
         beta_l = 0.6
+        dummy_tensor = tn_out.new_empty(1, dtype=torch.long)
         N = tn_out.size(0)
         B = [[Hypothesis(
-            pred=[self.bos_id],
+            pred=dummy_tensor.new_tensor([self.bos_id]),
             log_prob=0.0,
             cache={'pn_state': self.decoder.init_states()})] for _ in range(N)]
         if use_lm:
@@ -808,7 +807,7 @@ class TransducerBeamSearcher():
                     if buffers[idx_orin].isfull() and scores[b, k] < buffers[idx_orin].min():
                         break
                     cur_hypo = sqz_beams[index_of_beams[b]].clone()
-                    tok = tokens[b, k].item()
+                    tok = tokens[b, k]
                     cur_hypo.add_token(tok)
                     cur_hypo.log_prob += log_prob[b, tok]
                     idx_g, idx_b_part = map_relidx2gid[b], map_relidx2bid[b]
@@ -899,10 +898,10 @@ def group_to_batch(hypos: List[Hypothesis], dummy_tensor: torch.Tensor = None, p
 
     # group that cache doesn't hit
     batched_out = []
-    for _hypos_with_index in groupby(hypos_with_index, key=lambda item: len(item[1].pred)):
+    for _hypos_with_index in groupby(hypos_with_index, key=lambda item: item[1].pred.size(0)):
         _index, _hypos = list(zip(*_hypos_with_index))
-        _batched_tokens = dummy_tensor.new_tensor(
-            [hyp.pred[-1] for hyp in _hypos], dtype=torch.long).view(-1, 1)
+        _batched_tokens = torch.stack(
+            [hyp.pred[-1] for hyp in _hypos]).view(-1, 1)
         _batched_states = {_key:
                            _state.batching([_hyp.cache[_key]
                                            for _hyp in _hypos])
@@ -917,7 +916,7 @@ def group_to_batch(hypos: List[Hypothesis], dummy_tensor: torch.Tensor = None, p
         return batched_out, []
     else:
         cached_out = []
-        for _hypos_with_index in groupby(in_cache, key=lambda item: len(item[1].pred)):
+        for _hypos_with_index in groupby(in_cache, key=lambda item: item[1].pred.size(0)):
             _index, _hypos = list(zip(*_hypos_with_index))
             # type: List[Dict[str, Union[torch.Tensor, AbsStates]]]
             caches = [prefix_cache.getCache(_hyp.pred) for _hyp in _hypos]

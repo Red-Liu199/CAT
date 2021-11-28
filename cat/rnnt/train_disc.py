@@ -10,14 +10,18 @@ from ..shared.decoder import AbsDecoder
 from .train import build_model as rnnt_builder
 from ..lm import lm_builder
 from ..shared.decoder import NGram
-from .joint import AbsJointNet
+from .joint import (
+    PackedSequence,
+    AbsJointNet,
+    DenormalJointNet
+)
 from ..shared.data import (
     SpeechDatasetPickle,
     sortedPadCollateTransducer
 )
-from . import PackedSequence
 import warp_rnnt
 
+import copy
 import os
 import json
 import gather
@@ -41,7 +45,7 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         world_size=args.world_size, rank=args.rank)
 
     manager = Manager(SpeechDatasetPickle,
-                      sortedPadCollateTransducer(), args, build_model)
+                      sortedPadCollateTransducer(), args, build_mmi_model)
 
     # training
     manager.run(args)
@@ -170,6 +174,205 @@ class DiscTransducerTrainer(nn.Module):
         super().train(mode)
         self.den_lm.eval()
         return
+
+
+class MMITransducerTrainer(nn.Module):
+    def __init__(self,
+                 encoder: nn.Module,
+                 decoder: AbsDecoder,
+                 joint: DenormalJointNet,
+                 searcher: TransducerBeamSearcher) -> None:
+        super().__init__()
+        self.encoder = encoder
+        self.decoder = decoder
+        self.joint = joint
+
+        self.searcher = searcher
+        self._pad = nn.ConstantPad1d((1, 0), 0)
+        self._random_mask = True
+
+    def forward(self, inputs: torch.Tensor, targets: torch.Tensor, input_lengths: torch.Tensor, target_lengths: torch.Tensor):
+
+        targets = targets.to(inputs.device, non_blocking=True)
+        output_encoder, encoder_lens = self.encoder(inputs, input_lengths)
+        encoder_lens = encoder_lens.to(torch.long, non_blocking=True)
+        # numerator
+        # [N, ]
+        numerator_cost = self.cal_p(
+            output_encoder, targets, encoder_lens, target_lengths)
+
+        if self._random_mask:
+            K = self.searcher.beam_size
+            # [N, U] -> [N, 1, U] -> [N, K, U]
+            unsqz_targets = targets.unsqueeze(1).expand(-1, K, -1)
+            # mask 20% tokens
+            mask = torch.rand(unsqz_targets.size(),
+                              device=targets.device) < 0.2
+            # random token, <bos>=0
+            values = torch.randint_like(
+                unsqz_targets, 1, output_encoder.size(-1))
+            # [N, K, U]
+            den_samples = unsqz_targets.masked_scatter(mask, values)
+            # [N, K, U] -> [NK, U]
+            den_samples = den_samples.view(-1, den_samples.size(-1))
+            # [N, K] -> [NK, ]
+            den_samples_lengths = target_lengths.unsqueeze(
+                1).expand(-1, K).contiguous().view(-1)
+
+            # [N, K, T, V]
+            sampled_encoder_out = output_encoder.unsqueeze(
+                1).expand(-1, K, -1, -1)
+            # [N, K, T, V] -> [NK, T, V]
+            sampled_encoder_out = sampled_encoder_out.contiguous().view(
+                -1, *(sampled_encoder_out.size()[-2:]))
+            # [N, K] -> [NK, ]
+            sampled_encoder_lens = encoder_lens.unsqueeze(
+                1).expand(-1, K).contiguous().view(-1)
+            # [NK, ]
+            denominator_cost = self.cal_p(
+                sampled_encoder_out, den_samples, sampled_encoder_lens, den_samples_lengths)
+
+            # [NK, ] -> [N, K] -> [N, 1+K]
+            denominator_cost = torch.cat(
+                [numerator_cost.unsqueeze(1), denominator_cost.view(-1, K)], dim=1)
+
+            mmi_loss = -(numerator_cost -
+                         torch.logsumexp(denominator_cost, dim=1))
+
+            return mmi_loss.mean()
+
+        else:
+            with torch.no_grad():
+                N = output_encoder.size(0)
+                difflist = []
+                den_samples = []
+                cumsum = [0]
+                batch_samples = self.searcher.batch_alsd(
+                    output_encoder, encoder_lens)
+                for n in range(N):
+                    hyps = batch_samples[n]
+                    difflist += [n] * len(hyps)
+                    cumsum.append(len(difflist))
+                    for hypo in hyps:
+                        if torch.equal(targets[n, :target_lengths[n]], hypo.pred[1:]):
+                            difflist[-1].pop()
+                            cumsum[-1] -= 1
+                            continue
+                        den_samples.append(hypo.pred[1:])
+                # for n in range(N):
+                #     hyps = self.searcher.raw_decode(
+                #         host_encoder_out[n:n+1, :encoder_lens[n]])
+                #     difflist += [n] * len(hyps)
+                #     cumsum.append(len(difflist))
+                #     for hypo in hyps:
+                #         den_samples.append(hypo.pred[1:])
+
+                M = len(difflist)   # number of denominator of whole batch
+                # length exnclude <s>
+                den_samples_lengths = input_lengths.new_tensor(
+                    [sample.size(0) for sample in den_samples], dtype=torch.long)
+                # [M, U]
+                den_samples = utils.pad_list(den_samples).to(inputs.device)
+
+            # denominator
+            # [M, T, V]
+            sampled_encoder_out = output_encoder[difflist, :, :]
+            # [M, ]
+            sampled_encoder_lens = encoder_lens[difflist]
+            # [M, ]
+            denominator_cost = self.cal_p(
+                sampled_encoder_out, den_samples, sampled_encoder_lens, den_samples_lengths)
+
+            mmi_loss = []
+            for n in range(N):
+                mmi_loss.append(
+                    -(numerator_cost[n]-torch.logsumexp(torch.cat([
+                        denominator_cost[cumsum[n]:cumsum[n+1]
+                                         ], numerator_cost[n].view(1)
+                    ]), dim=0)))
+
+            return sum(mmi_loss)/N
+
+    def cal_p(self, xs: torch.Tensor, labels: torch.tensor, lx: torch.LongTensor, ly: torch.LongTensor):
+        padded_y = self._pad(labels)
+        pn_out, _ = self.decoder(padded_y, input_lengths=ly+1)
+
+        lx = lx.to(device=xs.device, dtype=torch.int)
+        ly = ly.to(device=xs.device, dtype=torch.int)
+        packed_x = PackedSequence(xs, lx)
+        packed_y = PackedSequence(pn_out, ly+1)
+        try:
+            joint_out = self.joint(packed_x, packed_y)
+        except RuntimeError as re:
+            print(re)
+            print(packed_x.data.size())
+            print(packed_x.batch_sizes)
+            print(packed_y.data.size())
+            print(packed_y.batch_sizes)
+            exit(1)
+        # [N, U] -> [SN, ]
+        labels = gather.cat(labels.unsqueeze(
+            2).to(torch.float), ly).to(dtype=torch.int32).squeeze(1)
+        with autocast(enabled=False):
+            rnnt_cost = warp_rnnt.rnnt_loss(
+                joint_out, labels, lx, ly, gather=True, compact=True)
+        return -rnnt_cost
+
+    def train(self, mode: bool = True):
+        super().train(mode)
+        self.decoder.eval()
+        return
+
+
+def build_mmi_model(args, configuration: dict, dist: bool = True) -> DiscTransducerTrainer:
+    def _load_and_immigrate(orin_dict_path: str, str_src: str, str_dst: str) -> OrderedDict:
+        if not os.path.isfile(orin_dict_path):
+            raise FileNotFoundError(f"{orin_dict_path} is not a valid file.")
+
+        checkpoint = torch.load(orin_dict_path, map_location='cpu')
+        new_state_dict = OrderedDict()
+        for k, v in checkpoint['model'].items():
+            new_state_dict[k.replace(str_src, str_dst)] = v
+        del checkpoint
+        return new_state_dict
+
+    assert 'TransducerTrainer' in configuration
+    disc_settings = configuration['TransducerTrainer']
+    assert 'pretrain-config' in disc_settings
+    assert 'pretrain-lm-check' in disc_settings
+
+    assert 'searcher' in configuration
+
+    with open(disc_settings['pretrain-config'], 'r') as fi:
+        rnnt_setting = json.load(fi)
+    encoder, decoder, joint = rnnt_builder(
+        None, rnnt_setting, dist=False, verbose=False, wrapped=False)
+
+    utils.distprint(
+        f"> MMI Transducer: PN initializes from {disc_settings['pretrain-lm-check']}", args.gpu)
+    decoder.load_state_dict(_load_and_immigrate(
+        disc_settings['pretrain-lm-check'], 'module.lm.', ''))
+    for param in decoder.parameters():
+        param.requires_grad = False
+    decoder.eval()
+    # cpu_decoder = copy.deepcopy(decoder.to('cpu'))
+    # cpu_decoder.eval()
+    searcher = TransducerBeamSearcher(
+        decoder, joint, **configuration['searcher'])
+    assert isinstance(joint, DenormalJointNet)
+    model = MMITransducerTrainer(encoder, decoder, joint, searcher)
+
+    if not dist:
+        return model
+
+    # make batchnorm synced across all processes
+    model = utils.convert_syncBatchNorm(model)
+
+    model.cuda(args.gpu)
+    model = torch.nn.parallel.DistributedDataParallel(
+        model, device_ids=[args.gpu])
+
+    return model
 
 
 def build_model(args, configuration: dict, dist: bool = True) -> DiscTransducerTrainer:

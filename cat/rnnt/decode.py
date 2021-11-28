@@ -165,6 +165,7 @@ def main_worker(gpu: int, args: argparse.Namespace, q: mp.Queue, fmt: str, model
             key = key[0]
             x = x.to(device)
             nbest_list, scores_nbest = searcher(model.encoder(x, x_lens)[0])
+            nbest_list = [pred.cpu().tolist() for pred in nbest_list]
             if args.token_nbest:
                 nbest[key] = [(score.item(), hypo)
                               for hypo, score in zip(nbest_list, scores_nbest)]

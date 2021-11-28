@@ -114,11 +114,13 @@ class DenormalJointNet(AbsJointNet):
         if isinstance(tn_out, PackedSequence):
             assert pn_out.data.size(-1) == tn_out.data.size(-1), \
                 f"pn and tn output should be of the same size at last dimension, instead of {pn_out.data.size(-1)} != {tn_out.data.size(-1)}"
-            pn_out.data = pn_out.data.log_softmax(dim=-1)
+            pn_out.set(pn_out.data.log_softmax(dim=-1))
             return pn_out + tn_out
         else:
             assert pn_out.size(-1) == tn_out.size(-1), \
                 f"pn and tn output should be of the same size at last dimension, instead of {pn_out.size(-1)} != {tn_out.size(-1)}"
+
+            pn_out = pn_out.log_softmax(dim=-1)
             if tn_out.dim() == 1 and pn_out.dim() == 1:
                 return pn_out + tn_out
 

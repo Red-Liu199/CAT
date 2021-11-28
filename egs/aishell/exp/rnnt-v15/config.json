@@ -69,7 +69,7 @@
             "peak_factor": 1.0,
             "d_model": 512,
             "warmup_steps": 25000,
-            "epoch_max": 10,
+            "epoch_max": 100,
             "reverse_metric_direc": true
         }
     }

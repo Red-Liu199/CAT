@@ -106,6 +106,7 @@ class TransducerTrainer(nn.Module):
         targets = targets.to(inputs.device, non_blocking=True)
 
         output_encoder, o_lens = self.encoder(inputs, input_lengths)
+        o_lens = o_lens.to(torch.long)
         # introduce time reduction layer
         if self._t_reduction is not None:
             output_encoder, o_lens = self._t_reduction(output_encoder, o_lens)
