@@ -2,7 +2,7 @@
 # Apache 2.0.
 # Author: Zheng Huahuan (maxwellzh@outlook.com)
 
-"""CTC-CRF-related modules
+"""CTC-related modules
 """
 
 

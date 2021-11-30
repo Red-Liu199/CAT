@@ -3,7 +3,7 @@
 ## In-house SOTA Results 
 
 - [Librispeech](egs/libri): 1.96/4.44, WER% for test-clean/test-other
-- [AIshell-1](egs/aishell): 4.69 | 3.67 with extra corpus, CER%
+- [AIshell-1](egs/aishell): 4.69 %CER and 3.67 with extra corpus
 
 ## Installation
 
@@ -41,26 +41,13 @@
    python setup.py install
    ```
    
-   **ASR:**
+   **ASR (All functions):**
    
-   ```bash
-   git submodule init && git submodule update
-   cd src/
-   
-   # warp-rnnt >= 0.7.1
-   cd warp-rnnt/pytorch_binding/
-   git checkout -t origin/dev
-   python setup.py install
-   cd ../../
-   
-   # gather >= 0.2.1
-   cd torch-gather/
-   python setup.py install
-   ```
+   Please refer to [src/INSTALL](src/INSTALL) for installation instruction.
 
 ## Usage
 
-**Data preparation:**
+**Data preparation for ASR:**
 
 Currently, this repository is relied on [CAT](https://github.com/thu-spmi/CAT) for data pre-processing, basically the audio features extraction and some of the text normalization.
 
@@ -84,7 +71,14 @@ In this repo, we support RNN-T, Language model and CTC/CTC-CRF model training as
   python utils/lm_process.py exp/template
   ```
 
-- **CTC/CTC-CRF:** this can be regarded as a replica of CAT, but with better and pretty training procedure monitoring. Unfortunately, there's no available `ctc_process.py` like RNN-T and LM training. I'll add it in the future, but that is not on my current schedule. And training CTC/CTC-CRF requires the `ctc_crf` to be installed. Refer to CAT installation for more details.
+- **CTC:** Training CTC model shares most of the configurations with RNN-T. Set `"topo":"ctc"` in the `hyper-p.json` file to enable CTC training.
+ Unfortunately, there's no available template file like RNN-T and LM training. 
+ I'll add it soon or later, but that is not on my current schedule.
+
+  ```bash
+  # same as RNN-T, cd egs/<task>/
+  python utils/asr_process.py exp/template
+  ```
 
 **Global hyper-parameter setting:**`exp/<task>/template/hyper-p.json`, example taken from `egs/libri`
 
@@ -103,18 +97,21 @@ In this repo, we support RNN-T, Language model and CTC/CTC-CRF model training as
                // https://github.com/google/sentencepiece/blob/master/doc/options.md 
         ...
     },
-    "train": {    // NN training related setting, for supported options:
-                  // in egs/<task>/, run 'python -m cat.rnnt -h' or 'python -m cat.lm -h'
+    "train": {    // NN training related setting, for supported options (in egs/<task>/):
+                  // for RNN-T task, run 'python -m cat.rnnt -h'
+                  // for CTC task, run 'python -m cat.ctc -h'
+                  // for LM task, run 'python -m cat.lm -h'
         ...
     },
-    "inference": {    // for RNN-T only, decoding related setting
+    "inference": {    // for ASR only, decoding related setting
         "avgmodel": {        // model averaging setting, optional
             "mode": "best",  // 'best' of 'last'
             "num": 10        // number of checkpoints to be averaged
         },
-        "subsample": 4,      // tell the subsampling factor of RNN-T encoder, optional
-        "decode": {   // decoding setting, for support options
-                      // in egs/<task>/, run 'python -m cat.rnnt.decode -h'
+        "subsample": 4,      // optional, tell the subsampling factor of RNN-T encoder
+        "decode": {   // decoding setting, for support options (in egs/<task>/):
+                      // RNN-T: run 'python -m cat.rnnt.decode -h'
+                      // CTC: run 'python -m cat.ctc.decode -h'
             ...
         },
         "er": {		// WER/CER computing setting
@@ -122,14 +119,14 @@ In this repo, we support RNN-T, Language model and CTC/CTC-CRF model training as
             "oracle": true		// compute oracle wer for N-best list or not
         }
     },
-  	// the git commit hash, useful to reproduce the experiment
+    // the git commit hash, useful to reproduce the experiment
     "commit": "60aa5175c9630bcb5ea1790444732fc948b05865"
 }
 ```
 
 **NN configuration:** `exp/<task>/template/config.json`
 
-- If you have installed all dependencies (including `warp-rnnt` and `torch-gather`), and you're using Visual-Studio Code as working environment, you can generate json schema for syntax intellisense via (in `egs/<task>/`):
+- If you have installed all dependencies, and you're using Visual-Studio Code as working environment, you can generate json schema for syntax intellisense via (in `egs/<task>/`):
 
   ```bash
   python utils/parseschema.py
@@ -173,8 +170,8 @@ In this repo, we support RNN-T, Language model and CTC/CTC-CRF model training as
             ...
         }
     },
-    "encoder": {	// for RNN-T only
-        "type": ...,   // can be any of modules in cat/shared/encoder.py
+    "encoder": {	// for ASR only
+        "type": ...,   // can be any of derived classes of 'AbsEncoder' in cat/shared/encoder.py
         "kwargs": {    // setting according to 'type'
             ...
         }

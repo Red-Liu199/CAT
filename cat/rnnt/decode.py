@@ -214,7 +214,7 @@ def build_model(args, device) -> Tuple[torch.nn.Module, Union[torch.nn.Module, N
 def DecoderParser():
 
     parser = utils.BasicDDPParser(
-        istraining=False, prog='RNN-Transducer decoding.')
+        istraining=False, prog='RNN-Transducer decoder.')
 
     parser.add_argument("--lm-config", type=str, default=None,
                         help="Config of external LM.")

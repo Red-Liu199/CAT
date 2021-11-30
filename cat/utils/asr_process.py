@@ -545,11 +545,25 @@ if __name__ == "__main__":
         except ModuleNotFoundError:
             import sys
             sys.path.append(cwd)
-        from cat.rnnt.train import RNNTParser
-        from cat.rnnt.train import main as RNNTMain
 
-        NNTrain(args, hyper_settings, f_hyper_settings, os.path.join(
-            args.expdir, 'pkl/{}.pkl'), RNNTParser(), RNNTMain, fmt)
+        if 'topo' not in hyper_settings:
+            hyper_settings['topo'] = 'rnnt'
+            print(fmt.format(f"set 'topo' to 'rnnt'"))
+
+        if hyper_settings['topo'] == 'rnnt':
+            from cat.rnnt.train import RNNTParser
+            from cat.rnnt.train import main as RNNTMain
+
+            NNTrain(args, hyper_settings, f_hyper_settings, os.path.join(
+                args.expdir, 'pkl/{}.pkl'), RNNTParser(), RNNTMain, fmt)
+        elif hyper_settings['topo'] == 'ctc':
+            from cat.ctc.train import CTCParser
+            from cat.ctc.train import main as CTCMain
+            NNTrain(args, hyper_settings, f_hyper_settings, os.path.join(
+                args.expdir, 'pkl/{}.pkl'), CTCParser(), CTCMain, fmt)
+        else:
+            raise ValueError(fmt.format(
+                f"Unknown topology: {hyper_settings['topo']}, expect one of ['rnnt', 'ctc']"))
 
     ############ Stage 4  Decoding ############
     if s_beg <= 4 and s_end >= 4:
@@ -557,13 +571,6 @@ if __name__ == "__main__":
         fmt = "Stage 4  Decoding: {}"
         import re
         import torch
-        try:
-            import cat
-        except ModuleNotFoundError:
-            import sys
-            sys.path.append(cwd)
-        from cat.rnnt.decode import DecoderParser
-        from cat.rnnt.decode import main as DecoderMain
 
         assert 'inference' in hyper_settings, fmt.format(
             f"missing 'inference' in hyper-setting file {f_hyper_settings}")
@@ -571,6 +578,13 @@ if __name__ == "__main__":
             f"missing 'data' in hyper-setting file {f_hyper_settings}")
         assert 'test' in hyper_settings['data'], fmt.format(
             "missing 'test' in hyper-p['data']")
+        if 'topo' not in hyper_settings:
+            hyper_settings['topo'] = 'rnnt'
+            print(fmt.format(f"set 'topo' to 'rnnt'"))
+
+        if hyper_settings['topo'] not in ['rnnt', 'ctc']:
+            raise ValueError(fmt.format(
+                f"Unknown topology: {hyper_settings['topo']}, expect one of ['rnnt', 'ctc']"))
 
         inference_settings = hyper_settings['inference']
         checkdir = os.path.join(args.expdir, 'checks')
@@ -658,7 +672,8 @@ if __name__ == "__main__":
             decode_settings['nj'] = os.cpu_count()
             print(fmt.format(
                 f"set 'nj' to {decode_settings['nj']}"))
-        if 'lm-weight' in decode_settings and decode_settings['lm-weight'] > 0.0:
+        if hyper_settings['topo'] == 'rnnt' and \
+                'lm-weight' in decode_settings and decode_settings['lm-weight'] > 0.0:
             assert 'lmdir' in inference_settings, fmt.format(
                 "'lm-weight' > 0 in hyper-p['inference']['decode'] should be used with 'lmdir' in hyper-p['inference']")
             lmdir = inference_settings['lmdir']
@@ -680,12 +695,27 @@ if __name__ == "__main__":
                 suffix_lm = f"lm-rescore-{decode_settings['lm-weight']}"
             else:
                 suffix_lm = f"lm-fusion-{decode_settings['lm-weight']}"
+        elif hyper_settings['topo'] == 'ctc' and \
+                'lm-path' in decode_settings:
+            checkExist('f', decode_settings['lm-path'])
+            if 'lm-alpha' in decode_settings:
+                alpha = str(decode_settings['lm-alpha'])
+            else:
+                alpha = 'default'
+            if 'lm-beta' in decode_settings:
+                beta = str(decode_settings['lm-beta'])
+            else:
+                beta = 'default'
+            suffix_lm = f"lm-fusion-{alpha}-{beta}"
         else:
             suffix_lm = "nolm"
         if 'output_prefix' not in decode_settings:
             decodedir = os.path.join(args.expdir, 'decode')
             os.makedirs(decodedir, exist_ok=True)
-            f_text = f"beam-{decode_settings['beam_size']}_algo-{decode_settings['algo']}_{suffix_lm}_{suffix_avgmodel}"
+            if hyper_settings['topo'] == 'rnnt':
+                f_text = f"rnnt-{decode_settings['beam_size']}_algo-{decode_settings['algo']}_{suffix_lm}_{suffix_avgmodel}"
+            else:
+                f_text = f"ctc-{decode_settings['beam_size']}_{suffix_lm}_{suffix_avgmodel}"
             decode_out_prefix = os.path.join(decodedir, f_text)
             print(fmt.format(
                 f"set 'output_prefix' to {decode_out_prefix}"))
@@ -695,54 +725,70 @@ if __name__ == "__main__":
             decode_settings['dist-url'] = f"tcp://localhost:{get_free_port()}"
             print(fmt.format(
                 f"set 'dist-url' to {decode_settings['dist-url']}"))
-        if 'algo' in decode_settings and decode_settings['algo'] == 'alsd' and 'umax-portion' not in decode_settings:
-            # trying to compute a reasonable portion value from trainset
-            from cat.shared.data import SpeechDatasetPickle
-            import numpy as np
-            f_pkl = os.path.join(args.expdir, f'pkl/train.pkl')
-            if os.path.isfile(f_pkl):
-                # since we using conformer, there's a 1/4 subsapling, if it's not, change that
-                if "subsample" in inference_settings:
-                    sub_factor = inference_settings['subsample']
-                    assert sub_factor > 1, fmt.format(
-                        f"Can't deal with 'subsample'={sub_factor} in hyper-p['inference']")
-                    print(fmt.format(
-                        f"resolving portion data from train set, might takes a while."))
-                    dataset = SpeechDatasetPickle(f_pkl)
-                    lt = np.asarray(dataset.get_seq_len()).astype(np.float64)
-                    ly = []
-                    for _, _, label in dataset.dataset:
-                        ly.append(len(label))
-                    assert len(lt) == len(ly), fmt.format(
-                        f"Unknown condition {len(lt)} != {len(ly)}")
-                    ly = np.asarray(ly).astype(np.float64)
-                    lt /= sub_factor
-                    normal_ly = ly/lt
-                    portion = np.mean(normal_ly) + 5 * np.std(normal_ly)
-                    del lt
-                    del ly
-                    del normal_ly
-                    decode_settings['umax-portion'] = portion
-                    with open(f_hyper_settings, 'r') as fi:
-                        orin_hyper_setting = json.load(fi)
-                    orin_hyper_setting['inference']['decode']['umax-portion'] = portion
-                    with open(f_hyper_settings, 'w') as fo:
-                        json.dump(orin_hyper_setting, fo, indent=4)
-                    print(fmt.format(
-                        f"set 'umax-portion' to {portion}"))
-        # if 'word-tree' not in decode_settings and decode_settings['algo'] == 'alsd':
-        #     pth_wpt = os.path.join(args.expdir, 'pkl/wpt.pkl')
-        #     if os.path.isfile(pth_wpt):
-        #         decode_settings['word-tree'] = pth_wpt
-        #         print(fmt.format(f"set 'word-tree' to {pth_wpt}"))
-        #         print(
-        #             "... if you don't want to enable word prefix tree in decoding, set 'word-tree'=null")
+        if hyper_settings['topo'] == 'rnnt':
+            if 'algo' in decode_settings and decode_settings['algo'] == 'alsd' and 'umax-portion' not in decode_settings:
+                # trying to compute a reasonable portion value from trainset
+                from cat.shared.data import SpeechDatasetPickle
+                import numpy as np
+                f_pkl = os.path.join(args.expdir, f'pkl/train.pkl')
+                if os.path.isfile(f_pkl):
+                    # since we using conformer, there's a 1/4 subsapling, if it's not, change that
+                    if "subsample" in inference_settings:
+                        sub_factor = inference_settings['subsample']
+                        assert sub_factor > 1, fmt.format(
+                            f"Can't deal with 'subsample'={sub_factor} in hyper-p['inference']")
+                        print(fmt.format(
+                            f"resolving portion data from train set, might takes a while."))
+                        dataset = SpeechDatasetPickle(f_pkl)
+                        lt = np.asarray(dataset.get_seq_len()
+                                        ).astype(np.float64)
+                        ly = []
+                        for _, _, label in dataset.dataset:
+                            ly.append(len(label))
+                        assert len(lt) == len(ly), fmt.format(
+                            f"Unknown condition {len(lt)} != {len(ly)}")
+                        ly = np.asarray(ly).astype(np.float64)
+                        lt /= sub_factor
+                        normal_ly = ly/lt
+                        portion = np.mean(normal_ly) + 5 * np.std(normal_ly)
+                        del lt
+                        del ly
+                        del normal_ly
+                        decode_settings['umax-portion'] = portion
+                        with open(f_hyper_settings, 'r') as fi:
+                            orin_hyper_setting = json.load(fi)
+                        orin_hyper_setting['inference']['decode']['umax-portion'] = portion
+                        with open(f_hyper_settings, 'w') as fo:
+                            json.dump(orin_hyper_setting, fo, indent=4)
+                        print(fmt.format(
+                            f"set 'umax-portion' to {portion}"))
+            # if 'word-tree' not in decode_settings and decode_settings['algo'] == 'alsd':
+            #     pth_wpt = os.path.join(args.expdir, 'pkl/wpt.pkl')
+            #     if os.path.isfile(pth_wpt):
+            #         decode_settings['word-tree'] = pth_wpt
+            #         print(fmt.format(f"set 'word-tree' to {pth_wpt}"))
+            #         print(
+            #             "... if you don't want to enable word prefix tree in decoding, set 'word-tree'=null")
 
         testsets = hyper_settings['data']['test']
         if isinstance(testsets, str):
             testsets = [testsets]
         f_scps = expandPath('s', testsets, cwd)
         checkExist('f', f_scps)
+
+        try:
+            import cat
+        except ModuleNotFoundError:
+            import sys
+            sys.path.append(cwd)
+        if hyper_settings['topo'] == 'rnnt':
+            from cat.rnnt.decode import DecoderParser
+            from cat.rnnt.decode import main as DecoderMain
+        elif hyper_settings['topo'] == 'ctc':
+            from cat.ctc.decode import DecoderParser
+            from cat.ctc.decode import main as DecoderMain
+        else:
+            raise RuntimeError(f"Unknown topology: {hyper_settings['topo']}")
 
         for _set, scp in zip(testsets, f_scps):
             decode_settings['output_prefix'] = decode_out_prefix+f'_{_set}'

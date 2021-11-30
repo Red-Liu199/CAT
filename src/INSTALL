@@ -12,3 +12,9 @@ cd torch-gather/
 python setup.py install
 cd ../
 
+# ctcdecode >= 1.0.3
+cd ctcdecode/
+# this would take some time since ctcdecode requires 
+# ... downloading extra files (depending on your network.)
+python setup.py install
+cd ../

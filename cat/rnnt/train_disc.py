@@ -208,7 +208,7 @@ class MMITransducerTrainer(nn.Module):
             # mask 20% tokens
             mask = torch.rand(unsqz_targets.size(),
                               device=targets.device) < 0.2
-            # random token, <bos>=0
+            # random token, <eos>=0
             values = torch.randint_like(
                 unsqz_targets, 1, output_encoder.size(-1))
             # [N, K, U]

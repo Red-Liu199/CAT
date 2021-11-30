@@ -13,7 +13,6 @@ from cat.shared import decoder as pn_zoo
 from cat.shared import encoder as tn_zoo
 from cat.shared import scheduler, SpecAug
 from cat.shared.scheduler import Scheduler
-from cat.shared.decoder import AbsDecoder
 from cat.rnnt import joint as joint_zoo
 from cat.rnnt.joint import AbsJointNet
 from cat.rnnt.train import TransducerTrainer
@@ -127,7 +126,7 @@ def parse_processing(processing: typing.Union[dict, OrderedDict], module_list: l
 # %%
 schema = gen_object(dict)
 schema['description'] = 'Settings of NN training.'
-schema['required'] = ['transducer', 'encoder', 'decoder', 'joint', 'scheduler']
+schema['required'] = ['scheduler']
 
 # %% [markdown]
 # ## Transducer
@@ -148,7 +147,7 @@ processing = gen_object(dict)  # type:OrderedDict
 modules = []
 for m in dir(tn_zoo):
     _m = getattr(tn_zoo, m)
-    if inspect.isclass(_m) and issubclass(_m, nn.Module):
+    if inspect.isclass(_m) and issubclass(_m, tn_zoo.AbsEncoder):
         modules.append(_m)
 
 parse_processing(processing, modules)
@@ -165,7 +164,7 @@ processing = gen_object(dict)  # type:OrderedDict
 modules = []
 for m in dir(pn_zoo):
     _m = getattr(pn_zoo, m)
-    if inspect.isclass(_m) and issubclass(_m, AbsDecoder):
+    if inspect.isclass(_m) and issubclass(_m, pn_zoo.AbsDecoder):
         modules.append(_m)
 
 parse_processing(processing, modules)

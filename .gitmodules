@@ -4,3 +4,6 @@
 [submodule "src/torch-gather"]
 	path = src/torch-gather
 	url = git@github.com:maxwellzh/torch-gather.git
+[submodule "src/ctcdecode"]
+	path = src/ctcdecode
+	url = https://github.com/maxwellzh/ctcdecode.git

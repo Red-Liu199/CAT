@@ -108,6 +108,15 @@ class DenormalJointNet(AbsJointNet):
         super().__init__()
 
     def impl_forward(self, tn_out: Union[torch.Tensor, PackedSequence], pn_out: Union[torch.Tensor, PackedSequence]) -> torch.FloatTensor:
+        '''
+        # classes of PN out: V+1 (V tokens + <eos>), suppose <eos>=0
+        # classes of TN out: V+1 (V tokens + <blk>), suppose <blk>=0
+        For PN, <blk> is undefined, and useless.
+        For TN, <eos> could be useful. But in current implementation, 
+        ... <eos> is undefined for TN.
+        Therefore, the joint network sums up the V tokens output of the two networks,
+        ... and takes <blk> as the (V+1)th elements.
+        '''
         assert not (isinstance(tn_out, PackedSequence) ^
                     isinstance(pn_out, PackedSequence)), f"TN output and PN output should be of the same type, instead of {type(tn_out)} != {type(pn_out)}"
 
@@ -115,6 +124,13 @@ class DenormalJointNet(AbsJointNet):
             assert pn_out.data.size(-1) == tn_out.data.size(-1), \
                 f"pn and tn output should be of the same size at last dimension, instead of {pn_out.data.size(-1)} != {tn_out.data.size(-1)}"
             pn_out.set(pn_out.data.log_softmax(dim=-1))
+            if pn_out.data.requires_grad:
+                # [Su, V-1]
+                _sliced_pn_out = pn_out.data[:, 1:]
+                pn_out.set(torch.cat([_sliced_pn_out.new_zeros(
+                    (_sliced_pn_out.size(0), 1)), _sliced_pn_out], dim=1))
+            else:
+                pn_out.data[:, 0] = 0.0
             return pn_out + tn_out
         else:
             assert pn_out.size(-1) == tn_out.size(-1), \
@@ -122,7 +138,14 @@ class DenormalJointNet(AbsJointNet):
 
             pn_out = pn_out.log_softmax(dim=-1)
             if tn_out.dim() == 1 and pn_out.dim() == 1:
+                pn_out[0] = 0.0
                 return pn_out + tn_out
+
+            if pn_out.requires_grad:
+                pn_out = torch.cat(
+                    [pn_out.new_zeros(pn_out.shape[:2]+(1,)), pn_out[:, :, 1:]], dim=-1)
+            else:
+                pn_out[:, :, 0] = 0.0
 
             # [N, U, V] -> [N, 1, U, V]
             pn_out = pn_out.unsqueeze(1)
