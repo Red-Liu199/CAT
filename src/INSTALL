@@ -7,6 +7,11 @@ git checkout -t origin/dev
 python setup.py install
 cd ../../
 
+# warp-rna >= 0.3.0
+cd warp-rna/pytorch_binding/
+python setup.py install
+cd ../../
+
 # gather >= 0.2.1
 cd torch-gather/
 python setup.py install

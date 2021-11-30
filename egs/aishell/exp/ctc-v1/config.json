@@ -13,6 +13,7 @@
             "idim": 80,
             "hdim": 512,
             "conv": "vgg2l",
+            "d_head": 36,
             "num_heads": 4,
             "dropout": 0.3,
             "dropout_attn": 0.3,

@@ -28,12 +28,12 @@ class AbsDecoder(nn.Module):
 
     """
 
-    def __init__(self, n_emb: int, num_classes: int = -1, n_hid: int = -1, padding_idx: int = -1, tied: bool = False, with_head: bool = True) -> None:
+    def __init__(self, num_classes: int, n_emb: int,  n_hid: int = -1, padding_idx: int = -1, tied: bool = False, with_head: bool = True) -> None:
         super().__init__()
         if n_hid == -1:
             n_hid = n_emb
 
-        assert (with_head and num_classes > 0) or not with_head
+        assert num_classes > 0
         assert n_emb > 0 and isinstance(
             n_emb, int), f"{self.__class__.__name__}: Invalid embedding size: {n_emb}"
         assert n_hid > 0 and isinstance(

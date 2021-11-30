@@ -51,8 +51,8 @@ class LSTM(AbsEncoder):
                  idim: int,
                  hdim: int,
                  n_layers: int,
-                 num_classes: int,
                  dropout: float,
+                 num_classes: int = -1,
                  with_head: bool = True,
                  bidirectional: bool = False):
         super().__init__(with_head=with_head, num_classes=num_classes,
@@ -66,7 +66,15 @@ class LSTM(AbsEncoder):
 
 
 class VGGLSTM(LSTM):
-    def __init__(self, idim: int, hdim: int, n_layers: int, num_classes: int, dropout: float, with_head: bool = True, in_channel: int = 3, bidirectional: int = False):
+    def __init__(self,
+                 idim: int,
+                 hdim: int,
+                 n_layers: int,
+                 dropout: float,
+                 num_classes: int = -1,
+                 with_head: bool = True,
+                 in_channel: int = 3,
+                 bidirectional: int = False):
         super().__init__(get_vgg2l_odim(idim, in_channel),
                          hdim, n_layers, num_classes, dropout, with_head, bidirectional)
 
@@ -78,7 +86,13 @@ class VGGLSTM(LSTM):
 
 
 class LSTMrowCONV(AbsEncoder):
-    def __init__(self, idim: int, hdim: int, n_layers: int, dropout: float, with_head: bool = True,  num_classes: int = -1) -> None:
+    def __init__(self,
+                 idim: int,
+                 hdim: int,
+                 n_layers: int,
+                 dropout: float,
+                 with_head: bool = True,
+                 num_classes: int = -1) -> None:
         super().__init__(with_head=with_head, num_classes=num_classes, n_hid=hdim)
 
         self.lstm = c_layers._LSTM(idim, hdim, n_layers, dropout)
@@ -91,7 +105,12 @@ class LSTMrowCONV(AbsEncoder):
 
 
 class TDNN_NAS(AbsEncoder):
-    def __init__(self, idim: int, hdim: int, dropout: float = 0.5, num_classes: int = -1, with_head: bool = True) -> None:
+    def __init__(self,
+                 idim: int,
+                 hdim: int,
+                 dropout: float = 0.5,
+                 num_classes: int = -1,
+                 with_head: bool = True) -> None:
         super().__init__(with_head=with_head, num_classes=num_classes, n_hid=hdim)
 
         self.dropout = nn.Dropout(dropout)
@@ -116,7 +135,13 @@ class TDNN_NAS(AbsEncoder):
 
 
 class TDNN_LSTM(AbsEncoder):
-    def __init__(self, idim: int, hdim: int, n_layers: int, dropout: float, num_classes: int = -1, with_head: bool = True) -> None:
+    def __init__(self,
+                 idim: int,
+                 hdim: int,
+                 n_layers: int,
+                 dropout: float,
+                 num_classes: int = -1,
+                 with_head: bool = True) -> None:
         super().__init__(with_head=with_head, num_classes=num_classes, n_hid=hdim)
 
         self.tdnn_init = c_layers.TDNN(idim, hdim)
@@ -144,7 +169,13 @@ class TDNN_LSTM(AbsEncoder):
 
 
 class BLSTMN(AbsEncoder):
-    def __init__(self, idim: int, hdim: int, n_layers: int, dropout: float, num_classes: int = -1, with_head: bool = True) -> None:
+    def __init__(self,
+                 idim: int,
+                 hdim: int,
+                 n_layers: int,
+                 dropout: float,
+                 num_classes: int = -1,
+                 with_head: bool = True) -> None:
         super().__init__(with_head=with_head, num_classes=num_classes, n_hid=hdim)
 
         assert n_layers > 0
@@ -195,12 +226,12 @@ class ConformerNet(AbsEncoder):
             num_cells: int,
             idim: int,
             hdim: int,
-            num_classes: int,
+            num_classes: int = -1,
             conv: Literal['conv2d', 'vgg2l'] = 'conv2d',
             conv_multiplier: int = None,
             dropout_in: float = 0.2,
             res_factor: float = 0.5,
-            d_head: int = 36,
+            d_head: int = -1,
             num_heads: int = 4,
             kernel_size: int = 32,
             multiplier: int = 1,

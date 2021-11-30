@@ -7,3 +7,6 @@
 [submodule "src/ctcdecode"]
 	path = src/ctcdecode
 	url = https://github.com/maxwellzh/ctcdecode.git
+[submodule "src/warp-rna"]
+	path = src/warp-rna
+	url = https://github.com/maxwellzh/warp-rna.git

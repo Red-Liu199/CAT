@@ -202,7 +202,7 @@ def BasicDDPParser(istraining: bool = True, prog: str = '') -> argparse.Argument
     if istraining:
         parser.add_argument('-p', '--print-freq', default=10, type=int,
                             metavar='N', help='print frequency (default: 10)')
-        parser.add_argument('--batch_size', default=256, type=int, metavar='N',
+        parser.add_argument('--batch-size', default=256, type=int, metavar='N',
                             help='mini-batch size (default: 256), this is the total '
                             'batch size of all GPUs on the current node when '
                             'using Distributed Data Parallel')

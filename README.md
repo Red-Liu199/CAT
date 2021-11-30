@@ -80,7 +80,51 @@ In this repo, we support RNN-T, Language model and CTC/CTC-CRF model training as
   python utils/asr_process.py exp/template
   ```
 
-**Global hyper-parameter setting:**`exp/<task>/template/hyper-p.json`, example taken from `egs/libri`
+### Settings of training
+
+If you're using Visual-Studio Code as working environment, you can setup the json schema for syntax intellisense via (in `egs/<task>/`):
+
+```bash
+ln -s ../../.vscode ./
+```
+
+Above command would probably raise an error, if there exists a directory `egs/<task>/.vscode`, in such situation, you could manually copy the schema files
+
+```bash
+cp ../../.vscode/{hyper_schema,schemas}.json ./.vscode/
+```
+
+And add following contents into the file `egs/<task>/.vscode/settings.json`:
+
+```
+{
+    ...,		// there might be existing settings
+    "json.schemas": [
+        {
+            "fileMatch": [
+                "exp/**/config.json"
+            ],
+            "url": ".vscode/schemas.json"
+        },
+        {
+            "fileMatch": [
+                "exp/**/hyper-p.json"
+            ],
+            "url": ".vscode/hyper_schema.json"
+        }
+    ]
+}
+```
+
+With all these properly setup, intellisense will be enable when editting `egs/<task>/<any name>/config.json` and `egs/<task>/<any name>/hyper-p.json`.
+
+For more about how schema works, refer to [JSON editing in Visual Studio Code](https://code.visualstudio.com/docs/languages/json)
+
+<img src="assets/intellisense.gif" alt="intellisense" style="zoom:50%;" />
+  
+Also, you can manually check the details of settings as following:
+
+**Global hyper-parameter setting:** `exp/<task>/template/hyper-p.json`, example taken from `egs/libri`
 
 ```
 {
@@ -124,35 +168,7 @@ In this repo, we support RNN-T, Language model and CTC/CTC-CRF model training as
 }
 ```
 
-**NN configuration:** `exp/<task>/template/config.json`
-
-- If you have installed all dependencies, and you're using Visual-Studio Code as working environment, you can generate json schema for syntax intellisense via (in `egs/<task>/`):
-
-  ```bash
-  python utils/parseschema.py
-  ```
-
-  It would auto-generate a file `.vscode/schemas.json`. Add following contents into the file `.vscode/settings.json`:
-
-  ```
-  {
-  		...,		// there might be existing settings
-      "json.schemas": [
-          {
-              "fileMatch": [
-                  "exp/**/config.json"
-              ],
-              "url": ".vscode/schemas.json"
-          }
-      ]
-  }
-  ```
-
-  With all these properly setup, intellisense will be enable when editting `egs/<task>/<any name>/config.json`. For more details, refer to [JSON editing in Visual Studio Code](https://code.visualstudio.com/docs/languages/json)
-
-  <img src="assets/intellisense.gif" alt="intellisense" style="zoom:50%;" />
-  
-- Also, you can check the details of settings as following
+**NN configuration:** `exp/<task>/template/config.json`, example taken from `egs/libri`
 
 ```
 {

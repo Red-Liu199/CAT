@@ -19,8 +19,7 @@
         "grad-norm": 5.0,
         "databalance": true,
         "checkall": true,
-        "amp": true,
-        "resume": "exp/ctc-v1/checks/checkpoint.013.pt"
+        "amp": true
     },
     "inference": {
         "avgmodel": {
@@ -39,5 +38,5 @@
             "oracle": false
         }
     },
-    "commit": "639c197b0443eb1537bb0e0ba55b81267422651f"
+    "commit": "43d34533cd726e4ffdaea6a760443322db014caa"
 }

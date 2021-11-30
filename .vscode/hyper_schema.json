@@ -1,0 +1,270 @@
+{
+    "description": "Settings of Hyper-parameters.",
+    "type": "object",
+    "required": [
+        "data",
+        "sp",
+        "train"
+    ],
+    "properties": {
+        "data": {
+            "description": "Configuration of Data processing",
+            "type": "object",
+            "properties": {
+                "train": {
+                    "type": "string",
+                    "default": "train"
+                },
+                "dev": {
+                    "type": "string",
+                    "default": "dev"
+                },
+                "test": {
+                    "type": "string",
+                    "default": "test"
+                },
+                "filter": {
+                    "description": "Range of legal lengths of spectrum frames, split by ':'",
+                    "type": "string",
+                    "default": ":2000"
+                },
+                "text_processing": {
+                    "description": "Configuration of text processing. See utils/transText2Bin.py for details",
+                    "type": "object",
+                    "properties": {
+                        "concat": {
+                            "type": "number",
+                            "default": -1
+                        },
+                        "truncate": {
+                            "type": "number",
+                            "default": -1
+                        },
+                        "bos_id": {
+                            "type": "number",
+                            "default": 0
+                        }
+                    }
+                },
+                "lang": {
+                    "description": "Language of data. Refer to https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes",
+                    "type": "string",
+                    "examples": [
+                        "zh",
+                        "en"
+                    ],
+                    "default": "en"
+                }
+            }
+        },
+        "sp": {
+            "description": "Configuration of SentencePiece tokenizer. For all options, refer to https://github.com/google/sentencepiece/blob/master/doc/options.md",
+            "type": "object",
+            "properties": {
+                "input_format": {
+                    "type": "string",
+                    "examples": [
+                        "text",
+                        "tsv"
+                    ],
+                    "default": "text"
+                },
+                "model_prefix": {
+                    "type": "string",
+                    "default": ""
+                },
+                "model_type": {
+                    "type": "string",
+                    "examples": [
+                        "unigram",
+                        "bpe",
+                        "word",
+                        "char"
+                    ],
+                    "default": "unigram"
+                },
+                "vocab_size": {
+                    "type": "number",
+                    "default": 8000
+                },
+                "character_coverage": {
+                    "type": "number",
+                    "default": 0.9995
+                },
+                "input_sentence_size": {
+                    "type": "number",
+                    "default": 0
+                },
+                "shrinking_factor": {
+                    "type": "number",
+                    "default": 0.75
+                },
+                "num_threads": {
+                    "type": "number",
+                    "default": 16
+                },
+                "num_sub_iterations": {
+                    "type": "number",
+                    "default": 2
+                },
+                "max_sentencepiece_length": {
+                    "type": "number",
+                    "default": 16
+                },
+                "max_sentence_length": {
+                    "type": "number",
+                    "default": 4192
+                },
+                "treat_whitespace_as_suffix": {
+                    "type": "boolean",
+                    "default": false
+                },
+                "user_defined_symbols": {
+                    "type": "string",
+                    "default": ""
+                },
+                "add_dummy_prefix": {
+                    "type": "boolean",
+                    "default": true
+                },
+                "use_all_vocab": {
+                    "type": "boolean",
+                    "default": false
+                },
+                "unk_id": {
+                    "type": "number",
+                    "default": 0
+                },
+                "bos_id": {
+                    "type": "number",
+                    "default": 1
+                },
+                "eos_id": {
+                    "type": "number",
+                    "default": 2
+                },
+                "pad_id": {
+                    "type": "number",
+                    "default": -1
+                },
+                "unk_surface": {
+                    "type": "string",
+                    "default": " ⁇ "
+                },
+                "train_extremely_large_corpus": {
+                    "type": "boolean",
+                    "default": false
+                }
+            }
+        },
+        "topo": {
+            "type": "string",
+            "examples": [
+                "rnnt",
+                "ctc"
+            ]
+        },
+        "train": {
+            "description": "Basic configuration of NN Training",
+            "type": "object",
+            "properties": {
+                "debug": {
+                    "type": "boolean",
+                    "default": false
+                },
+                "batch-size": {
+                    "type": "number",
+                    "default": 256
+                },
+                "grad-accum-fold": {
+                    "type": "number",
+                    "default": 1
+                },
+                "grad-norm": {
+                    "type": "number",
+                    "default": 0.0
+                },
+                "amp": {
+                    "type": "boolean",
+                    "default": false
+                },
+                "databalance": {
+                    "type": "boolean",
+                    "default": false
+                },
+                "len-norm": {
+                    "type": "string"
+                },
+                "checkall": {
+                    "type": "boolean",
+                    "default": false
+                },
+                "print-freq": {
+                    "type": "number",
+                    "default": 10
+                },
+                "seed": {
+                    "type": "number",
+                    "default": 0
+                },
+                "resume": {
+                    "type": "string"
+                }
+            }
+        },
+        "inference": {
+            "description": "Basic configuration of NN Training",
+            "type": "object",
+            "properties": {
+                "avgmodel": {
+                    "type": "object",
+                    "required": [
+                        "mode",
+                        "num"
+                    ],
+                    "properties": {
+                        "mode": {
+                            "type": "string",
+                            "examples": [
+                                "best",
+                                "last"
+                            ],
+                            "default": "best"
+                        },
+                        "num": {
+                            "type": "number",
+                            "default": 10
+                        }
+                    }
+                },
+                "subsample": {
+                    "type": "number"
+                },
+                "decode": {
+                    "description": "Configuration of decoding. Run 'python -m cat.[topo].decode -h' for support options",
+                    "type": "object"
+                },
+                "er": {
+                    "type": "object",
+                    "required": [
+                        "mode"
+                    ],
+                    "properties": {
+                        "mode": {
+                            "type": "string",
+                            "examples": [
+                                "wer",
+                                "cer"
+                            ],
+                            "default": "wer"
+                        },
+                        "oracle": {
+                            "type": "boolean",
+                            "default": false
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

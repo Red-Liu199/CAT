@@ -30,6 +30,7 @@ from warp_rnnt import rnnt_loss as RNNTLoss
 import warp_rnnt
 if warp_rnnt.__version__ >= '0.7.1':
     from warp_rnnt import fused_rnnt_loss_ as RNNTFusedLoss
+from warp_rna import rna_loss as RNALoss
 from typing import Union
 
 import torch
@@ -72,6 +73,7 @@ class TransducerTrainer(nn.Module):
                  jointnet: AbsJointNet = None,
                  compact: bool = False,
                  fused: bool = False,
+                 isrna: bool = False,
                  time_reduction: int = 1,
                  decoder_mask_range: float = 0.1,
                  num_decoder_mask: int = -1,
@@ -81,6 +83,9 @@ class TransducerTrainer(nn.Module):
         self.decoder = decoder
         self.joint = jointnet
         self._compact = compact
+        self.isrna = isrna
+        if isrna:
+            assert not compact and not fused, f"RNA Loss currently doesn't support compact and fused mode yet."
 
         self.isfused = fused
         if self.isfused and not self._compact:
@@ -141,7 +146,12 @@ class TransducerTrainer(nn.Module):
             joint_out = joint_out[0]
 
         with autocast(enabled=False):
-            if self.isfused:
+            if self.isrna:
+                loss = RNALoss(joint_out.float(), targets.to(dtype=torch.int),
+                               o_lens.to(device=joint_out.device,
+                                         dtype=torch.int),
+                               target_lengths.to(device=joint_out.device, dtype=torch.int), reduction='mean')
+            elif self.isfused:
                 loss = RNNTFusedLoss(joint_out.float(), targets.to(dtype=torch.int32),
                                      o_lens.to(device=joint_out.device,
                                                dtype=torch.int32),
