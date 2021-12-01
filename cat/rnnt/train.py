@@ -52,16 +52,6 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
     manager = Manager(SpeechDatasetPickle,
                       sortedPadCollateTransducer(), args, build_model)
 
-    if args.update_bn:
-        assert args.resume is not None, "invalid behavior"
-
-        utils.update_bn(manager.trainloader, args, manager)
-        updated_check = args.resume.replace('.pt', '_bn.pt')
-        manager.save(updated_check)
-        utils.distprint(
-            f"> Save updated model at {updated_check}", args.rank)
-        return
-
     # training
     manager.run(args)
 

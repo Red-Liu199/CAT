@@ -262,24 +262,34 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
         with autocast(enabled=enableAMP):
             loss = model(features, labels, input_lengths, label_lengths)/fold
 
-        normalized_loss = loss.detach() * features.size(0)
+        if isinstance(loss, tuple):
+            assert len(loss) == 2
+            loss, norm_size = loss
+        else:
+            norm_size = features.size(0)
+        if not isinstance(norm_size, torch.Tensor):
+            norm_size = input_lengths.new_tensor(
+                int(norm_size), device=args.gpu)
+        else:
+            norm_size = norm_size.to(device=args.gpu, dtype=torch.long)
+
+        normalized_loss = loss.detach() * norm_size
         if 'databalance' in args and args.databalance:
             '''
             get current global size
             efficiently, we can set t_batch_size=args.batch_size, 
             but current impl is more robust
             '''
-            t_batch_size = features.new_tensor(features.size(0))
-            dist.all_reduce(t_batch_size)
-            loss.data = normalized_loss * (world_size / t_batch_size)
+            dist.all_reduce(norm_size)
+            loss.data = normalized_loss * (world_size / norm_size)
         else:
-            t_batch_size = features.size(0) * world_size
+            norm_size *= world_size
 
         scaler.scale(loss).backward()
 
         dist.all_reduce(normalized_loss)
         detach_loss += normalized_loss.float()
-        n_batch += t_batch_size
+        n_batch += norm_size
 
         return detach_loss, n_batch
 
@@ -365,32 +375,6 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
 
 
 @torch.no_grad()
-def update_bn(trainloader, args: argparse.Namespace, manager: Manager):
-
-    utils.check_parser(args, ['n_steps', 'print_freq',
-                              'rank', 'gpu', 'debug', 'amp'])
-
-    model = manager.model
-    if not hasattr(model.module, 'impl_forward'):
-        raise RuntimeError(
-            "--update-bn requires the model trainer has impl_forward to do pure forward computation.")
-
-    model.train()
-    enableAMP = args.amp
-
-    for i, minibatch in tqdm(enumerate(trainloader), desc=f'Update BN',
-                             unit='batch', total=args.n_steps, disable=(args.gpu != 0), leave=False):
-        # measure data loading time
-        features, input_lengths, labels, label_lengths = minibatch
-        features, labels, input_lengths, label_lengths = features.cuda(
-            args.gpu, non_blocking=True), labels, input_lengths, label_lengths
-
-        with autocast(enabled=enableAMP):
-            _ = model.module.impl_forward(
-                features, labels, input_lengths, label_lengths)
-
-
-@torch.no_grad()
 def evaluate(testloader, args: argparse.Namespace, manager: Manager) -> float:
 
     model = manager.model
@@ -411,13 +395,23 @@ def evaluate(testloader, args: argparse.Namespace, manager: Manager) -> float:
         '''
         loss = model(features, labels, input_lengths, label_lengths)
 
-        real_loss = loss * features.size(0)  # type: torch.Tensor
-        n_batch = real_loss.new_tensor(features.size(0), dtype=torch.long)
+        if isinstance(loss, tuple):
+            assert len(loss) == 2
+            loss, norm_size = loss
+        else:
+            norm_size = features.size(0)
+        if not isinstance(norm_size, torch.Tensor):
+            norm_size = input_lengths.new_tensor(
+                int(norm_size), device=args.gpu)
+        else:
+            norm_size = norm_size.to(device=args.gpu, dtype=torch.long)
+
+        real_loss = loss * norm_size  # type: torch.Tensor
 
         dist.all_reduce(real_loss, dist.ReduceOp.SUM)
-        dist.all_reduce(n_batch, dist.ReduceOp.SUM)
+        dist.all_reduce(norm_size, dist.ReduceOp.SUM)
 
-        cnt_seq += n_batch.item()
+        cnt_seq += norm_size.item()
         total_loss += real_loss.item()
 
     avg_loss = total_loss/cnt_seq

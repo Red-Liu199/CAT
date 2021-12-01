@@ -210,8 +210,6 @@ def BasicDDPParser(istraining: bool = True, prog: str = '') -> argparse.Argument
                             help="Manual seed.")
         parser.add_argument("--amp", action="store_true",
                             help="Enable automatic mixed precision training.")
-        parser.add_argument("--update-bn", action="store_true",
-                            help="Update batchnorm stats for model averaging.")
         parser.add_argument("--grad-accum-fold", type=int, default=1,
                             help="Utilize gradient accumulation for K times. Default: K=1")
         parser.add_argument("--grad-norm", type=float, default=0.0,
@@ -391,12 +389,13 @@ def setPath(args: argparse.Namespace):
     if not args.debug and args.resume is None:
         if os.listdir(checksdir) != []:
             raise FileExistsError(
-                f"{args.checksdir} is not empty! Refuse to run.")
+                f"{args.checksdir} is not empty!")
+
         from .monitor import FILE_WRITER
-        logfile = os.path.join(args.logsdir, FILE_WRITER)
+        logfile = os.path.join(logsdir, FILE_WRITER)
         if os.path.isfile(logfile):
             raise FileExistsError(
-                f"{logfile} exist! Refuse to run.")
+                f"{logfile} exists!")
 
 
 def load_checkpoint(model: Union[torch.nn.Module, torch.nn.parallel.DistributedDataParallel], path_ckpt: str) -> torch.nn.Module:

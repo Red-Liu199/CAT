@@ -55,7 +55,7 @@ def SetupOptim(type_optim: str, paramlist: Iterable[torch.nn.parameter.Parameter
 
 
 class Scheduler(object):
-    def __init__(self, optimizer_configs: dict, paramlist: Iterable[torch.nn.parameter.Parameter], reverse_metric_direc: bool = False):
+    def __init__(self, optimizer_configs: dict, paramlist: Iterable[torch.nn.parameter.Parameter], reverse_metric_direc: bool = True):
         super().__init__()
         if 'type_optim' in optimizer_configs:   # for compablility of previous versions
             optimizer_configs['type'] = optimizer_configs['type_optim']
@@ -134,7 +134,7 @@ class SchedulerEarlyStop(Scheduler):
             lr_stop: float = 1e-5,
             num_ahead: int = 1,
             gamma: float = 0.1,
-            reverse_metric_direc: bool = False):
+            reverse_metric_direc: bool = True):
         super().__init__(optimizer_configs, paramlist, reverse_metric_direc)
         self.lr_stop = lr_stop
         self.epoch_min = epoch_min
@@ -177,7 +177,7 @@ class SchedulerFixedStop(Scheduler):
             optimizer_configs,
             paramlist: Iterable[torch.nn.parameter.Parameter],
             epoch_max: int,
-            reverse_metric_direc: bool = False):
+            reverse_metric_direc: bool = True):
         super().__init__(optimizer_configs, paramlist, reverse_metric_direc)
         self.epoch_max = epoch_max
 
@@ -217,7 +217,7 @@ class SchedulerWarmupMileStone(SchedulerEarlyStop):
             lr_stop: float = 1e-5,
             num_ahead: int = 1,
             gamma: float = 0.1,
-            reverse_metric_direc: bool = False):
+            reverse_metric_direc: bool = True):
         super().__init__(optimizer_configs, paramlist, 0, lr_stop,
                          num_ahead, gamma, reverse_metric_direc)
         if refer_lr == 0.:
@@ -266,7 +266,7 @@ class SchedulerTransformer(SchedulerFixedStop):
             warmup_steps: int,
             epoch_max: int,
             peak_factor: float = 1.0,
-            reverse_metric_direc: bool = False):
+            reverse_metric_direc: bool = True):
         super().__init__(optimizer_configs, paramlist, epoch_max, reverse_metric_direc)
         assert d_model > 0
         assert warmup_steps > 0
@@ -302,7 +302,7 @@ class SchedulerTransformerEarlyStop(SchedulerEarlyStop):
             lr_stop: float = 1e-5,
             num_ahead: int = 1,
             gamma: float = 0.1,
-            reverse_metric_direc: bool = False):
+            reverse_metric_direc: bool = True):
         super().__init__(optimizer_configs, paramlist, 0,
                          lr_stop, num_ahead, gamma, reverse_metric_direc)
         assert d_model > 0
@@ -343,7 +343,7 @@ class SchedulerIterAnnealing(SchedulerFixedStop):
             paramlist: Iterable[torch.nn.parameter.Parameter],
             decay_factor: float,
             epoch_max: int,
-            reverse_metric_direc: bool = False):
+            reverse_metric_direc: bool = True):
         super().__init__(optimizer_configs, paramlist, epoch_max, reverse_metric_direc)
         assert decay_factor > 0. and decay_factor < 1. and epoch_max > 0
         self.decay = decay_factor
@@ -362,7 +362,7 @@ class SchedulerCosineAnnealing(SchedulerFixedStop):
             epoch_max: int,
             period: int = 0,
             decay_factor: float = 1.,
-            reverse_metric_direc: bool = False):
+            reverse_metric_direc: bool = True):
         super().__init__(optimizer_configs, paramlist, epoch_max, reverse_metric_direc)
         assert period >= 0 and lr_min >= 0 and epoch_max > 0
         assert decay_factor > 0. and decay_factor <= 1.

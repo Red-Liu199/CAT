@@ -16,10 +16,7 @@
     "train": {
         "batch_size": 128,
         "grad-norm": 5.0,
-        "grad-accum-fold": 1,
         "databalance": true,
-        "checkall": true,
         "amp": true
-    },
-    "commit": "4b3d2dceafa7f2505b3c54d03541976d2c982749"
+    }
 }

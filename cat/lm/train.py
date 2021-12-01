@@ -48,8 +48,9 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
 
     manager = Manager(CorpusDataset, sortedPadCollateLM(),
                       args, build_model, func_eval=evaluate)
-    manager.model.eval()
+
     if args.eval is not None:
+        manager.model.eval()
         ppl = evaluate(manager.valloader, args, manager)
         utils.distprint(f"Perplexity over dataset is {ppl:.2f}", args.gpu)
         return
@@ -78,35 +79,12 @@ class LMTrainer(nn.Module):
 
         # targets: (\sum{S_i})
         loss = self.criterion(logits, targets)
-        return loss
-
-
-class PerplexityLoss(nn.CrossEntropyLoss):
-    def __init__(self, reduction: str = 'mean', *args, **kwargs) -> None:
-        super().__init__(reduction='none', *args, **kwargs)
-        assert reduction in ['mean', 'sum',
-                             'none'], f"unknown reduction: {reduction}"
-        self.ppl_reduction = reduction
-
-    def forward(self, input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        gather_loss = super().forward(input, target)
-        gather_ppl = torch.exp(gather_loss)
-        if self.ppl_reduction == 'mean':
-            return gather_ppl.mean()
-        elif self.ppl_reduction == 'sum':
-            return gather_ppl.sum()
-        elif self.ppl_reduction == 'none':
-            return gather_ppl
-        else:
-            raise RuntimeError(
-                f"Invalid reduction option: {self.ppl_reduction}, expected one of ['mean', 'sum', 'none'].")
+        return loss, input_lengths.sum()
 
 
 @torch.no_grad()
-def evaluate(testloader: DataLoader, args: argparse.Namespace, manager: Manager):
-
-    avg_ce_loss = default_eval(testloader, args, manager)
-    return math.exp(avg_ce_loss)
+def evaluate(*args) -> float:
+    return math.exp(default_eval(*args))
 
 
 def build_model(args, configuration, dist=True, wrapper=True) -> LMTrainer:

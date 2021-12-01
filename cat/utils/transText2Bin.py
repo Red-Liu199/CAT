@@ -1,6 +1,22 @@
 """Convert text to pickle data
 
 text could be in token index format or pure text (with tokenizer specified)
+
+would create two files: (suppose --output=<f_text>)
+    <f_text> and <f_text>.bin
+    where <f_text> stores the location of <f_text>.bin, as well as 
+    the data location given by fseek(). 
+
+How to get the parsed data:
+    with open('<f_text>', 'rb') as fi:
+        f_bin = pickle.load(fi)
+        f_seeks = pickle.load(fi)
+    
+    with open(f_bin, 'rb') as fi:
+        # get the 5th element
+        index = 5
+        fi.seek(f_seeks[index], 0)
+        data = pickle.load(fi)
 """
 
 import argparse
@@ -9,7 +25,20 @@ import os
 import uuid
 import sentencepiece as spm
 from multiprocessing import Pool
-from typing import Union, Tuple
+from typing import Union, Tuple, List
+
+
+def chunk(X: List[int], Y: List[int], chunk_size: int, drop_res: bool = True):
+    assert len(X) == len(Y)
+    lx = len(X)
+    if drop_res:
+        assert lx >= chunk_size
+        res_size = lx % chunk_size
+    else:
+        res_size = 0
+
+    for bound in range(0, lx-res_size, chunk_size):
+        yield X[bound:bound+chunk_size], Y[bound:bound+chunk_size]
 
 
 def text2bin(arguments: Tuple[argparse.Namespace, str, int, int]):
@@ -25,16 +54,9 @@ def text2bin(arguments: Tuple[argparse.Namespace, str, int, int]):
         def processor(line): return [int(x) for x in line.split()]
 
     dataset = []
-    postfix = []
     cnt_process = 0
     tot_line = 0
-    flag_norm = (args.concat != -1) or (args.truncate != -1)
-    istruncate = (args.truncate != -1)
-    if istruncate:
-        norm_len = args.truncate
-    else:
-        norm_len = args.concat
-
+    concat_lines = []   # type: List[int]
     with open(args.intext, 'r') as fi:
         for i, line in (enumerate(fi)):
             if i < idx_beg or i >= idx_end:
@@ -42,32 +64,38 @@ def text2bin(arguments: Tuple[argparse.Namespace, str, int, int]):
             tot_line += 1
             l_data = processor(line)
 
-            if flag_norm:
-                data = postfix + l_data
-                while len(data) >= norm_len:
-                    dataset.append(data[:norm_len])
-                    data = data[norm_len:]
+            if args.truncate != -1:
+                # <s> + seq
+                X = [args.bos_id]+l_data
+                # seq + </s>
+                Y = l_data+[args.eos_id]
+                for x, y in chunk(X, Y, args.truncate, drop_res=False):
+                    dataset.append((x, y))
                     cnt_process += 1
-                if len(data) > 0:
-                    if istruncate:
-                        dataset.append(data)
-                        cnt_process += 1
-                    else:
-                        postfix = data
-                        postfix.append(args.bos_id)
+            elif args.concat != -1:
+                concat_lines.append(args.bos_id)
+                concat_lines += l_data
             else:
-                dataset.append(l_data)
+                # (<s> + seq, seq + </s>)
+                dataset.append(
+                    ([args.bos_id]+l_data, l_data+[args.eos_id]))
+
+    if args.concat != -1:
+        X = concat_lines
+        Y = concat_lines[1:] + [args.bos_id]
+        for x, y in chunk(X, Y, args.concat, drop_res=True):
+            dataset.append((x, y))
+            cnt_process += 1
 
     with open(binfile, 'wb') as fo:
         pickle.dump(dataset, fo)
 
-    if flag_norm:
-        if istruncate:
-            print("Truncate by {}, # {} -> {}".format(
-                args.truncate, tot_line, cnt_process))
-        else:
-            print("Concat by {}, # {} -> {}".format(
-                norm_len, tot_line, cnt_process))
+    if args.truncate != -1:
+        print("Truncate by {}, # {} -> {}".format(
+            args.truncate, tot_line, cnt_process))
+    elif args.concat != -1:
+        print("Concat by {}, # {} -> {}".format(
+            args.concat, tot_line, cnt_process))
 
 
 def main(args: argparse.Namespace):
@@ -80,6 +108,13 @@ def main(args: argparse.Namespace):
 
     if not os.path.isfile(args.intext):
         raise FileNotFoundError(f"{args.intext} does not exist!")
+
+    if args.eos_id == -1:
+        args.eos_id = args.bos_id
+
+    if args.concat > 1 and (args.eos_id != args.bos_id):
+        raise RuntimeError(
+            f"--concat > 1 requires <bos> = <eos>, instead {args.bos_id} != {args.eos_id}")
 
     fmt = os.path.join('/tmp', str(uuid.uuid4())+'.{}.tmp')
     if num_threads == 1:
@@ -135,7 +170,9 @@ def TextProcessingParser():
     parser.add_argument("--truncate", type=int, default=-1, metavar="trunc",
                         help="Truncate the seq longer than trunc and take res of it as new seq. Default: -1 (disable)")
     parser.add_argument("--bos_id", type=int, default=0,
-                        help="Begin of sequence index, available in concat > 1. Default: 0")
+                        help="Begin of sequence index, used when concat > 1. Default: 0")
+    parser.add_argument("--eos_id", type=int, default=-1,
+                        help="End of sequence index, used when concat > 1. Default: -1 (same as --bos_id)")
     return parser
 
 

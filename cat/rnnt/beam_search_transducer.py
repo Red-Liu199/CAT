@@ -11,7 +11,6 @@ Author: Huahuan Zhengh (maxwellzh@outlook.com)
 
 from .joint import AbsJointNet
 from ..shared.decoder import AbsDecoder, AbsStates
-from ..shared.data import sortedPadCollateLM
 
 import os
 import yaml
@@ -356,18 +355,7 @@ class TransducerBeamSearcher():
                                  hypo.score for hypo in hyps])
 
         if self.rescore:
-            collate_fn = sortedPadCollateLM(flatten_target=False)
-            tokens, token_length, target, _ = collate_fn(pred_list)
-            logits, _ = self.lm(tokens, input_lengths=token_length)
-            log_prob_lm = logits.log_softmax(
-                dim=-1).gather(index=target.unsqueeze(2), dim=-1).squeeze(-1)
-            final_scores = []
-            for i in range(len(pred_list)):
-                final_scores.append((score_list[i] + self.lm_weight * log_prob_lm[i,
-                                    :token_length[i]].mean()))  # + beta_l*token_length[i]))
-            pair = sorted(list(zip(pred_list, final_scores)),
-                          key=lambda item: item[1], reverse=True)
-            return list(zip(*pair))
+            raise NotImplementedError
         else:
             return pred_list, score_list
 

@@ -56,10 +56,9 @@ class AbsDecoder(nn.Module):
             if tied:
                 self.classifier.weight = self.embedding.weight
 
-    def score(self, input_ids: torch.LongTensor, input_lengths: torch.LongTensor, *args):
+    def score(self, input_ids: torch.LongTensor, targets: torch.LongTensor, input_lengths: torch.LongTensor, *args):
         # [N, U, K]
         logits, _ = self.forward(input_ids, input_lengths=input_lengths, *args)
-        targets = input_ids.roll(-1, 1)
         # [N, U]
         log_prob = logits.log_softmax(
             dim=-1).gather(index=targets.unsqueeze(2), dim=-1).squeeze(-1)
@@ -336,29 +335,45 @@ class CausalTransformer(AbsDecoder):
 
 
 class NGram(AbsDecoder):
-    def __init__(self, gram_n: int, num_classes: int, f_binlm: str) -> None:
+    def __init__(self,
+                 gram_order: int,
+                 num_classes: int,
+                 f_binlm: str,
+                 bos_id: int = 0,
+                 eos_id: int = -1,
+                 unk_id: int = 1) -> None:
         super().__init__(n_emb=1, with_head=False)
         del self.embedding
         del self.classifier
-        self.gram_n = gram_n
-        self.vocab = [str(x) for x in range(num_classes)]
+        self.gram_order = gram_order
+        self.vocab = {x: str(x) for x in range(num_classes)}
         # set 0 -> </s>, 1 -> <unk>
-        self.vocab[0] = '</s>'
-        self.vocab[1] = '<unk>'
+        if eos_id == -1:
+            eos_id = bos_id
+        self.vocab[bos_id] = '<s>'
+        self.vocab[eos_id] = '</s>'
+        self.vocab[unk_id] = '<unk>'
+        self.bos_id = bos_id
+        self.eos_id = eos_id
+        self.unk_id = unk_id
         self.ngram = kenlm.Model(f_binlm)
         # scale: convert log10 -> loge
         self.register_buffer('scale', torch.tensor(
             10.).log_(), persistent=False)
 
-    def score(self, input_ids: torch.LongTensor, input_lengths: torch.LongTensor):
+    def score(self, input_ids: torch.LongTensor, targets: torch.LongTensor, input_lengths: torch.LongTensor):
+        if not torch.equal(input_ids[:, 1:], targets[:, :-1]):
+            raise RuntimeError(
+                "N-gram model requires that there's no exposure mismatch between input and target.")
+
         # [N, ]
         log_prob = input_ids.new_full(
             input_ids.size()[:1], 0.0, dtype=torch.float)
         for b, (seq, l) in enumerate(zip(input_ids.cpu().tolist(), input_lengths.cpu().tolist())):
-            seq = [str(x) for x in seq[:l]]
-            if seq[0] == '0':
+            seq = [self.vocab[i] for i in seq[:l]]
+            if seq[0] == '</s>':
                 seq[0] = '<s>'
-            seq.append('</s>')
+            seq.append(self.vocab[targets[b][-1].item()])
 
             for t, pb in enumerate(self.ngram.full_scores(' '.join(seq), bos=False, eos=False)):
                 if t == 0:
@@ -386,16 +401,13 @@ class NGram(AbsDecoder):
             input_ids = src_ids
 
         # keep N-1 ids
-        input_ids = input_ids[:, -(self.gram_n-1):]
+        input_ids = input_ids[:, -(self.gram_order-1):]
 
         pred_logp = [[] for _ in range(B)]
         for b, seq in enumerate(input_ids.cpu().tolist()):
-            seq = [str(x) for x in seq]
-            if seq[0] == '0':
-                seq[0] = '<s>'
+            seq = [self.vocab(x) for x in seq]
             state = init_state(self.ngram, seq)
-            # TODO: replace 1 -> <unk>
-            for tok in self.vocab:
+            for tok in self.vocab.values():
                 pred_logp[b].append(update_state(self.ngram, state, tok)[0])
 
         return self.scale*self.scale.new_tensor(pred_logp), input_ids

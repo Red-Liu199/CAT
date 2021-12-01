@@ -3,7 +3,7 @@
         "type": "NGram",
         "kwargs": {
             "f_binlm": "exp/5gram/5gram-libri-large.klm",
-            "gram_n": 5,
+            "gram_order": 5,
             "num_classes": 1024
         }
     }

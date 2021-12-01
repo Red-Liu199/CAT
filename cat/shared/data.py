@@ -204,8 +204,8 @@ class CorpusDataset(AbsDataset):
             self.dataset = open(self._pathbin, 'rb')
 
         self.dataset.seek(self._seeks[index], 0)
-        data = pickle.load(self.dataset)    # type: Sequence[int]
-        return torch.LongTensor(data)
+        x, y = pickle.load(self.dataset)
+        return torch.LongTensor(x), torch.LongTensor(y)
 
 
 class NbestListDataset(AbsDataset):
@@ -353,38 +353,32 @@ class sortedPadCollateLM():
     """Collect data into batch by desending order and add padding.
 
     Args:
-        batch  : list of label
-            label  : torch.LongTensor
+        batch  : [(labels, targets)]
+            labels  : torch.LongTensor
+            targets : torch.LongTensor
 
     Return:
-        (labels_with_bos, label_lengths, labels_with_eos, `torch.empty(1)`)
+        (labels, label_lengths, targets, `torch.empty(1)`)
     """
 
     def __init__(self, flatten_target: bool = True) -> None:
         self.flatten_target = flatten_target
 
-    def __call__(self, batch: Sequence[torch.LongTensor]):
-        batches = [(label, label.size(0)) for label in batch]
+    def __call__(self, batch: Tuple[List[torch.LongTensor], List[torch.LongTensor]]):
+        batch_sorted = sorted(
+            batch, key=lambda item: item[0].size(0), reverse=True)
 
-        batch_sorted = sorted(batches, key=lambda item: item[1], reverse=True)
+        X, Y = list(zip(*batch_sorted))
+        input_lengths = torch.LongTensor(
+            [x.size(0) for x in X])  # type: torch.LongTensor
+        xs = utils.pad_list(X)   # type: torch.Tensor
 
-        xs = utils.pad_list([x[0] for x in batch_sorted]
-                            )   # type: torch.Tensor
-        # xs -> <s> + xs
-        xs = torch.cat([xs.new_zeros(xs.size(0), 1), xs], dim=1)
-
-        # labels -> labels + <s>
-        labels = [torch.cat([x, x.new_zeros(1)]) for x, _ in batch_sorted]
         if self.flatten_target:
-            labels = torch.cat(labels)
+            target = torch.cat(Y, dim=0)
         else:
-            labels = utils.pad_list(labels)
+            target = utils.pad_list(Y)
 
-        input_lengths = torch.LongTensor([l+1 for _, l in batch_sorted])
-
-        label_lengths = torch.empty(1)
-
-        return xs, input_lengths, labels, label_lengths
+        return xs, input_lengths, target, torch.empty(1)
 
 
 class BalancedDistributedSampler(DistributedSampler):
