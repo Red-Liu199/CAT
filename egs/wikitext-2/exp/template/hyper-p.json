@@ -1,22 +1,20 @@
 {
     "data": {
-        "train": "data/train.txt",
-        "dev": "data/valid.txt",
-        "test": "data/test.txt",
+        "train": "data/train",
+        "dev": "data/valid",
+        "test": "data/test",
         "text_processing": {
-            "truncate": 128
+            "truncate": 35
         }
     },
     "sp": {
         "model_type": "word",
-        "vocab_size": 30959,
-        "use_all_vocab": true,
-        "model_prefix": "sentencepiece/wikitext-2_word/spm"
+        "vocab_size": 28779,
+        "use_all_vocab": true
     },
     "train": {
-        "batch_size": 128,
-        "grad-norm": 5.0,
-        "databalance": true,
-        "amp": true
+        "batch_size": 20,
+        "grad-norm": 0.5,
+        "amp": false
     }
 }

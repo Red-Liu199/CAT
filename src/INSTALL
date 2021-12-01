@@ -1,5 +1,5 @@
 # Fetch modules
-git submodule init && git submodule update
+git submodule update --init --recursive
 
 # warp-rnnt >= 0.7.1
 cd warp-rnnt/pytorch_binding/

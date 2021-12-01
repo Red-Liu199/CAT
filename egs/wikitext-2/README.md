@@ -11,6 +11,9 @@ Size of datasets (# sequences):
 ## Usage
 
 ```bash
+# generate normalized data
+python local/data_prep.py
+
 # view helping info
 python utils/lm_process.py -h
 

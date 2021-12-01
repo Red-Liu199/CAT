@@ -2,34 +2,25 @@
     "decoder": {
         "type": "CausalTransformer",
         "kwargs": {
-            "dim_hid": 256,
-            "attn_dropout": 0.1,
-            "num_classes": 30959,
-            "num_head": 4,
-            "num_layers": 8
+            "attn_dropout": 0.2,
+            "dim_hid": 200,
+            "num_classes": 28779,
+            "num_head": 2,
+            "num_layers": 2
         }
     },
     "scheduler": {
-        "type": "SchedulerTransformerEarlyStop",
+        "type": "SchedulerIterAnnealing",
+        "kwargs": {
+            "decay_factor": 0.95,
+            "epoch_max": 3
+        },
         "optimizer": {
-            "type": "Adam",
+            "type": "SGD",
             "use_zero": true,
             "kwargs": {
-                "lr": 0.001,
-                "betas": [
-                    0.9,
-                    0.99
-                ],
-                "weight_decay": 1e-06
+                "lr": 5.0
             }
-        },
-        "kwargs": {
-            "d_model": 256,
-            "peak_factor": 1.0,
-            "warmup_steps": 800,
-            "lr_stop": 1e-05,
-            "gamma": 0.3,
-            "reverse_metric_direc": true
         }
     }
 }

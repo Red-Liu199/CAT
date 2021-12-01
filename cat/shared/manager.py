@@ -260,13 +260,14 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
     def _go_step(detach_loss, n_batch):
         # we divide loss with fold since we want the gradients to be divided by fold
         with autocast(enabled=enableAMP):
-            loss = model(features, labels, input_lengths, label_lengths)/fold
+            loss = model(features, labels, input_lengths, label_lengths)
 
         if isinstance(loss, tuple):
             assert len(loss) == 2
             loss, norm_size = loss
         else:
             norm_size = features.size(0)
+        loss = loss / fold
         if not isinstance(norm_size, torch.Tensor):
             norm_size = input_lengths.new_tensor(
                 int(norm_size), device=args.gpu)
