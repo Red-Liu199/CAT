@@ -193,7 +193,7 @@ class CorpusDataset(AbsDataset):
         _ls = []
         with open(self._pathbin, 'rb') as fi:
             for _ in range(len(self)):
-                _ls.append(len(pickle.load(fi)))
+                _ls.append(len(pickle.load(fi)[0]))
         return _ls
 
     def __len__(self):

@@ -22,7 +22,6 @@ import argparse
 import torch
 import torch.nn as nn
 import torch.distributed as dist
-from torch.utils.data import DataLoader
 
 
 def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
