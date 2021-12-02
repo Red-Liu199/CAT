@@ -342,7 +342,7 @@ class NGram(AbsDecoder):
                  bos_id: int = 0,
                  eos_id: int = -1,
                  unk_id: int = 1) -> None:
-        super().__init__(n_emb=1, with_head=False)
+        super().__init__(1, n_emb=1, with_head=False)
         del self.embedding
         del self.classifier
         self.gram_order = gram_order
@@ -405,7 +405,7 @@ class NGram(AbsDecoder):
 
         pred_logp = [[] for _ in range(B)]
         for b, seq in enumerate(input_ids.cpu().tolist()):
-            seq = [self.vocab(x) for x in seq]
+            seq = [self.vocab[x] for x in seq]
             state = init_state(self.ngram, seq)
             for tok in self.vocab.values():
                 pred_logp[b].append(update_state(self.ngram, state, tok)[0])

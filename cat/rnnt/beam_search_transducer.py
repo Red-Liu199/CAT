@@ -85,14 +85,7 @@ class Hypothesis():
         return "Hypothesis({}, {:.2e})".format(self.pred[1:], (self.score if isinstance(self.score, float) else self.score.item()))
 
     def __repr__(self) -> str:
-        if len(self) < 8:
-            return f"Hypothesis(pred={self.pred}, score={self.score:.2f})"
-        else:
-            pretty_pred = [str(i) for i in self.pred[:4]]
-            pretty_pred.append('...')
-            pretty_pred += [str(i) for i in self.pred[-3:]]
-            pretty_pred = ', '.join(pretty_pred)
-            return f"Hypothesis(pred=[{pretty_pred}], score={self.score:.2f})"
+        return f"Hypothesis(pred={self.pred}, score={self.score:.2f})"
 
 
 class PrefixTree():
@@ -268,8 +261,8 @@ class MaxBeamBuffer():
         return self._res == 0
 
     def min(self) -> Union[None, float, torch.Tensor]:
-        if self._res == self._buffer:
-            return None
+        if self._res > 0:
+            return float('-inf')
         return self._buffer[self._min_index].score
 
     def getBeam(self) -> List[Hypothesis]:
@@ -293,11 +286,12 @@ class TransducerBeamSearcher():
         bos_id: int = 0,
         beam_size: int = 5,
         nbest: int = 1,
-        algo: Literal['default', 'lc', 'alsd'] = 'default',
+        algo: Literal['default', 'lc', 'alsd', 'rna'] = 'default',
         umax_portion: float = 0.35,  # for alsd, librispeech
         prefix_merge: bool = True,
         lm_module: Optional[AbsDecoder] = None,
         lm_weight: float = 0.0,
+        lm_beta: float = 0.6,
         state_beam: float = 2.3,
         expand_beam: float = 2.3,
         temperature: float = 1.0,
@@ -321,6 +315,7 @@ class TransducerBeamSearcher():
         self.is_latency_control = False
         self.is_prefix = prefix_merge
         self.rescore = rescore and self.lm_weight > 0.0
+        self.beta = lm_beta
         if self.rescore:
             # disable fusion
             self.lm_weight = 0.0
@@ -342,6 +337,9 @@ class TransducerBeamSearcher():
             self.u_portion = umax_portion
             assert umax_portion > 0.0 and umax_portion < 1.0
             self.searcher = self.align_length_sync_decode
+        elif algo == 'rna':
+            self.is_prefix = True,
+            self.searcher = self.rna_decode
         else:
             raise RuntimeError(f"Unknown beam search algorithm: {algo}.")
 
@@ -378,7 +376,7 @@ class TransducerBeamSearcher():
             Output from transcription network with shape
             [1, time_len, hiddens].
         """
-
+        use_lm = self.lm_weight > 0.0
         # min between beam and max_target_lent
         tn_i = tn_output[0]
         dummy_tensor = torch.empty(
@@ -393,7 +391,7 @@ class TransducerBeamSearcher():
             cache={'pn_state': None},
             len_norm=True
         )
-        if self.lm_weight > 0:
+        if use_lm:
             hyp.cache.update({"lm_state": None})
 
         beam_hyps = [hyp]
@@ -429,14 +427,14 @@ class TransducerBeamSearcher():
                     pn_out, hidden = self._pn_step(
                         input_PN, a_best_hyp.cache["pn_state"])
                     t_cache['pn_out'] = (pn_out, hidden)
-                    if self.lm_weight > 0:
+                    if use_lm:
                         log_probs_lm, hidden_lm = self._lm_step(
                             input_PN, a_best_hyp.cache["lm_state"])
                         t_cache['lm_out'] = (log_probs_lm, hidden_lm)
                     prefix_cache.update(t_best_pref, t_cache)
                 else:
                     pn_out, hidden = hypo_cache['pn_out']
-                    if self.lm_weight > 0:
+                    if use_lm:
                         log_probs_lm, hidden_lm = hypo_cache['lm_out']
 
                 # forward jointnet
@@ -465,10 +463,10 @@ class TransducerBeamSearcher():
                     if (not self.is_latency_control) or (self.is_latency_control and log_p >= best_logp - self.expand_beam):
                         topk_hyp.add_token(tok)
                         topk_hyp.cache["pn_state"] = hidden
-                        if self.lm_weight > 0.0:
+                        if use_lm:
                             topk_hyp.cache["lm_state"] = hidden_lm
                             topk_hyp.lm_score = self.lm_weight * \
-                                log_probs_lm.view(-1)[tok]
+                                log_probs_lm.view(-1)[tok] + self.beta
                         process_hyps.append(topk_hyp)
 
         del prefix_cache
@@ -489,7 +487,6 @@ class TransducerBeamSearcher():
 
         use_lm = self.lm_weight > 0.0
         use_wpt = self.word_prefix_tree is not None
-        beta_l = 0.6
 
         tn_out = tn_out[0]
         dummy_tensor = tn_out.new_empty(1, dtype=torch.long)
@@ -588,7 +585,7 @@ class TransducerBeamSearcher():
             if use_lm:
                 lm_out = torch.cat(group_lm_out, dim=0)
                 lm_score = self.lm_weight * \
-                    lm_out.squeeze(1) + beta_l
+                    lm_out.squeeze(1) + self.beta
                 # [B, V]
                 fused_prob = log_prob + lm_score
             else:
@@ -661,7 +658,7 @@ class TransducerBeamSearcher():
         """
 
         use_lm = self.lm_weight > 0.0
-        beta_l = 0.6
+
         dummy_tensor = tn_out.new_empty(1, dtype=torch.long)
         N = tn_out.size(0)
         B = [[Hypothesis(
@@ -771,7 +768,7 @@ class TransducerBeamSearcher():
             if use_lm:
                 lm_out = torch.cat(group_lm_out, dim=0)
                 lm_score = self.lm_weight * \
-                    lm_out.squeeze(1) + beta_l
+                    lm_out.squeeze(1) + self.beta
                 # [B, V]
                 fused_prob = log_prob + lm_score
             else:
@@ -792,7 +789,7 @@ class TransducerBeamSearcher():
             for b in range(num_batches):
                 for k in range(self.beam_size):
                     idx_orin = map_rel2orin[b]
-                    if buffers[idx_orin].isfull() and scores[b, k] < buffers[idx_orin].min():
+                    if scores[b, k] < buffers[idx_orin].min():
                         break
                     cur_hypo = sqz_beams[index_of_beams[b]].clone()
                     tok = tokens[b, k]
@@ -821,6 +818,117 @@ class TransducerBeamSearcher():
             batch_nbest.append(Nbest)
 
         return batch_nbest
+
+    def rna_decode(self, tn_out: torch.Tensor) -> List[Hypothesis]:
+        """
+        One-step constrained decode for RNN-T or RNA decode
+
+        tn_output: [1, T, D]        
+        """
+        use_lm = self.lm_weight > 0.0
+
+        dummy_tensor = tn_out.new_empty(1, dtype=torch.long)
+        B = [Hypothesis(
+            pred=dummy_tensor.new_tensor([self.bos_id]),
+            log_prob=0.0,
+            cache={'pn_state': self.decoder.init_states()})]
+        if use_lm:
+            B[0].cache.update(
+                {'lm_state': self.lm.init_states()})
+        T = tn_out.size(1)
+        prefix_cache = PrefixCacheDict()
+
+        for t in range(T):
+            nB = len(B)
+            group_uncached, group_cached = group_to_batch(
+                B, dummy_tensor, prefix_cache)
+            group_beams = group_uncached + group_cached
+
+            index_of_beams = []   # len: len(sliced_B)
+            group_pn_out = []       # len: len(group_B)
+            if use_lm:
+                group_lm_out = []
+
+            i_sep = len(group_uncached)
+            for i, (g_index, g_tokens, g_states) in enumerate(group_beams):
+                if i < i_sep:
+                    index_of_beams += g_index
+                    pn_out, pn_state = self.decoder(
+                        g_tokens, g_states['pn_state']())
+                    if use_lm:
+                        lm_out, lm_state = self._lm_step(
+                            g_tokens, g_states['lm_state']())
+                    # add into cache
+                    for bid, absidx in enumerate(g_index):
+                        cur_cache = {
+                            'pn_out': pn_out[bid:bid+1],
+                            'pn_state': self.decoder.get_state_from_batch(pn_state, bid)
+                        }
+                        if use_lm:
+                            cur_cache.update({
+                                'lm_out': lm_out[bid:bid+1],
+                                'lm_state': self.lm.get_state_from_batch(lm_state, bid)
+                            })
+                        prefix_cache.update(B[absidx].pred, cur_cache)
+                else:
+                    pn_out = g_tokens['pn_out']
+                    pn_state = g_states['pn_state']()
+                    if use_lm:
+                        lm_out = g_tokens['lm_out']
+                        lm_state = g_states['lm_state']()
+
+                group_pn_out.append(pn_out)
+                if use_lm:
+                    group_lm_out.append(lm_out)
+
+            # [uB, 1, H]
+            pn_out = torch.cat(group_pn_out, dim=0)
+            # [uB, 1, H]
+            expand_tn_out = tn_out[:, t, :].expand(nB, -1, -1)
+            log_prob = self.joint(
+                expand_tn_out, pn_out).squeeze(1).squeeze(1)
+
+            if use_lm:
+                lm_out = torch.cat(group_lm_out, dim=0)
+                lm_score = self.lm_weight * \
+                    lm_out.squeeze(1) + self.beta
+                # [B, V]
+                combine_score = log_prob + lm_score
+                combine_score[:, self.blank_id] = log_prob[:, self.blank_id]
+            else:
+                combine_score = log_prob.clone()
+
+            V = combine_score.size(-1)
+            combine_score += collect_scores([B[i] for i in index_of_beams],
+                                            dummy_tensor).unsqueeze(1)
+            # [K, ]
+            _, flatten_positions = torch.topk(
+                combine_score.flatten(), k=self.beam_size)
+            idx_beam = torch.div(
+                flatten_positions, V, rounding_mode='floor')
+            tokens = flatten_positions % V
+            # [K, ]
+            A = []
+            for i, b in enumerate(idx_beam):
+                orin_hypo = B[index_of_beams[b]]
+                cur_hypo = orin_hypo.clone()
+                cur_hypo.log_prob += log_prob[b, tokens[i]]
+                if tokens[i] == self.blank_id:
+                    A.append(cur_hypo)
+                    continue
+                cur_hypo.add_token(tokens[i])
+                cur_hypo.cache = prefix_cache.getCache(orin_hypo.pred)
+                if use_lm:
+                    cur_hypo.lm_score += lm_score[b, tokens[i]]
+                A.append(cur_hypo)
+
+            B = recombine_hypo(A)
+            prefix_cache.pruneShorterThan(min(len(hypo) for hypo in B))
+
+        Nbest = sorted(B, key=lambda item: item.score,
+                       reverse=True)[:self.nbest]
+
+        return Nbest
 
     def _joint_step(self, tn_out: torch.Tensor, pn_out: torch.Tensor):
         """Join predictions (TN & PN)."""
