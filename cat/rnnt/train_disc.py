@@ -3,11 +3,11 @@
 
 from ..shared import Manager
 from ..shared import coreutils as utils
-from ..shared import encoder as tn_zoo
-from ..shared import decoder as pn_zoo
 from .beam_search_transducer import TransducerBeamSearcher
 from ..shared.decoder import AbsDecoder
+from ..shared.encoder import AbsEncoder
 from .train import build_model as rnnt_builder
+from ..ctc.train import build_model as ctc_builder
 from ..lm import lm_builder
 from ..shared.decoder import NGram
 from .joint import (
@@ -19,9 +19,10 @@ from ..shared.data import (
     SpeechDatasetPickle,
     sortedPadCollateTransducer
 )
+from ctcdecode import CTCBeamDecoder
 import warp_rnnt
 
-import copy
+import math
 import os
 import json
 import gather
@@ -45,7 +46,7 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         world_size=args.world_size, rank=args.rank)
 
     manager = Manager(SpeechDatasetPickle,
-                      sortedPadCollateTransducer(), args, build_mmi_model)
+                      sortedPadCollateTransducer(), args, build_model)
 
     # training
     manager.run(args)
@@ -53,126 +54,123 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
 
 class DiscTransducerTrainer(nn.Module):
     def __init__(self,
-                 encoder: nn.Module,
+                 encoder: AbsEncoder,
                  decoder: AbsDecoder,
                  joint: AbsJointNet,
-                 den_lm: AbsDecoder,
-                 searcher: TransducerBeamSearcher) -> None:
+                 ctc_sampler: AbsEncoder,
+                 searcher: CTCBeamDecoder,
+                 beta: float = 0.6) -> None:
         super().__init__()
         self.encoder = encoder
         self.decoder = decoder
         self.joint = joint
 
-        self.den_lm = den_lm
+        self.sampler = ctc_sampler
         self.searcher = searcher
+        self.ctc_loss = nn.CTCLoss(reduction='none')
         self._pad = nn.ConstantPad1d((1, 0), 0)
+        # length normalization factor
+        self._beta = beta
+
+    def cal_p(self,
+              model_xs: torch.Tensor, lx: torch.Tensor,
+              noise_xs: torch.Tensor, lnx: torch.Tensor,
+              ys: torch.Tensor, ly: torch.Tensor,
+              nu: int, is_noise: bool = False):
+        """
+        model_xs : [Stu, V]
+        lx: [N, ]
+        noise_xs: [N, T, V]
+        lnx: [N, ]
+        ys: [Su, ]
+        ly: [N, ]
+        """
+        assert model_xs.dim() == 2
+        assert noise_xs.dim() == 3
+        assert lx.size(0) == ly.size(0) and lx.size(
+            0) == noise_xs.size(0) and lx.size(0) == lnx.size(0)
+
+        # calculate the noise q(Y|X)
+        with torch.no_grad(), autocast(enabled=False):
+            # [N, T, V] -> [T, N, V]
+            noise_xs = noise_xs.transpose(0, 1)
+            noise_log_probs = - \
+                self.ctc_loss(noise_xs.float().log_softmax(
+                    dim=-1), ys, lnx, ly)
+
+        with autocast(enabled=False):
+            ys = gather.cat(ys.unsqueeze(2).float(), ly).squeeze(0)
+            dist_log_probs = -warp_rnnt.rnnt_loss(
+                model_xs.float(), ys.to(torch.int), lx, ly,
+                reduction='none', gather=True, compact=True) + self._beta * ly
+
+        q_nu = math.log(nu) + noise_log_probs
+        if is_noise:
+            return q_nu - torch.logaddexp(dist_log_probs, q_nu)
+        else:
+            return dist_log_probs - torch.logaddexp(dist_log_probs, q_nu)
 
     def forward(self, inputs: torch.Tensor, targets: torch.Tensor, input_lengths: torch.Tensor, target_lengths: torch.Tensor):
 
+        K = self.searcher._beam_width
         targets = targets.to(inputs.device, non_blocking=True)
-        padded_targets = self._pad(targets)
-
         output_encoder, encoder_lens = self.encoder(inputs, input_lengths)
+        encoder_lens = encoder_lens.to(torch.int)
+        target_lengths = target_lengths.to(torch.int)
 
+        # positive samples
         with torch.no_grad():
-            # FIXME: magic codes for fixing the bug:
-            # "RuntimeError: Expected to have finished reduction in the prior iteration before starting a new one.
-            # ...This error indicates that your module has parameters that were not used in producing loss."
-            for param in self.joint.parameters():
-                param.requires_grad = False
+            sampler_out, sampler_lens = self.sampler(inputs, input_lengths)
+            sampler_lens = sampler_lens.to(torch.int)
+            padded_targets = self._pad(targets)
+            pos_decoder_out, _ = self.decoder(
+                padded_targets, input_lengths=target_lengths+1)
+        pos_joint_out = self.joint(
+            PackedSequence(output_encoder, encoder_lens),
+            PackedSequence(pos_decoder_out, target_lengths+1)
+        )
 
-            encoder_lens = encoder_lens.to(torch.long)
-            N = output_encoder.size(0)
-            difflist = []
-            negsamples = []
-            for n in range(N):
-                hyps = self.searcher.raw_decode(
-                    output_encoder[n:n+1, :encoder_lens[n]])
-                if hyps[0].pred == padded_targets[n][:target_lengths[n]+1]:
-                    continue
-                difflist.append(n)
-                negsamples.append(hyps[0].pred)
+        pos_logp = self.cal_p(pos_joint_out, encoder_lens, sampler_out,
+                              sampler_lens, targets, target_lengths, K, False)
+        # noise samples
+        with torch.no_grad():
+            # draw noise samples
+            # [N, K, Umax]      [N, K]
+            noise_samples, _, _, l_hypos = self.searcher.decode(
+                sampler_out, seq_lens=sampler_lens)
+            noise_samples = noise_samples[:, :, :l_hypos.max()]
+            # [N, K, U] -> [K, N, U] -> [KN, U]
+            noise_samples = noise_samples.transpose(
+                0, 1).contiguous().view(-1, noise_samples.size(-1)).to(inputs.device, non_blocking=True)
+            l_hypos = l_hypos.transpose(0, 1).contiguous(
+            ).view(-1).to(inputs.device, non_blocking=True)
 
-            M = len(difflist)
-            if M == 0:
-                with torch.enable_grad():
-                    loss = 0.0
-                    # hack way to skip parameter updating
-                    for param in self.parameters():
-                        if param.requires_grad:
-                            loss += 0.0 * param.sum()
-                    return loss
+            # [NK, T, V]
+            noise_sampler_out = sampler_out.repeat(K, 1, 1).contiguous()
+            # [N, ] -> [NK, ]
+            noise_sampler_lens = sampler_lens.repeat(K)
 
-            possamples = [padded_targets[d, :1+target_lengths[d]]
-                          for d in difflist]
-            negsamples = [inputs.new_tensor(_neg_sample)
-                          for _neg_sample in negsamples]
+            padding_mask = torch.arange(noise_samples.size(1), device=noise_samples.device)[
+                None, :] < l_hypos[:, None].to(noise_samples.device)
+            noise_samples *= padding_mask
+            noise_decoder_out, _ = self.decoder(
+                self._pad(noise_samples), input_lengths=l_hypos+1)
+        noise_encoder_out = output_encoder.repeat(K, 1, 1).contiguous()
+        noise_encoder_lens = encoder_lens.repeat(K)
+        noise_joint_out = self.joint(
+            PackedSequence(noise_encoder_out, noise_encoder_lens),
+            PackedSequence(noise_decoder_out, l_hypos+1))
 
-            merge_samples = possamples + negsamples
-            # length include <s>
-            merge_lengths = input_lengths.new_tensor(
-                [sample.size(0) for sample in merge_samples], dtype=torch.long)
-            # [2M, U]
-            merge_samples = utils.pad_list(merge_samples)
-            # [2M,]
-            den_score = self.den_lm.score(merge_samples, merge_lengths)
+        noise_logp = self.cal_p(
+            noise_joint_out, noise_encoder_lens,
+            noise_sampler_out, noise_sampler_lens,
+            noise_samples, l_hypos, K, True)
 
-            for param in self.joint.parameters():
-                param.requires_grad = True
-
-        # [2M, T, H]
-        sampled_encoder_out = output_encoder[difflist*2, :, :]
-        # [2M, ]
-        sampled_encoder_lens = encoder_lens[difflist*2]
-        # [2M, U, H]
-        sampled_decoder_out, _ = self.decoder(
-            merge_samples, input_lengths=merge_lengths)
-
-        packed_decoder_out = PackedSequence(
-            sampled_decoder_out, merge_lengths)
-        packed_encoder_out = PackedSequence(
-            sampled_encoder_out, sampled_encoder_lens)
-
-        joint_out = self.joint.impl_forward(
-            packed_encoder_out, packed_decoder_out)
-        target_lengths = (
-            merge_lengths - 1).to(device=joint_out.device, dtype=torch.int32)
-        targets = gather.cat(merge_samples[:, 1:].unsqueeze(
-            2).to(torch.float), target_lengths).to(dtype=torch.int32)
-
-        with autocast(enabled=False):
-            f_joint = joint_out.float()
-            frame_lengths = sampled_encoder_lens.to(
-                device=joint_out.device, dtype=torch.int32)
-            # use logit instead of log probs to cal un-normalized "cost"
-            # [2M, ]
-            p_rnnt_costs = warp_rnnt.rnnt_loss(
-                f_joint, targets, frame_lengths, target_lengths,
-                reduction='none', gather=True, compact=True)
-            with torch.no_grad():
-                # [2M, ]
-                q_rnnt_costs = warp_rnnt.fused_rnnt_loss_(
-                    f_joint, targets, frame_lengths,
-                    target_lengths, reduction=None)
-        # assume lm weight \lambda=1.0
-        # log p(Y) = logP_rnnt(Y|X)+logP_lm(Y), [2M, ]
-        # type: torch.FloatTensor
-        p_y_all = -p_rnnt_costs+den_score
-        q_y_all = -q_rnnt_costs
-        # [2M, ]   p(x) + q(x)
-        nce_denominator = torch.logaddexp(p_y_all, q_y_all)
-        # p(x)/(p(x)+q(x)) & q(x)/(p(x)+q(x))
-        concat_logits = torch.cat([
-            p_y_all[:M], q_y_all[M:]
-        ], dim=0) - nce_denominator
-
-        nce_loss = -concat_logits.sum(dim=0) / inputs.size(0)
-        # re-normalize with batch size
-        return nce_loss
+        return -(pos_logp.mean() + noise_logp.mean())
 
     def train(self, mode: bool = True):
         super().train(mode)
-        self.den_lm.eval()
+        self.sampler.eval()
         return
 
 
@@ -390,36 +388,39 @@ def build_model(args, configuration: dict, dist: bool = True) -> DiscTransducerT
     assert 'DiscTransducerTrainer' in configuration
     disc_settings = configuration['DiscTransducerTrainer']
     assert 'pretrain-config' in disc_settings
-    assert 'pretrain-check' in disc_settings
+    assert 'pretrain-lm-check' in disc_settings
 
-    assert 'den-lm' in configuration
-    den_lm_settins = configuration['den-lm']
-    assert 'pretrain-config' in den_lm_settins
+    assert 'ctc-sampler' in configuration
+    ctc_config = configuration['ctc-sampler']
+    assert 'pretrain-config' in ctc_config
+    assert 'pretrain-check' in ctc_config
+    with open(ctc_config['pretrain-config'], 'r') as fi:
+        ctc_setting = json.load(fi)
+    ctc_model = ctc_builder(None, ctc_setting, dist=False, wrapper=False)
+    ctc_model.load_state_dict(_load_and_immigrate(
+        ctc_config['pretrain-check'], 'module.am.', ''))
+    ctc_model.eval()
+    for param in ctc_model.parameters():
+        param.requires_grad = False
 
     assert 'searcher' in configuration
-
     with open(disc_settings['pretrain-config'], 'r') as fi:
         rnnt_setting = json.load(fi)
     encoder, decoder, joint = rnnt_builder(
         None, rnnt_setting, dist=False, verbose=False, wrapped=False)
 
-    with open(den_lm_settins['pretrain-config'], 'r') as fi:
-        dlm_config = json.load(fi)
-    den_lm = lm_builder(None, dlm_config, dist=False, wrapper=False)
-    for param in den_lm.parameters():
+    utils.distprint("> Initialize prediction network from {}".format(
+        disc_settings['pretrain-lm-check']), args.gpu)
+    decoder.load_state_dict(_load_and_immigrate(
+        disc_settings['pretrain-lm-check'], 'module.lm.', ''))
+    for param in decoder.parameters():
         param.requires_grad = False
 
-    searcher = TransducerBeamSearcher(
-        decoder, joint, **configuration['searcher'])
+    labels = [str(i) for i in range(ctc_model.classifier.out_features)]
+    searcher = CTCBeamDecoder(
+        labels, log_probs_input=True, **configuration['searcher'])
 
-    model = DiscTransducerTrainer(encoder, decoder, joint, den_lm, searcher)
-    transducer = _load_and_immigrate(
-        configuration['DiscTransducerTrainer']['pretrain-check'], 'module.', '')
-
-    if not isinstance(den_lm, NGram):
-        transducer.update(_load_and_immigrate(
-            den_lm_settins['pretrain-check'], 'module.lm.', 'den_lm.'))
-    model.load_state_dict(transducer, strict=True)
+    model = DiscTransducerTrainer(encoder, decoder, joint, ctc_model, searcher)
 
     if not dist:
         setattr(model, 'requires_slice', True)

@@ -22,13 +22,11 @@ import pickle
 import argparse
 import sentencepiece as spm
 from tqdm import tqdm
-from typing import Union, Tuple
 
 import torch
 import torch.multiprocessing as mp
 import torch.distributed as dist
 from torch.utils.data import DataLoader
-from torch.cuda.amp import autocast
 
 
 def main(args: argparse.Namespace):

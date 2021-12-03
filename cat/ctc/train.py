@@ -13,11 +13,11 @@ from ..shared import coreutils as utils
 from ..shared import encoder as model_zoo
 from ..shared.data import SpeechDatasetPickle, sortedPadCollate
 
-import argparse
-
 import os
 import argparse
 from collections import OrderedDict
+from typing import Union
+
 import torch
 import torch.nn as nn
 import torch.distributed as dist
@@ -60,7 +60,7 @@ class AMTrainer(nn.Module):
         return loss.mean()
 
 
-def build_model(args: argparse.Namespace, configuration: dict, dist: bool = True, wrapper: bool = True) -> AMTrainer:
+def build_model(args: argparse.Namespace, configuration: dict, dist: bool = True, wrapper: bool = True) -> Union[model_zoo.AbsEncoder, AMTrainer]:
 
     assert 'encoder' in configuration
     netconfigs = configuration['encoder']

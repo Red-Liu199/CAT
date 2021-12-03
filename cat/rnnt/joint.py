@@ -31,7 +31,7 @@ class PackedSequence():
             else:
                 raise NotImplementedError
 
-            if xs.dtype != torch.float:
+            if xs.dtype not in [torch.float16, torch.float, torch.float64]:
                 # this might be slow
                 self._data = torch.cat([xs[i, :xn[i]].view(-1, V)
                                        for i in range(xn.size(0))], dim=0)
@@ -124,6 +124,7 @@ class DenormalJointNet(AbsJointNet):
             assert pn_out.data.size(-1) == tn_out.data.size(-1), \
                 f"pn and tn output should be of the same size at last dimension, instead of {pn_out.data.size(-1)} != {tn_out.data.size(-1)}"
             pn_out.set(pn_out.data.log_softmax(dim=-1))
+            tn_out.set(tn_out.data.log_softmax(dim=-1))
             if pn_out.data.requires_grad:
                 # [Su, V-1]
                 _sliced_pn_out = pn_out.data[:, 1:]
@@ -137,6 +138,7 @@ class DenormalJointNet(AbsJointNet):
                 f"pn and tn output should be of the same size at last dimension, instead of {pn_out.size(-1)} != {tn_out.size(-1)}"
 
             pn_out = pn_out.log_softmax(dim=-1)
+            tn_out = tn_out.log_softmax(dim=-1)
             if tn_out.dim() == 1 and pn_out.dim() == 1:
                 pn_out[0] = 0.0
                 return pn_out + tn_out
