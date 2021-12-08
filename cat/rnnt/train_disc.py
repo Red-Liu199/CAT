@@ -55,7 +55,7 @@ class DiscTransducerTrainer(nn.Module):
                  joint: AbsJointNet,
                  ctc_sampler: AbsEncoder,
                  searcher: CTCBeamDecoder,
-                 beta: float = 0.6) -> None:
+                 beta: float = 0.0) -> None:
         super().__init__()
         self.encoder = encoder
         self.decoder = decoder
@@ -162,7 +162,7 @@ class DiscTransducerTrainer(nn.Module):
             noise_sampler_out, noise_sampler_lens,
             noise_samples, l_hypos, K, True)
 
-        return -(pos_logp.mean() + noise_logp.mean())
+        return -(pos_logp.mean() + K*noise_logp.mean())
 
     def train(self, mode: bool = True):
         super().train(mode)

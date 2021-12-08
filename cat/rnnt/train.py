@@ -20,7 +20,8 @@ from ..shared.data import (
 from . import joint as joint_zoo
 from .joint import (
     PackedSequence,
-    AbsJointNet
+    AbsJointNet,
+    DenormalJointNet
 )
 
 import os
@@ -77,6 +78,8 @@ class TransducerTrainer(nn.Module):
         if isrna:
             assert not compact and not fused, f"RNA Loss currently doesn't support compact and fused mode yet."
 
+        if isinstance(jointnet, DenormalJointNet) and fused:
+            raise RuntimeError("DenormalJointNet is conflict with fused=True")
         self.isfused = fused
         if self.isfused and not self._compact:
             print(
@@ -95,6 +98,14 @@ class TransducerTrainer(nn.Module):
             self._pn_mask = None
 
         self.bos_id = bos_id
+
+    def train(self: 'TransducerTrainer', mode: bool = True) -> 'TransducerTrainer':
+        super().train(mode=mode)
+        if self.encoder.freeze:
+            self.encoder.eval()
+        if self.decoder.freeze:
+            self.decoder.eval()
+        return self
 
     def impl_forward(self, inputs: torch.FloatTensor, targets: torch.LongTensor, input_lengths: torch.LongTensor, target_lengths: torch.LongTensor) -> torch.FloatTensor:
 
@@ -211,17 +222,13 @@ def build_model(args, configuration: dict, dist: bool = True, verbose: bool = Tr
                 utils.highlight_msg(
                     f"WARNING: It seems {module} pretrained model is not properly loaded.")
 
-        # NOTE (Huahuan): In a strict sense, we should avoid invoke model.train() if we want to freeze the model
-        #                 ...for which would enable the operations like dropout during training.
         if 'freeze' in config and config['freeze']:
             if 'pretrained' not in config:
                 raise RuntimeError(
                     "freeze=True while 'pretrained' is empty is not allowed. In {} init".format(module))
 
-            for name, param in _model.named_parameters():
-                # NOTE: we only freeze those loaded parameters
-                if name in state_dict and param.requires_grad:
-                    param.requires_grad = False
+            for param in _model.parameters():
+                param.requires_grad = False
 
             setattr(_model, 'freeze', True)
         else:
@@ -247,6 +254,9 @@ def build_model(args, configuration: dict, dist: bool = True, verbose: bool = Tr
     if all(_model.freeze for _model in [encoder, decoder, jointnet]):
         raise RuntimeError("It's illegal to freeze all parts of Transducer.")
 
+    is_part_freeze = not all(not _model.freeze for _model in [
+                             encoder, decoder, jointnet])
+
     if not wrapped:
         return encoder, decoder, jointnet
 
@@ -260,7 +270,7 @@ def build_model(args, configuration: dict, dist: bool = True, verbose: bool = Tr
                               jointnet=jointnet, **transducer_kwargs)
 
     if not dist:
-        if not all(not _model.freeze for _model in [encoder, decoder, jointnet]):
+        if is_part_freeze:
             setattr(model, 'requires_slice', True)
         return model
 
@@ -270,7 +280,7 @@ def build_model(args, configuration: dict, dist: bool = True, verbose: bool = Tr
     model.cuda(args.gpu)
     model = torch.nn.parallel.DistributedDataParallel(
         model, device_ids=[args.gpu])
-    if not all(not _model.freeze for _model in [encoder, decoder, jointnet]):
+    if is_part_freeze:
         setattr(model, 'requires_slice', True)
     return model
 

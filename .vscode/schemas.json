@@ -612,13 +612,25 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
+                                    "unk_id": {
+                                        "type": "number",
+                                        "default": 1
+                                    },
+                                    "eos_id": {
+                                        "type": "number",
+                                        "default": -1
+                                    },
+                                    "bos_id": {
+                                        "type": "number",
+                                        "default": 0
+                                    },
                                     "f_binlm": {
                                         "type": "string"
                                     },
                                     "num_classes": {
                                         "type": "number"
                                     },
-                                    "gram_n": {
+                                    "gram_order": {
                                         "type": "number"
                                     }
                                 }
@@ -1206,7 +1218,7 @@
                                 "properties": {
                                     "reverse_metric_direc": {
                                         "type": "boolean",
-                                        "default": false
+                                        "default": true
                                     },
                                     "paramlist": {},
                                     "optimizer_configs": {
@@ -1233,7 +1245,7 @@
                                 "properties": {
                                     "reverse_metric_direc": {
                                         "type": "boolean",
-                                        "default": false
+                                        "default": true
                                     },
                                     "decay_factor": {
                                         "type": "number",
@@ -1271,7 +1283,7 @@
                                 "properties": {
                                     "reverse_metric_direc": {
                                         "type": "boolean",
-                                        "default": false
+                                        "default": true
                                     },
                                     "gamma": {
                                         "type": "number",
@@ -1310,7 +1322,7 @@
                                 "properties": {
                                     "reverse_metric_direc": {
                                         "type": "boolean",
-                                        "default": false
+                                        "default": true
                                     },
                                     "epoch_max": {
                                         "type": "number"
@@ -1337,7 +1349,7 @@
                                 "properties": {
                                     "reverse_metric_direc": {
                                         "type": "boolean",
-                                        "default": false
+                                        "default": true
                                     },
                                     "epoch_max": {
                                         "type": "number"
@@ -1367,7 +1379,7 @@
                                 "properties": {
                                     "reverse_metric_direc": {
                                         "type": "boolean",
-                                        "default": false
+                                        "default": true
                                     },
                                     "peak_factor": {
                                         "type": "number",
@@ -1404,7 +1416,7 @@
                                 "properties": {
                                     "reverse_metric_direc": {
                                         "type": "boolean",
-                                        "default": false
+                                        "default": true
                                     },
                                     "gamma": {
                                         "type": "number",
@@ -1450,7 +1462,7 @@
                                 "properties": {
                                     "reverse_metric_direc": {
                                         "type": "boolean",
-                                        "default": false
+                                        "default": true
                                     },
                                     "gamma": {
                                         "type": "number",

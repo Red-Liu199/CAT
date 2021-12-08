@@ -8,7 +8,7 @@ from ..shared.data import BalancedDistributedSampler
 from . import scheduler
 from . import coreutils as utils
 from ._specaug import SpecAug
-from .monitor import MonitorWriter
+from .monitor import MonitorWriter, BASE_METRIC
 
 import os
 import argparse
@@ -38,7 +38,8 @@ class Manager(object):
             args: argparse.Namespace,
             func_build_model: Callable[[argparse.Namespace, dict], Union[nn.Module, nn.parallel.DistributedDataParallel]],
             func_train: Optional[Callable] = None,
-            func_eval: Optional[Callable] = None):
+            func_eval: Optional[Callable] = None,
+            extra_tracks: Union[str, List[str], None] = None):
         super().__init__()
 
         utils.check_parser(args, ['rank', 'gpu', 'workers', 'trset', 'devset', 'databalance',
@@ -122,7 +123,9 @@ class Manager(object):
                 configures['scheduler'], self.model.parameters())
 
         self.monitor = MonitorWriter(args.logsdir)
-        self.monitor.addWriter(['train:loss', 'train:lr', 'eval:loss'])
+        self.monitor.addWriter(BASE_METRIC)
+        if extra_tracks is not None:
+            self.monitor.addWriter(extra_tracks)
 
         if args.rank == 0:
             self.writer = SummaryWriter(os.path.join(
