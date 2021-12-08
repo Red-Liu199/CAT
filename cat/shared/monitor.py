@@ -17,8 +17,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from typing import Union, Tuple, Any, Dict, List
 
-import torch
-
 FILE_WRITER = r"training.summary"
 BASE_METRIC = ['train:loss', 'train:lr', 'eval:loss']
 
@@ -68,13 +66,15 @@ class MonitorWriter():
     '''
 
     def __init__(self, path: str = './') -> None:
-        if os.path.isdir(path):
-            path = os.path.join(path, FILE_WRITER)
-            self._default_path = path
-            self.summaries = {}   # type: Dict[str, BaseSummary]
-        else:
+        if os.path.isfile(path):
             # assume path is file-like
             self.load(path)
+            return
+        elif os.path.isdir(path):
+            path = os.path.join(path, FILE_WRITER)
+
+        self._default_path = path
+        self.summaries = {}   # type: Dict[str, BaseSummary]
 
     def __contains__(self, index):
         return index in self.summaries
@@ -175,7 +175,7 @@ class MonitorWriter():
 
     def visualize(self, fig_path: str = None) -> str:
         self.export()
-        return plot_monitor(self._default_path, o_path=fig_path, pt_like=False)
+        return plot_monitor(self._default_path, o_path=fig_path)
 
 
 def read_from_check(path: str, pt_like: bool = False) -> Tuple[np.array, np.array, int, int]:
@@ -320,8 +320,8 @@ def plot_monitor(path: str, o_path: str = None, title: str = None, interactive_s
         if k not in BASE_METRIC:
             apd.append(k)
 
-    n_row = 2 + (len(apd) % 2)
-    n_col = 2 + (len(apd) // 2)
+    n_row = 2 + (len(apd) // 2 + len(apd) % 2)
+    n_col = 2
 
     _, axes = plt.subplots(n_row, n_col, figsize=(
         3*n_col, 2.2*n_row), constrained_layout=True)

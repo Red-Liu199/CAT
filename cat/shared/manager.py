@@ -400,8 +400,8 @@ def evaluate(testloader, args: argparse.Namespace, manager: Manager) -> float:
         loss = model(features, labels, input_lengths, label_lengths)
 
         if isinstance(loss, tuple):
-            assert len(loss) == 2
-            loss, norm_size = loss
+            assert len(loss) >= 2
+            loss, norm_size = loss[:2]
         else:
             norm_size = features.size(0)
         if not isinstance(norm_size, torch.Tensor):
