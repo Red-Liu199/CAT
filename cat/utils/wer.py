@@ -34,25 +34,51 @@ class Processor():
             return o_seq
 
 
-def WER(l_gt: List[str], l_hy: List[str]) -> Tuple[int, int, int, int]:
+def WER(l_gt: List[str], l_hy: List[str]) -> Tuple[int, int, int, int, int]:
+    """Compute WER and SER from given list of sentences
+    
+    Args:
+        l_gt (list(str)): list of ground truth sentences
+        l_hy (list(str)): list of hypothesis sentences
+    
+    Returns:
+        (sub, del, ins, hit, n_se)
+        sub (int): sum of of substitutions
+        del (int): sum of of deletions
+        ins (int): sum of of insertions
+        hit (int): sum of of hits
+        n_se (int): number of mismatch sentences
+    """
+    assert len(l_gt) == len(l_hy)
     measures = jiwer.compute_measures(l_gt, l_hy)
-    return measures['substitutions'], measures['deletions'], measures['insertions'], measures['hits']
+
+    cnt_s = 0
+    for i in range(len(l_gt)):
+        if l_gt[i] != l_hy[i]:
+            cnt_s += 1
+
+    return measures['substitutions'], measures['deletions'], measures['insertions'], measures['hits'], cnt_s
 
 
-def oracleWER(l_gt: List[Tuple[str, str]], l_hy: List[Tuple[str, List[str]]]) -> Tuple[int, int, int, int]:
+def oracleWER(l_gt: List[Tuple[str, str]], l_hy: List[Tuple[str, List[str]]]) -> Tuple[int, int, int, int, int]:
     """Computer oracle WER.
 
     Take first col of l_gt as key
+
+    Returns have the same meaning as returns of WER()
     """
 
     l_hy = {key: nbest for key, nbest in l_hy}
-    _sub, _del, _ins, _hit = 0, 0, 0, 0
+    _sub, _del, _ins, _hit, _se = 0, 0, 0, 0, 0
     for key, g_s in l_gt:
         candidates = l_hy[key]
         best_wer = float('inf')
         best_measure = {}
 
+        mismatch = 1
         for can_seq in candidates:
+            if can_seq == g_s:
+                mismatch = 0
             part_ith_measure = jiwer.compute_measures(g_s, can_seq)
             if part_ith_measure['wer'] < best_wer:
                 best_wer = part_ith_measure['wer']
@@ -62,8 +88,9 @@ def oracleWER(l_gt: List[Tuple[str, str]], l_hy: List[Tuple[str, List[str]]]) ->
         _del += best_measure['deletions']
         _ins += best_measure['insertions']
         _hit += best_measure['hits']
+        _se += mismatch
 
-    return _sub, _del, _ins, _hit
+    return _sub, _del, _ins, _hit, _se
 
 
 def run_wer_wrapper(args):
@@ -166,20 +193,23 @@ def main(args: argparse.Namespace):
             gathered_measures = pool.map(run_wer_wrapper, pool_args)
 
     # gather sub-processes results
-    _sub, _del, _ins, _hits = 0, 0, 0, 0
-    for p_sub, p_del, p_ins, p_hits in gathered_measures:
+    _sub, _del, _ins, _hits, _se = 0, 0, 0, 0, 0
+    for p_sub, p_del, p_ins, p_hits, p_se in gathered_measures:
         _sub += p_sub
         _del += p_del
         _ins += p_ins
         _hits += p_hits
+        _se += p_se
 
     _err = _sub + _del + _ins
     _sum = _hits + _sub + _del
     _wer = _err / _sum
+    _ser = _se / num_lines
 
-    # format: %WER 4.50 [ 2367 / 52576, 308 ins, 157 del, 1902 sub ]
+    # format: %SER 13.60 | %WER 4.50 [ 2367 / 52576, 308 ins, 157 del, 1902 sub ]
     prefix = 'WER' if not args.cer else 'CER'
-    pretty_str = f"%{prefix} {_wer*100:.2f} [{_err} / {_sum}, {_ins} ins, {_del} del, {_sub} sub ]"
+    pretty_str = \
+        f"%SER {_ser*100:.2f} | %{prefix} {_wer*100:.2f} [{_err} / {_sum}, {_ins} ins, {_del} del, {_sub} sub ]"
 
     sys.stdout.write(pretty_str+'\n')
 

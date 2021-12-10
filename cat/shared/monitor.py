@@ -378,8 +378,9 @@ def cmp(checks: List[str], legends: Union[List[str], None] = None, title: str = 
         if k not in BASE_METRIC:
             apd.append(k)
 
-    n_row = 2 + (len(apd) % 2)
-    n_col = 2 + (len(apd) // 2)
+    n_row = 2 + (len(apd) // 2 + len(apd) % 2)
+    n_col = 2
+
     _, axes = plt.subplots(n_row, n_col, figsize=(
         3*n_col, 2.2*n_row), constrained_layout=True)
 

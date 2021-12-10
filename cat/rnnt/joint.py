@@ -104,8 +104,12 @@ class DenormalJointNet(AbsJointNet):
     return logP_pn(Y) * logit_tn (X, Y) w/o softmax
     """
 
-    def __init__(self) -> None:
+    def __init__(self, normalizd_tn: bool = True) -> None:
         super().__init__()
+        if normalizd_tn:
+            self._tn_normalize = nn.LogSoftmax(dim=-1)
+        else:
+            self._tn_normalize = nn.Identity()
 
     def impl_forward(self, tn_out: Union[torch.Tensor, PackedSequence], pn_out: Union[torch.Tensor, PackedSequence]) -> torch.FloatTensor:
         '''
@@ -124,7 +128,7 @@ class DenormalJointNet(AbsJointNet):
             assert pn_out.data.size(-1) == tn_out.data.size(-1), \
                 f"pn and tn output should be of the same size at last dimension, instead of {pn_out.data.size(-1)} != {tn_out.data.size(-1)}"
             pn_out.set(pn_out.data.log_softmax(dim=-1))
-            tn_out.set(tn_out.data.log_softmax(dim=-1))
+            tn_out.set(self._tn_normalize(tn_out.data))
             if pn_out.data.requires_grad:
                 # [Su, V-1]
                 _sliced_pn_out = pn_out.data[:, 1:]
@@ -138,7 +142,7 @@ class DenormalJointNet(AbsJointNet):
                 f"pn and tn output should be of the same size at last dimension, instead of {pn_out.size(-1)} != {tn_out.size(-1)}"
 
             pn_out = pn_out.log_softmax(dim=-1)
-            tn_out = tn_out.log_softmax(dim=-1)
+            tn_out = self._tn_normalize(tn_out)
             if tn_out.dim() == 1 and pn_out.dim() == 1:
                 pn_out[0] = 0.0
                 return pn_out + tn_out

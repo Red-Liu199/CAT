@@ -774,7 +774,12 @@
                         "properties": {
                             "kwargs": {
                                 "type": "object",
-                                "properties": {}
+                                "properties": {
+                                    "normalizd_tn": {
+                                        "type": "boolean",
+                                        "default": true
+                                    }
+                                }
                             }
                         }
                     }

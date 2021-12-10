@@ -23,12 +23,13 @@ import os
 import json
 import gather
 import argparse
+from tqdm import tqdm
 from collections import OrderedDict
 
 import torch
 import torch.nn as nn
 import torch.distributed as dist
-from torch.cuda.amp import autocast
+from torch.cuda.amp import autocast, GradScaler
 
 
 def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
@@ -42,7 +43,9 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         world_size=args.world_size, rank=args.rank)
 
     manager = Manager(SpeechDatasetPickle,
-                      sortedPadCollateTransducer(), args, build_model)
+                      sortedPadCollateTransducer(),
+                      args, build_model,
+                      func_train=train, extra_tracks=['Pos Acc', 'Noise Acc'])
 
     # training
     manager.run(args)
@@ -67,6 +70,7 @@ class DiscTransducerTrainer(nn.Module):
         self._pad = nn.ConstantPad1d((1, 0), 0)
         # length normalization factor
         self._beta = beta
+        self._logsigmoid = nn.LogSigmoid()
 
     def cal_p(self,
               model_xs: torch.Tensor, lx: torch.Tensor,
@@ -86,7 +90,7 @@ class DiscTransducerTrainer(nn.Module):
         assert lx.size(0) == ly.size(0) and lx.size(
             0) == noise_xs.size(0) and lx.size(0) == lnx.size(0)
 
-        # calculate the noise q(Y|X)
+        # Q
         with torch.no_grad(), autocast(enabled=False):
             # [N, T, V] -> [T, N, V]
             noise_xs = noise_xs.transpose(0, 1)
@@ -94,6 +98,7 @@ class DiscTransducerTrainer(nn.Module):
                 self.ctc_loss(noise_xs.float().log_softmax(
                     dim=-1), ys, lnx, ly)
 
+        # P
         with autocast(enabled=False):
             ys = gather.cat(ys.unsqueeze(2).float(), ly).squeeze(0)
             dist_log_probs = -warp_rnnt.rnnt_loss(
@@ -101,10 +106,12 @@ class DiscTransducerTrainer(nn.Module):
                 reduction='none', gather=True, compact=True) + self._beta * ly
 
         q_nu = math.log(nu) + noise_log_probs
+
+        # G = log(P) - log(vQ) = dist_log_probs - q_nu
         if is_noise:
-            return q_nu - torch.logaddexp(dist_log_probs, q_nu)
+            return self._logsigmoid(q_nu - dist_log_probs)
         else:
-            return dist_log_probs - torch.logaddexp(dist_log_probs, q_nu)
+            return self._logsigmoid(dist_log_probs - q_nu)
 
     def forward(self, inputs: torch.Tensor, targets: torch.Tensor, input_lengths: torch.Tensor, target_lengths: torch.Tensor):
 
@@ -162,12 +169,140 @@ class DiscTransducerTrainer(nn.Module):
             noise_sampler_out, noise_sampler_lens,
             noise_samples, l_hypos, K, True)
 
-        return -(pos_logp.mean() + K*noise_logp.mean())
+        return -(pos_logp.mean() + K*noise_logp.mean()), inputs.size(0), \
+            pos_logp.detach().exp_() > 0.5, noise_logp.detach().exp_() > 0.5
 
     def train(self, mode: bool = True):
         super().train(mode)
         self.sampler.eval()
         return
+
+
+def train(trainloader, args: argparse.Namespace, manager: Manager):
+
+    def _go_step(detach_loss, n_batch):
+        # we divide loss with fold since we want the gradients to be divided by fold
+        with autocast(enabled=enableAMP):
+            loss, norm_size, TP, FP = model(
+                features, labels, input_lengths, label_lengths)
+
+        if args.rank == 0:
+            # FIXME: not exact global accuracy
+            pos_acc = (TP.sum()/TP.size(0)).item()
+            noise_acc = (FP.sum()/FP.size(0)).item()
+            manager.monitor.update('Pos Acc', pos_acc)
+            manager.monitor.update('Noise Acc', noise_acc)
+            manager.writer.add_scalar(
+                'Acc/positive', pos_acc, manager.step + (i+1) % fold)
+            manager.writer.add_scalar(
+                'Acc/noise', noise_acc, manager.step + (i+1) % fold)
+
+        loss = loss / fold
+        if not isinstance(norm_size, torch.Tensor):
+            norm_size = input_lengths.new_tensor(
+                int(norm_size), device=args.gpu)
+        else:
+            norm_size = norm_size.to(device=args.gpu, dtype=torch.long)
+
+        normalized_loss = loss.detach() * norm_size
+        if 'databalance' in args and args.databalance:
+            '''
+            get current global size
+            efficiently, we can set t_batch_size=args.batch_size, 
+            but current impl is more robust
+            '''
+            dist.all_reduce(norm_size)
+            loss.data = normalized_loss * (world_size / norm_size)
+        else:
+            norm_size *= world_size
+
+        scaler.scale(loss).backward()
+
+        dist.all_reduce(normalized_loss)
+        detach_loss += normalized_loss.float()
+        n_batch += norm_size
+
+        return detach_loss, n_batch
+
+    utils.check_parser(args, ['grad_accum_fold', 'n_steps',
+                              'print_freq', 'rank', 'gpu', 'debug', 'amp', 'grad_norm'])
+
+    model = manager.model
+    scheduler = manager.scheduler
+    optimizer = scheduler.optimizer
+    optimizer.zero_grad()
+    enableAMP = args.amp
+    scaler = GradScaler(enabled=enableAMP)
+    grad_norm = args.grad_norm
+
+    world_size = dist.get_world_size()
+    fold = args.grad_accum_fold
+    assert fold >= 1
+    detach_loss = 0.0
+    n_batch = 0
+    for i, minibatch in tqdm(enumerate(trainloader), desc=f'Epoch {manager.epoch} | train',
+                             unit='batch', total=fold*args.n_steps, disable=(args.gpu != 0), leave=False):
+
+        features, input_lengths, labels, label_lengths = minibatch
+        features, labels, input_lengths, label_lengths = features.cuda(
+            args.gpu, non_blocking=True), labels, input_lengths, label_lengths
+
+        if manager.specaug is not None:
+            features, input_lengths = manager.specaug(features, input_lengths)
+
+        # update every fold times and drop the last few batches (number of which <= fold)
+        if fold == 1 or (i+1) % fold == 0:
+            detach_loss, n_batch = _go_step(detach_loss, n_batch)
+
+            if grad_norm > 0.0:
+                if enableAMP:
+                    scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(), grad_norm, error_if_nonfinite=False)
+
+            scaler.step(optimizer)
+            scaler.update()
+            optimizer.zero_grad()
+
+            manager.step += 1
+            global_step = manager.step
+            scheduler.update_lr(global_step)
+
+            # average for logging
+            dist.all_reduce(detach_loss)
+            detach_loss /= n_batch
+            # measure accuracy and record loss; item() can sync all processes.
+            tolog = {
+                'loss': detach_loss.item(),
+                'lr': scheduler.lr_cur
+            }
+
+            # update tensorboard
+            if args.rank == 0:
+                manager.writer.add_scalar(
+                    'loss/train_loss', tolog['loss'], global_step)
+                manager.writer.add_scalar(
+                    'lr', tolog['lr'], global_step)
+
+            # update monitor
+            manager.monitor.update({
+                'train:loss': tolog['loss'],
+                'train:lr': tolog['lr']
+            })
+
+            n_time = (i+1)//fold
+
+            if n_time == args.n_steps or (args.debug and n_time >= 20):
+                dist.barrier()
+                break
+
+            # reset accumulated loss
+            detach_loss -= detach_loss
+            n_batch -= n_batch
+        else:
+            # gradient accumulation w/o sync
+            with model.no_sync():
+                detach_loss, n_batch = _go_step(detach_loss, n_batch)
 
 
 def build_model(args, configuration: dict, dist: bool = True) -> DiscTransducerTrainer:
@@ -204,7 +339,7 @@ def build_model(args, configuration: dict, dist: bool = True) -> DiscTransducerT
     with open(disc_settings['pretrain-config'], 'r') as fi:
         rnnt_setting = json.load(fi)
     encoder, decoder, joint = rnnt_builder(
-        None, rnnt_setting, dist=False, verbose=False, wrapped=False)
+        args, rnnt_setting, dist=False, verbose=True, wrapped=False)
 
     utils.distprint("> Initialize prediction network from {}".format(
         disc_settings['pretrain-lm-check']), args.gpu)
