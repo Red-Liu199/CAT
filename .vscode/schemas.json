@@ -775,6 +775,10 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
+                                    "local_normalize": {
+                                        "type": "boolean",
+                                        "default": false
+                                    },
                                     "normalizd_tn": {
                                         "type": "boolean",
                                         "default": true

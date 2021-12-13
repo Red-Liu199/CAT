@@ -330,7 +330,8 @@ def plot_monitor(path: str, o_path: str = None, title: str = None, interactive_s
     draw_lr(axes[0][0], log_writer['train:lr'])
 
     # Time
-    draw_time(axes[0][1], log_writer['train:loss'], True)
+    draw_time(axes[0][1], log_writer['train:loss'],
+              log_writer['eval:loss'].data['cnt'], True)
 
     # Training loss and moving average
     draw_tr_loss(axes[1][0], log_writer['train:loss'])
@@ -389,7 +390,8 @@ def cmp(checks: List[str], legends: Union[List[str], None] = None, title: str = 
 
     for clog in checks:
         log_writer = MonitorWriter(clog)
-        draw_time(axes[0][0], log_writer['train:loss'], prop_box=False)
+        draw_time(axes[0][0], log_writer['train:loss'],
+                  log_writer['eval:loss'].data['cnt'], prop_box=False)
         draw_lr(axes[0][1], log_writer['train:lr'])
         draw_tr_loss(axes[1][0], log_writer['train:loss'])
         draw_dev_loss(axes[1][1], log_writer['eval:loss'], False)

@@ -79,7 +79,10 @@ class TransducerTrainer(nn.Module):
             assert not compact and not fused, f"RNA Loss currently doesn't support compact and fused mode yet."
 
         if isinstance(jointnet, DenormalJointNet) and fused:
-            raise RuntimeError("DenormalJointNet is conflict with fused=True")
+            if not jointnet._local_normalized:
+                raise RuntimeError(
+                    "TransducerTrainer: DenormalJointNet is conflict with fused=True")
+
         self.isfused = fused
         if self.isfused and not self._compact:
             print(
