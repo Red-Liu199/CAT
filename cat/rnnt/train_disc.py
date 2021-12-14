@@ -317,10 +317,8 @@ def build_model(args, configuration: dict, dist: bool = True) -> DiscTransducerT
         del checkpoint
         return new_state_dict
 
-    assert 'DiscTransducerTrainer' in configuration
-    disc_settings = configuration['DiscTransducerTrainer']
-    assert 'pretrain-config' in disc_settings
-    assert 'pretrain-lm-check' in disc_settings
+    if 'DiscTransducerTrainer' not in configuration:
+        configuration['DiscTransducerTrainer'] = {}
 
     assert 'ctc-sampler' in configuration
     ctc_config = configuration['ctc-sampler']
@@ -336,23 +334,15 @@ def build_model(args, configuration: dict, dist: bool = True) -> DiscTransducerT
         param.requires_grad = False
 
     assert 'searcher' in configuration
-    with open(disc_settings['pretrain-config'], 'r') as fi:
-        rnnt_setting = json.load(fi)
     encoder, decoder, joint = rnnt_builder(
-        args, rnnt_setting, dist=False, verbose=True, wrapped=False)
-
-    utils.distprint("> Initialize prediction network from {}".format(
-        disc_settings['pretrain-lm-check']), args.gpu)
-    decoder.load_state_dict(_load_and_immigrate(
-        disc_settings['pretrain-lm-check'], 'module.lm.', ''))
-    for param in decoder.parameters():
-        param.requires_grad = False
+        args, configuration, dist=False, verbose=True, wrapped=False)
 
     labels = [str(i) for i in range(ctc_model.classifier.out_features)]
     searcher = CTCBeamDecoder(
         labels, log_probs_input=True, **configuration['searcher'])
 
-    model = DiscTransducerTrainer(encoder, decoder, joint, ctc_model, searcher)
+    model = DiscTransducerTrainer(
+        encoder, decoder, joint, ctc_model, searcher, **configuration['DiscTransducerTrainer'])
 
     if not dist:
         setattr(model, 'requires_slice', True)

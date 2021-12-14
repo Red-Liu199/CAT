@@ -69,7 +69,7 @@
                     "default": false
                 },
                 "pretrained": {
-                    "type": "boolean",
+                    "type": "string",
                     "default": false
                 }
             },
@@ -475,8 +475,8 @@
                     "default": false
                 },
                 "pretrained": {
-                    "type": "boolean",
-                    "default": false
+                    "type": "string",
+                    "default": ""
                 }
             },
             "allOf": [

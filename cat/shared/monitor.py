@@ -24,8 +24,8 @@ BASE_METRIC = ['train:loss', 'train:lr', 'eval:loss']
 class BaseSummary():
     def __init__(self, src: dict = None) -> None:
         if src is None:
-            self._values = []
-            self._time = []
+            self._values = []   # type: List[Any]
+            self._time = []     # type: List[float]
             self._cnt = 0
         else:
             self.load(src)
@@ -35,7 +35,11 @@ class BaseSummary():
         return self.dump()
 
     def dump(self) -> dict:
-        return {'val': self._values, 'time': self._time, 'cnt': self._cnt}
+        return {
+            'val': self._values,
+            'time': self._time,
+            'cnt': self._cnt
+        }
 
     def load(self, src: dict):
         self._values = src['val']

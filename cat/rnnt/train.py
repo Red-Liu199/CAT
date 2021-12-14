@@ -242,8 +242,8 @@ def build_model(args, configuration: dict, dist: bool = True, verbose: bool = Tr
                 _path = ''
             else:
                 _path = config['pretrained']
-            print("{:<8}: freeze={} | loaded from {}".format(
-                module.upper(), _model.freeze, _path))
+            print("{:<8}: freeze={:<5} | loaded from {}".format(
+                module.upper(), str(_model.freeze), _path))
             del _path
         return _model
 

@@ -153,7 +153,7 @@ for m in dir(tn_zoo):
 parse_processing(processing, modules)
 processing['description'] = 'Configuration of Transducer transcription network'
 processing['properties']['freeze'] = gen_object(bool, default=False)
-processing['properties']['pretrained'] = gen_object(bool, default=False)
+processing['properties']['pretrained'] = gen_object(str, default=False)
 schema['properties']['encoder'] = processing
 
 # %% [markdown]
@@ -170,7 +170,7 @@ for m in dir(pn_zoo):
 parse_processing(processing, modules)
 processing['description'] = 'Configuration of Transducer prediction network'
 processing['properties']['freeze'] = gen_object(bool, default=False)
-processing['properties']['pretrained'] = gen_object(bool, default=False)
+processing['properties']['pretrained'] = gen_object(str, default="")
 schema['properties']['decoder'] = processing
 
 # %% [markdown]
