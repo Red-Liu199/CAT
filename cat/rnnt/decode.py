@@ -50,9 +50,9 @@ def main(args):
         world_size = torch.cuda.device_count()
     args.world_size = world_size
 
-    if args.rescore and args.lm_weight <= 0.0:
+    if args.rescore and args.alpha <= 0.0:
         raise RuntimeError(
-            f"Trying to do rescoring with lm-weight={args.lm_weight}")
+            f"Trying to do rescoring with alpha={args.alpha}")
 
     cachedir = '/tmp'
     fmt = os.path.join(cachedir, str(uuid.uuid4())+r".{}.tmp")
@@ -148,10 +148,12 @@ def main_worker(gpu: int, args: argparse.Namespace, q: mp.Queue, fmt: str, model
         model, ext_lm = build_model(args, device)
 
     searcher = TransducerBeamSearcher(
-        model.decoder, model.joint, blank_id=0, bos_id=model.bos_id, beam_size=args.beam_size,
-        nbest=args.beam_size, algo=args.algo, prefix_merge=True, umax_portion=args.umax_portion,
-        state_beam=2.3, expand_beam=2.3, temperature=1.0, word_prefix_tree=args.word_tree,
-        lm_module=ext_lm, lm_weight=args.lm_weight, rescore=args.rescore)
+        decoder=model.decoder, joint=model.joint,
+        blank_id=0, bos_id=model.bos_id, beam_size=args.beam_size,
+        nbest=args.beam_size, algo=args.algo, umax_portion=args.umax_portion,
+        prefix_merge=True, lm_module=ext_lm, alpha=args.alpha, beta=args.beta,
+        state_beam=2.3, expand_beam=2.3, temperature=1.0,
+        word_prefix_tree=args.word_tree, rescore=args.rescore)
 
     local_writer = fmt.format(gpu)
     sp = spm.SentencePieceProcessor(model_file=args.spmodel)
@@ -195,7 +197,7 @@ def build_model(args, device) -> Tuple[torch.nn.Module, Union[torch.nn.Module, N
     model = utils.load_checkpoint(model, args.resume)
     model.eval()
 
-    if args.lm_weight == 0.0 or args.lm_config is None or args.lm_check is None:
+    if args.alpha == 0.0 or args.lm_config is None or args.lm_check is None:
         return model, None
     else:
         assert args.lm_check is not None
@@ -220,8 +222,10 @@ def DecoderParser():
                         help="Config of external LM.")
     parser.add_argument("--lm-check", type=str, default=None,
                         help="Checkpoint of external LM.")
-    parser.add_argument("--lm-weight", type=float, default=0.0,
+    parser.add_argument("--alpha", type=float, default=0.0,
                         help="Weight of external LM.")
+    parser.add_argument("--beta", type=float, default=0.0,
+                        help="Penalty value of external LM.")
 
     parser.add_argument("--input_scp", type=str, default=None)
     parser.add_argument("--output_prefix", type=str, default='./decode')

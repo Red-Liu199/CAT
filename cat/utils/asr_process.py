@@ -673,9 +673,14 @@ if __name__ == "__main__":
             print(fmt.format(
                 f"set 'nj' to {decode_settings['nj']}"))
         if hyper_settings['topo'] == 'rnnt' and \
-                'lm-weight' in decode_settings and decode_settings['lm-weight'] > 0.0:
+                'alpha' in decode_settings and decode_settings['alpha'] > 0.0:
             assert 'lmdir' in inference_settings, fmt.format(
-                "'lm-weight' > 0 in hyper-p['inference']['decode'] should be used with 'lmdir' in hyper-p['inference']")
+                "'alpha' > 0 in hyper-p['inference']['decode'] should be used with 'lmdir' in hyper-p['inference']")
+
+            if 'beta' in decode_settings:
+                beta_suffix = f"-{decode_settings['beta']}"
+            else:
+                beta_suffix = ''
             lmdir = inference_settings['lmdir']
             checkExist('d', lmdir)
             if 'lm-config' not in decode_settings:
@@ -692,9 +697,9 @@ if __name__ == "__main__":
                 # skip checking for n-gram model
                 # checkExist('f', decode_settings['lm-check'])
             if 'rescore' in decode_settings and decode_settings['rescore']:
-                suffix_lm = f"lm-rescore-{decode_settings['lm-weight']}"
+                suffix_lm = f"lm-rescore-{decode_settings['alpha']}{beta_suffix}"
             else:
-                suffix_lm = f"lm-fusion-{decode_settings['lm-weight']}"
+                suffix_lm = f"lm-fusion-{decode_settings['alpha']}{beta_suffix}"
         elif hyper_settings['topo'] == 'ctc' and \
                 'lm-path' in decode_settings:
             checkExist('f', decode_settings['lm-path'])

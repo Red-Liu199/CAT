@@ -11,6 +11,8 @@ Author: Huahuan Zhengh (maxwellzh@outlook.com)
 
 from .joint import AbsJointNet
 from ..shared.decoder import AbsDecoder, AbsStates
+from ..shared.data import sortedPadCollateLM
+from ..shared import coreutils as utils
 
 import os
 import yaml
@@ -290,8 +292,8 @@ class TransducerBeamSearcher():
         umax_portion: float = 0.35,  # for alsd, librispeech
         prefix_merge: bool = True,
         lm_module: Optional[AbsDecoder] = None,
-        lm_weight: float = 0.0,
-        lm_beta: float = 0.6,
+        alpha: float = 0.0,
+        beta: float = 0.6,
         state_beam: float = 2.3,
         expand_beam: float = 2.3,
         temperature: float = 1.0,
@@ -307,19 +309,19 @@ class TransducerBeamSearcher():
         self.beam_size = beam_size
         self.nbest = min(nbest, beam_size)
         self.lm = lm_module
-        self.lm_weight = lm_weight
+        self.alpha_ = alpha
 
-        if lm_module is None and lm_weight > 0.0:
+        if lm_module is None and alpha > 0.0:
             raise ValueError("Language model is not provided.")
 
         self.is_latency_control = False
         self.is_prefix = prefix_merge
-        self.rescore = rescore and self.lm_weight > 0.0
-        self.beta = lm_beta
+        self.rescore = rescore and self.alpha_ > 0.0
+        self.beta_ = beta
         if self.rescore:
             # disable fusion
-            self.lm_weight = 0.0
-            self.rescore_weight = lm_weight
+            self.alpha_ = 0.0
+            self.rescore_weight = alpha
         if algo == 'default':
             self.searcher = self.default_beam_search
         elif algo == 'lc':
@@ -349,13 +351,36 @@ class TransducerBeamSearcher():
 
         hyps = self.searcher(tn_output)     # type:List[Hypothesis]
 
-        pred_list, score_list = ([hypo.pred[1:] for hypo in hyps], [
-                                 hypo.score for hypo in hyps])
-
         if self.rescore:
-            raise NotImplementedError
-        else:
-            return pred_list, score_list
+            rescored_index = self.call_rescore(hyps)
+            hyps = [hyps[i] for i in rescored_index]
+
+        pred_list, score_list = ([hypo.pred[1:] for hypo in hyps], [
+            hypo.score for hypo in hyps])
+        return pred_list, score_list
+
+    def call_rescore(self, decoded_hypos: List[Hypothesis]):
+        """Do rescoring with LM"""
+        assert self.rescore and self.rescore_weight > 0.0, \
+            f"Expect enable rescore=True and alpha > 0.0, instead rescore={self.rescore} alpha={self.rescore_weight}"
+
+        # [B, U]
+        dummy_tensor = decoded_hypos[0].pred.new_empty(1)
+        lens_in = dummy_tensor.new_tensor(
+            [len(hypo) for hypo in decoded_hypos])
+        in_seqs = utils.pad_list([hypo.pred for hypo in decoded_hypos], 0)
+
+        # suppose </s> = <s>
+        dummy_targets = torch.roll(in_seqs, -1, dims=1)
+        log_lm_probs = self.lm.score(in_seqs, dummy_targets, lens_in)
+        log_model_probs = collect_scores(
+            decoded_hypos, dummy_tensor=dummy_tensor)
+
+        composed_score = log_model_probs + self.rescore_weight * \
+            log_lm_probs + self.beta_ * lens_in
+
+        rescored_index = torch.argsort(composed_score, descending=True)
+        return rescored_index
 
     def raw_decode(self, tn_output: torch.Tensor) -> List[Hypothesis]:
         return self.searcher(tn_output)     # type:List[Hypothesis]
@@ -376,7 +401,7 @@ class TransducerBeamSearcher():
             Output from transcription network with shape
             [1, time_len, hiddens].
         """
-        use_lm = self.lm_weight > 0.0
+        use_lm = self.alpha_ > 0.0
         # min between beam and max_target_lent
         tn_i = tn_output[0]
         dummy_tensor = torch.empty(
@@ -465,8 +490,8 @@ class TransducerBeamSearcher():
                         topk_hyp.cache["pn_state"] = hidden
                         if use_lm:
                             topk_hyp.cache["lm_state"] = hidden_lm
-                            topk_hyp.lm_score = self.lm_weight * \
-                                log_probs_lm.view(-1)[tok] + self.beta
+                            topk_hyp.lm_score = self.alpha_ * \
+                                log_probs_lm.view(-1)[tok] + self.beta_
                         process_hyps.append(topk_hyp)
 
         del prefix_cache
@@ -485,7 +510,7 @@ class TransducerBeamSearcher():
         tn_output: [1, T, D]
         """
 
-        use_lm = self.lm_weight > 0.0
+        use_lm = self.alpha_ > 0.0
         use_wpt = self.word_prefix_tree is not None
 
         tn_out = tn_out[0]
@@ -584,8 +609,8 @@ class TransducerBeamSearcher():
 
             if use_lm:
                 lm_out = torch.cat(group_lm_out, dim=0)
-                lm_score = self.lm_weight * \
-                    lm_out.squeeze(1) + self.beta
+                lm_score = self.alpha_ * \
+                    lm_out.squeeze(1) + self.beta_
                 # [B, V]
                 fused_prob = log_prob + lm_score
             else:
@@ -657,7 +682,7 @@ class TransducerBeamSearcher():
         tn_output: [N, T, D]
         """
 
-        use_lm = self.lm_weight > 0.0
+        use_lm = self.alpha_ > 0.0
 
         dummy_tensor = tn_out.new_empty(1, dtype=torch.long)
         N = tn_out.size(0)
@@ -767,8 +792,8 @@ class TransducerBeamSearcher():
 
             if use_lm:
                 lm_out = torch.cat(group_lm_out, dim=0)
-                lm_score = self.lm_weight * \
-                    lm_out.squeeze(1) + self.beta
+                lm_score = self.alpha_ * \
+                    lm_out.squeeze(1) + self.beta_
                 # [B, V]
                 fused_prob = log_prob + lm_score
             else:
@@ -825,7 +850,7 @@ class TransducerBeamSearcher():
 
         tn_output: [1, T, D]        
         """
-        use_lm = self.lm_weight > 0.0
+        use_lm = self.alpha_ > 0.0
 
         dummy_tensor = tn_out.new_empty(1, dtype=torch.long)
         B = [Hypothesis(
@@ -890,8 +915,8 @@ class TransducerBeamSearcher():
 
             if use_lm:
                 lm_out = torch.cat(group_lm_out, dim=0)
-                lm_score = self.lm_weight * \
-                    lm_out.squeeze(1) + self.beta
+                lm_score = self.alpha_ * \
+                    lm_out.squeeze(1) + self.beta_
                 # [B, V]
                 combine_score = log_prob + lm_score
                 combine_score[:, self.blank_id] = log_prob[:, self.blank_id]
