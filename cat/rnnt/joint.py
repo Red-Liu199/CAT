@@ -101,11 +101,16 @@ class DenormalJointNet(AbsJointNet):
     """De-normalized joint network
 
     Take prediction network as a LM.
-    return logP_pn(Y) * logit_tn (X, Y) w/o softmax
+    return log P_pn(Y) * logit_tn (X, Y) w/o softmax
     """
 
-    def __init__(self, normalizd_tn: bool = True, local_normalize: bool = False) -> None:
+    def __init__(self, normalized_pn: bool = True, normalizd_tn: bool = True, local_normalize: bool = False) -> None:
         super().__init__()
+        if normalized_pn:
+            self._pn_normalize = nn.LogSoftmax(dim=-1)
+        else:
+            self._pn_normalize = nn.Identity()
+
         if normalizd_tn:
             self._tn_normalize = nn.LogSoftmax(dim=-1)
         else:
@@ -129,7 +134,7 @@ class DenormalJointNet(AbsJointNet):
         if isinstance(tn_out, PackedSequence):
             assert pn_out.data.size(-1) == tn_out.data.size(-1), \
                 f"pn and tn output should be of the same size at last dimension, instead of {pn_out.data.size(-1)} != {tn_out.data.size(-1)}"
-            pn_out.set(pn_out.data.log_softmax(dim=-1))
+            pn_out.set(self._pn_normalize(pn_out.data))
             tn_out.set(self._tn_normalize(tn_out.data))
             if pn_out.data.requires_grad:
                 # [Su, V-1]
@@ -143,7 +148,7 @@ class DenormalJointNet(AbsJointNet):
             assert pn_out.size(-1) == tn_out.size(-1), \
                 f"pn and tn output should be of the same size at last dimension, instead of {pn_out.size(-1)} != {tn_out.size(-1)}"
 
-            pn_out = pn_out.log_softmax(dim=-1)
+            pn_out = self._pn_normalize(pn_out)
             tn_out = self._tn_normalize(tn_out)
             if tn_out.dim() == 1 and pn_out.dim() == 1:
                 pn_out[0] = 0.0

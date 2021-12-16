@@ -71,15 +71,15 @@ class AbsDecoder(nn.Module):
         return score
 
     @staticmethod
-    def batching_states(*args, **kwargs):
+    def batching_states(*args, **kwargs) -> 'AbsStates':
         raise NotImplementedError
 
     @staticmethod
-    def get_state_from_batch(*args, **kwargs):
+    def get_state_from_batch(*args, **kwargs) -> Union['AbsStates', List['AbsStates']]:
         """Get state of given index (or index list) from the batched states"""
         raise NotImplementedError
 
-    def init_states(self, N: int = 1):
+    def init_states(self, N: int = 1) -> 'AbsStates':
         """The tensor representation of 'None' state of given batch size N"""
         raise NotImplementedError
 
@@ -431,6 +431,35 @@ class NGram(AbsDecoder):
 
     def init_states(self, N: int = 1):
         return AbsStates(None, self)
+
+
+class ZeroDecoder(AbsDecoder):
+    def __init__(self, hdim:int, *args, **kwargs) -> None:
+        super().__init__(num_classes=1, n_emb=1, with_head=False)
+        del self.embedding
+        del self.classifier
+        self._dummy_hdim = hdim
+
+    def forward(self, x: torch.Tensor, *args):
+        return torch.zeros_like(x).unsqueeze_(2).repeat(1, 1, self._dummy_hdim), None
+
+    def score(self, *args):
+        raise NotImplementedError
+
+    @staticmethod
+    def batching_states(*args, **kwargs) -> 'AbsStates':
+        return AbsStates(None, ZeroDecoder)
+
+    @staticmethod
+    def get_state_from_batch(raw_batched_states, index: Union[int, List[int]]) -> Union[AbsStates, List[AbsStates]]:
+
+        if isinstance(index, int):
+            return AbsStates(None, ZeroDecoder)
+        else:
+            return [AbsStates(None, ZeroDecoder) for i in index]
+
+    def init_states(self, N: int = 1) -> 'AbsStates':
+        return AbsStates(None, ZeroDecoder)
 
 
 def init_state(model: kenlm.Model, pre_toks: List[str]):

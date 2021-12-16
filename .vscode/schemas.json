@@ -467,7 +467,8 @@
                         "CausalTransformer",
                         "LSTMPredictNet",
                         "NGram",
-                        "PlainPN"
+                        "PlainPN",
+                        "ZeroDecoder"
                     ]
                 },
                 "freeze": {
@@ -678,6 +679,27 @@
                             }
                         }
                     }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "type": {
+                                "const": "ZeroDecoder"
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "kwargs": {
+                                "type": "object",
+                                "properties": {
+                                    "hdim": {
+                                        "type": "number"
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             ]
         },
@@ -780,6 +802,10 @@
                                         "default": false
                                     },
                                     "normalizd_tn": {
+                                        "type": "boolean",
+                                        "default": true
+                                    },
+                                    "normalized_pn": {
                                         "type": "boolean",
                                         "default": true
                                     }
