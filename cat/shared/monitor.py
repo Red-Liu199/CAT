@@ -206,14 +206,27 @@ def draw_time(ax: plt.Axes, summary: BaseSummary, n_epoch: int = -1, prop_box=Tr
     d_time = np.asarray(summary.data['time'])
     d_time -= d_time[0]
     d_time /= 3600.0
-    ax.plot(d_time)
 
     if n_epoch == -1:
+        ax.plot(d_time)
         n_iter = d_time.shape[0]
         fmt = 'iter'
+        ylabel = 'Total time (h)'
+        ax.ticklabel_format(axis="x", style="sci",
+                            scilimits=(0, 0), useMathText=True)
     else:
+        epoch_time = []
+        step_per_epoch = d_time.shape[0]//n_epoch
+        for i in range(n_epoch):
+            epoch_time.append(
+                d_time[(i+1)*step_per_epoch-1] - d_time[i*step_per_epoch])
+
+        ax.plot([1+x for x in range(n_epoch)], epoch_time, '.', markersize=2)
+        # plot a dummy marker to set ylim to 0.0
+        ax.scatter(1, 0, alpha=0.0)
         n_iter = n_epoch
         fmt = 'epoch'
+        ylabel = 'Time (h / epoch)'
 
     if prop_box:
         props = dict(boxstyle='round', facecolor='wheat', alpha=0.8)
@@ -227,13 +240,11 @@ def draw_time(ax: plt.Axes, summary: BaseSummary, n_epoch: int = -1, prop_box=Tr
                 timestr = "{:.1f} min/{}".format(speed, fmt)
         else:
             timestr = "{:.2f} h/{}".format(speed, fmt)
-        ax.text(0.05, 0.95, timestr, transform=ax.transAxes,
-                fontsize=8, verticalalignment='top', bbox=props)
+        ax.text(0.95, 0.05, timestr, transform=ax.transAxes,
+                fontsize=8, verticalalignment='bottom', horizontalalignment='right', bbox=props)
 
-    ax.ticklabel_format(axis="x", style="sci",
-                        scilimits=(0, 0), useMathText=True)
     ax.grid(ls='--')
-    ax.set_ylabel('Total time / h')
+    ax.set_ylabel(ylabel)
     return ax
 
 
@@ -394,9 +405,9 @@ def cmp(checks: List[str], legends: Union[List[str], None] = None, title: str = 
 
     for clog in checks:
         log_writer = MonitorWriter(clog)
-        draw_time(axes[0][0], log_writer['train:loss'],
+        draw_lr(axes[0][0], log_writer['train:lr'])
+        draw_time(axes[0][1], log_writer['train:loss'],
                   log_writer['eval:loss'].data['cnt'], prop_box=False)
-        draw_lr(axes[0][1], log_writer['train:lr'])
         draw_tr_loss(axes[1][0], log_writer['train:loss'])
         draw_dev_loss(axes[1][1], log_writer['eval:loss'], False)
 
@@ -409,7 +420,7 @@ def cmp(checks: List[str], legends: Union[List[str], None] = None, title: str = 
     if len(apd) % 2 != 0:
         axes[-1][-1].set_axis_off()
 
-    axes[0][1].legend(legends, fontsize=8)
+    axes[0][0].legend(legends, fontsize=8)
     plt.suptitle(title)
 
     legends = [x.replace(' ', '_') for x in legends]
