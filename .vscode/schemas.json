@@ -762,6 +762,7 @@
                     "examples": [
                         "AbsJointNet",
                         "DenormalJointNet",
+                        "HATNet",
                         "JointNet"
                     ]
                 }
@@ -808,6 +809,43 @@
                                     "normalized_pn": {
                                         "type": "boolean",
                                         "default": true
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "type": {
+                                "const": "HATNet"
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "kwargs": {
+                                "type": "object",
+                                "properties": {
+                                    "act": {
+                                        "default": "tanh"
+                                    },
+                                    "joint_mode": {
+                                        "default": "add"
+                                    },
+                                    "hdim": {
+                                        "type": "number",
+                                        "default": -1
+                                    },
+                                    "num_classes": {
+                                        "type": "number"
+                                    },
+                                    "odim_decoder": {
+                                        "type": "number"
+                                    },
+                                    "odim_encoder": {
+                                        "type": "number"
                                     }
                                 }
                             }

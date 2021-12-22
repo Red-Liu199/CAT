@@ -7,7 +7,8 @@ from asr_process import (
     combineText,
     updateNamespaceFromDict,
     NNTrain,
-    SentencePieceTrain
+    SentencePieceTrain,
+    mp_spawn
 )
 
 import os
@@ -84,7 +85,7 @@ if __name__ == "__main__":
         if 'spm' not in processing_settings:
             processing_settings['spm'] = spmodel
             print(fmt.format(f"set 'spm' to {spmodel}"))
-        
+
         if 'lang' in hyper_settings['data']:
             # check if it's chinese-like languages
             iszh = ('zh' == hyper_settings['data']['lang'].split('-')[0])
@@ -112,9 +113,8 @@ if __name__ == "__main__":
                 setting = processing_settings
 
             f_pkl = os.path.join(pkldir, part+'.pkl')
-            processingargs = updateNamespaceFromDict(
-                setting, TextProcessingParser(), [part_text, f_pkl])
-            ProcessingMain(processingargs)
+            mp_spawn(ProcessingMain, updateNamespaceFromDict(
+                setting, TextProcessingParser(), [part_text, f_pkl]))
 
     ############ Stage 3  NN training ############
     if s_beg <= 3 and s_end >= 3:

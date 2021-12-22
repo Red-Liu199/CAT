@@ -88,6 +88,13 @@ class AbsJointNet(nn.Module):
     def __init__(self) -> None:
         super().__init__()
 
+    @property
+    def is_normalize_separated(self) -> bool:
+        """ Tell if the log_softmax could be split from forward function,
+            useful for Transducer fused rnnt loss
+        """
+        return True
+
     def impl_forward(self, *args, **kwargs):
         raise NotImplementedError
 
@@ -117,6 +124,10 @@ class DenormalJointNet(AbsJointNet):
             self._tn_normalize = nn.Identity()
 
         self._local_normalized = local_normalize
+
+    @property
+    def is_normalize_separated(self) -> bool:
+        return self._local_normalized
 
     def impl_forward(self, tn_out: Union[torch.Tensor, PackedSequence], pn_out: Union[torch.Tensor, PackedSequence]) -> torch.FloatTensor:
         '''
@@ -267,6 +278,60 @@ class JointNet(AbsJointNet):
                 "Output of encoder and decoder being fed into jointnet should be of same type. Expect (Tensor, Tensor) or (PackedSequence, PackedSequence), instead ({}, {})".format(type(encoder_output), type(decoder_output)))
 
         return self.fc(expanded_out)
+
+
+class HATNet(JointNet):
+    """ "HYBRID AUTOREGRESSIVE TRANSDUCER (HAT)"
+
+    Suppose <blk>=0
+    """
+
+    def __init__(
+            self,
+            odim_encoder: int,
+            odim_decoder: int,
+            num_classes: int,
+            hdim: int = -1,
+            joint_mode: Literal['add', 'cat'] = 'add',
+            act: Literal['tanh', 'relu'] = 'tanh'):
+        super().__init__(odim_encoder, odim_decoder, num_classes,
+                         hdim=hdim, joint_mode=joint_mode, act=act)
+        self._dist_blank = nn.LogSigmoid()
+
+    @property
+    def is_normalize_separated(self) -> bool:
+        return False
+
+    def ilm_est(self, decoder_output: torch.Tensor):
+        """ILM score estimation"""
+        assert not self.training
+        if isinstance(decoder_output, PackedSequence):
+            decoder_output.set(self.fc_dec(decoder_output.data))
+            fc_out = decoder_output.data
+
+        elif isinstance(decoder_output, torch.Tensor):
+            fc_out = self.fc_dec(decoder_output)
+
+        # compute log softmax over real labels
+        fc_out = self.fc(fc_out)
+        # suppose blank=0
+        fc_out[..., 0] = float('-inf')
+        fc_out[..., 1:] = fc_out[..., 1:].log_softmax(dim=-1)
+        return fc_out
+
+    def forward(self, *args, **kwargs):
+        # [..., V]
+        logits = super().impl_forward(*args, **kwargs)
+        # [..., 1]
+        logit_blank = logits[..., 0:1]
+        log_prob_blank = self._dist_blank(logit_blank)
+        # FIXME: maybe we should cast it to float for numerical stablility
+        # sigmoid(x) = 1/(1+exp(-x)) ->
+        # 1-sigmoid(x) = 1/(1+exp(x)) = sigmoid(-x)
+        # [..., V-1]
+        log_prob_label = logits[..., 1:].log_softmax(
+            dim=-1) + self._dist_blank(-logit_blank)
+        return torch.cat([log_prob_blank, log_prob_label], dim=-1)
 
 
 __all__ = [PackedSequence, AbsJointNet, DenormalJointNet, JointNet]

@@ -70,24 +70,25 @@ class TransducerTrainer(nn.Module):
                  num_decoder_mask: int = -1,
                  bos_id: int = 0):
         super().__init__()
-        self.encoder = encoder
-        self.decoder = decoder
-        self.joint = jointnet
-        self._compact = compact
-        self.isrna = isrna
         if isrna:
             assert not compact and not fused, f"RNA Loss currently doesn't support compact and fused mode yet."
 
-        if isinstance(jointnet, DenormalJointNet) and fused:
-            if not jointnet._local_normalized:
-                raise RuntimeError(
-                    "TransducerTrainer: DenormalJointNet is conflict with fused=True")
+        if fused and not jointnet.is_normalize_separated:
+            raise RuntimeError(
+                f"TransducerTrainer: {jointnet.__class__.__name__} is conflict with fused=True")
+        if fused and not compact:
+            print(
+                "TransducerTrainer: setting fused=True and compact=False is conflict. Force compact=True")
+            compact = True
 
         self.isfused = fused
-        if self.isfused and not self._compact:
-            print(
-                "TransducerTrainer: setting isfused=True and compact=False is conflict. Force compact=True")
-            self._compact = True
+        self._compact = compact
+        self.isrna = isrna
+
+        self.encoder = encoder
+        self.decoder = decoder
+        self.joint = jointnet
+
         assert isinstance(time_reduction, int) and time_reduction >= 1
         if time_reduction == 1:
             self._t_reduction = None

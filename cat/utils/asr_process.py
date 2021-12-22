@@ -11,6 +11,19 @@ import uuid
 import pickle
 import argparse
 from typing import Union, Literal, List, Tuple, Optional, Callable
+from multiprocessing import Process
+
+
+def mp_spawn(target: Callable, args: Union[tuple, argparse.Namespace]):
+    """Spawn a new process to execute the target function with given args."""
+    if isinstance(args, argparse.Namespace):
+        args = (args, )
+    worker = Process(target=target, args=args)
+
+    worker.start()
+    worker.join()
+    if worker.exitcode is not None and worker.exitcode != 0:
+        raise RuntimeError("worker unexpectedly terminated.")
 
 
 def resolve_sp_path(config: dict, prefix: Optional[str] = None, allow_making: bool = False):
@@ -349,8 +362,7 @@ def NNTrain(
         print(promt.format(
             f"set 'dist-url' to {training_settings['dist-url']}"))
 
-    nnargs = updateNamespaceFromDict(training_settings, Parser)
-    MainFunc(nnargs)
+    mp_spawn(MainFunc, updateNamespaceFromDict(training_settings, Parser))
 
 
 def priorResolvePath(dataset: Union[str, List[str]], local_dir: str = 'data/text') -> Tuple[List[str], List[str]]:
@@ -533,8 +545,9 @@ if __name__ == "__main__":
             'spmodel': f_spm,
             'stripid': True,
             'output': os.path.join(d_pkl, 'wpt.pkl')}
-        WPTMain(updateNamespaceFromDict(wpt_settings, WordPrefixParser(), [
-                wpt_settings['intext'], wpt_settings['spmodel']]))
+
+        mp_spawn(WPTMain, updateNamespaceFromDict(wpt_settings, WordPrefixParser(), [
+            wpt_settings['intext'], wpt_settings['spmodel']]))
 
     ############ Stage 3  NN training ############
     if s_beg <= 3 and s_end >= 3:
@@ -799,9 +812,10 @@ if __name__ == "__main__":
             decode_settings['output_prefix'] = decode_out_prefix+f'_{_set}'
             decode_settings['input_scp'] = scp
             print(fmt.format(f"{scp} -> {decode_settings['output_prefix']}"))
-            decodeargs = updateNamespaceFromDict(
-                decode_settings, DecoderParser())
-            DecoderMain(decodeargs)
+
+            # FIXME: this canonot be spawned via mp_spawn, otherwise error would be raised
+            DecoderMain(updateNamespaceFromDict(
+                decode_settings, DecoderParser()))
             decode_settings['dist-url'] = f"tcp://localhost:{get_free_port()}"
 
         # compute wer/cer
@@ -835,13 +849,11 @@ if __name__ == "__main__":
                 wer_settings['oracle'] = False
                 # compute non-oracle WER/CER
                 print(_set, end='\t')
-                werargs = updateNamespaceFromDict(wer_settings, WERParser(), [
-                    wer_settings['gt'], wer_settings['hy']])
-                WERMain(werargs)
+                mp_spawn(WERMain, updateNamespaceFromDict(wer_settings, WERParser(), [
+                    wer_settings['gt'], wer_settings['hy']]))
                 wer_settings['oracle'] = True
                 wer_settings['hy'] += '.nbest'
 
             print(_set, end='\t')
-            werargs = updateNamespaceFromDict(wer_settings, WERParser(), [
-                                              wer_settings['gt'], wer_settings['hy']])
-            WERMain(werargs)
+            mp_spawn(WERMain, updateNamespaceFromDict(wer_settings, WERParser(), [
+                wer_settings['gt'], wer_settings['hy']]))
