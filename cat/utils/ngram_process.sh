@@ -7,7 +7,7 @@ opts=$(python utils/parseopt.py '{
             "type": "str",
             "help": "Path to the working directory."
         },
-        "outlm":{
+        "--outlm":{
             "type":"str",
             "default": "ngram.klm",
             "help": "Name of output N-gram file. Default: ngram.klm"
@@ -50,7 +50,7 @@ fi
 # train sentence piece tokenizer
 python utils/lm_process.py $dir --sta 1 --sto 1 || exit 1
 
-if [ $large_corpus=="True" ]; then
+if [ $large_corpus == "True" ]; then
     spmodel=$(cat $dir/hyper-p.json | python -c "import sys;import json;print(json.load(sys.stdin)['sp']['model_prefix'])").model
     f_text=$(cat $dir/hyper-p.json | python -c "import sys;import json;print(json.load(sys.stdin)['data']['train'])")
 

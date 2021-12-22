@@ -823,37 +823,41 @@ if __name__ == "__main__":
         from wer import main as WERMain
         assert 'er' in inference_settings, fmt.format(
             "missing 'er' in hyper-p['inference']")
-        error_rate_settings = inference_settings['er']
-        assert 'mode' in error_rate_settings, fmt.format(
+        err_settings = inference_settings['er']
+        assert 'mode' in err_settings, fmt.format(
             "missing 'mode' in hyper-p['inference']['er']")
 
         f_texts = expandPath('t', testsets, cwd)
         checkExist('f', f_texts)
 
-        if 'oracle' not in error_rate_settings:
-            error_rate_settings['oracle'] = True
+        if 'oracle' not in err_settings:
+            err_settings['oracle'] = True
             print(fmt.format(f"set 'oracle' to True"))
 
-        wer_settings = {
-            'stripid': True,
-            'cer': True if error_rate_settings['mode'] == 'cer' else False,
-            'oracle': error_rate_settings['oracle']
-        }
+        if 'stripif' not in err_settings:
+            err_settings['stripid'] = True
+            print(fmt.format(f"set 'stripid' to True"))
+
+        err_settings.update({
+            'cer': True if err_settings['mode'] == 'cer' else False
+        })
+        del err_settings['mode']
+
         for _set, _text in zip(testsets, f_texts):
-            wer_settings.update({
+            err_settings.update({
                 'gt': _text,
                 'hy': decode_out_prefix+f'_{_set}'
             })
 
-            if wer_settings['oracle']:
-                wer_settings['oracle'] = False
+            if err_settings['oracle']:
+                err_settings['oracle'] = False
                 # compute non-oracle WER/CER
                 print(_set, end='\t')
-                mp_spawn(WERMain, updateNamespaceFromDict(wer_settings, WERParser(), [
-                    wer_settings['gt'], wer_settings['hy']]))
-                wer_settings['oracle'] = True
-                wer_settings['hy'] += '.nbest'
+                mp_spawn(WERMain, updateNamespaceFromDict(err_settings, WERParser(), [
+                    err_settings['gt'], err_settings['hy']]))
+                err_settings['oracle'] = True
+                err_settings['hy'] += '.nbest'
 
             print(_set, end='\t')
-            mp_spawn(WERMain, updateNamespaceFromDict(wer_settings, WERParser(), [
-                wer_settings['gt'], wer_settings['hy']]))
+            mp_spawn(WERMain, updateNamespaceFromDict(err_settings, WERParser(), [
+                err_settings['gt'], err_settings['hy']]))

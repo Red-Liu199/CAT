@@ -30,10 +30,10 @@ if __name__ == "__main__":
             import os
             sys.path.append(os.getcwd())
         from cat.shared.data import CorpusDataset
-        libri = CorpusDataset(args.input)
+        corpus = CorpusDataset(args.input)
         try:
-            for i in range(len(libri)):
-                l = [str(x) if x != 1 else ' ' for x in libri[i].tolist()]
+            for i in range(len(corpus)):
+                l = [str(x) if x != 1 else ' ' for x in corpus[i][0].tolist()]
                 sys.stdout.write(' '.join(l)+'\n')
         except IOError:
             exit(0)
