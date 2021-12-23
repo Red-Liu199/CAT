@@ -12,15 +12,24 @@
             "type": "object",
             "properties": {
                 "train": {
-                    "type": "string",
+                    "type": [
+                        "string",
+                        "array"
+                    ],
                     "default": "train"
                 },
                 "dev": {
-                    "type": "string",
+                    "type": [
+                        "string",
+                        "array"
+                    ],
                     "default": "dev"
                 },
                 "test": {
-                    "type": "string",
+                    "type": [
+                        "string",
+                        "array"
+                    ],
                     "default": "test"
                 },
                 "filter": {
