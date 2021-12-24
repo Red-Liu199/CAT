@@ -5,6 +5,7 @@
 """basic functions impl"""
 
 import os
+import heapq
 import argparse
 import numpy as np
 from collections import OrderedDict
@@ -265,13 +266,50 @@ def convert_syncBatchNorm(model: nn.Module) -> nn.Module:
     """
     return nn.SyncBatchNorm.convert_sync_batchnorm(model)
 
+# modified from
+# https://stackoverflow.com/a/63393016
 
-def group_by_lens(src_l: List[Any], linfo: List[int], N: int, _norm: Union[None, str] = None, consider_padding: bool = False) -> List[List[Any]]:
+
+def divide_almost_equally(arr_l, arr_idx, num_chunks):
+    sorted_arr = list(zip(arr_l, arr_idx))
+
+    heap = [(0, idx) for idx in range(num_chunks)]
+    heapq.heapify(heap)
+    groups = {i: [] for i in range(num_chunks)}
+
+    for arr_idx in range(len(arr_l)):
+        g_sum, g_idx = heapq.heappop(heap)
+        groups[g_idx].append(sorted_arr[arr_idx][1])
+        g_sum += sorted_arr[arr_idx][0]
+        heapq.heappush(heap, (g_sum, g_idx))
+
+    return groups.values()
+
+
+def group_by_lens(src_l: List[Any], linfo: List[int], N: int, _norm: Union[None, str] = None, consider_padding: bool = True) -> List[List[Any]]:
     """Split `src_l` by `linfo` into `N` parts.
     The split is done by a kind of greedy method, considering
     balancing the sum of lengths in each part and their paddings.
     Assume src_l is sorted by descending order.
     """
+
+    len_src = len(linfo)
+    assert len_src >= N, f"list to be split is shorter than number of groups: {len_src} < {N}"
+    assert len_src == len(src_l)
+
+    if N == 1:
+        return [src_l]
+    if N == len_src:
+        return [[x] for x in src_l]
+
+    if _norm is not None:
+        # such as 'L**1.5'
+        def norm_func(L): return eval(_norm)   # type: Callable[[int], float]
+        linfo = [norm_func(x) for x in linfo]
+
+    if not consider_padding:
+        return list(divide_almost_equally(linfo, src_l, N))
+
     def get_largest(_linfo, _K: int) -> List[int]:
         _len_linfo = len(_linfo)
         assert _len_linfo >= _K
@@ -306,20 +344,6 @@ def group_by_lens(src_l: List[Any], linfo: List[int], N: int, _norm: Union[None,
             if cnt_interval > _avg or cnt_piece > max_piece:
                 return [lower_bound, _len_linfo]
             lower_bound -= 1
-
-    len_src = len(linfo)
-    assert len_src >= N, f"list to be split is shorter than number of groups: {len_src} < {N}"
-    assert len_src == len(src_l)
-
-    if N == 1:
-        return [src_l]
-    if N == len_src:
-        return [[x] for x in src_l]
-
-    if _norm is not None:
-        # such as 'L**1.5'
-        def norm_func(L): return eval(_norm)   # type: Callable[[int], float]
-        linfo = [norm_func(x) for x in linfo]
 
     # greedy not optimal
     g_avg = sum(linfo) / N

@@ -78,7 +78,7 @@ class Hypothesis():
 
     def add_token(self, tok: torch.LongTensor):
         self.pred = torch.cat([self.pred, tok.view(1)])
-        self._res_word.append(tok)
+        self._res_word.append(tok.item())
 
     def __len__(self) -> int:
         return len(self.pred)

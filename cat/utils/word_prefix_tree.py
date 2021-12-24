@@ -9,14 +9,14 @@ import sys
 import os
 from typing import List, Tuple
 
-try:
-    import cat
-except ModuleNotFoundError:
-    sys.path.append(os.getcwd())
-from cat.rnnt.beam_search_transducer import PrefixTree
-
 
 def main(args: argparse.Namespace = None):
+    try:
+        import cat
+    except ModuleNotFoundError:
+        sys.path.append(os.getcwd())
+    from cat.rnnt.beam_search_transducer import PrefixTree
+
     f_raw_text = args.intext
     f_spmodel = args.spmodel
 
