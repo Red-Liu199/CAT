@@ -128,6 +128,9 @@ def main(args: argparse.Namespace):
     # Pre-processing
     processor = Processor()
 
+    # replace '\t' to space
+    processor.append(lambda s: s.replace('\t', ' '))
+
     # rm consecutive spaces
     pattern = re.compile(r' {2,}')
     processor.append(lambda s: pattern.sub(' ', s))
@@ -151,7 +154,7 @@ def main(args: argparse.Namespace):
             l_hy[i] = (key, seqs)
 
         for i, s in enumerate(l_gt):
-            sl = s.split(' ')
+            sl = s.split()
             key, g_s = sl[0], ' '.join(sl[1:])
             l_gt[i] = (key, processor(g_s))
 

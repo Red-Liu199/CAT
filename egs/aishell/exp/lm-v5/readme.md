@@ -1,7 +1,7 @@
 # n-gram LM
 
 - 5-gram
-- aishell corpus, ~20M lines 
+- aishell transcript
 - no truncate in text processing
 
 ## Result

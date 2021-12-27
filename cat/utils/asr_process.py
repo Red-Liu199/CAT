@@ -664,6 +664,12 @@ if __name__ == "__main__":
                     else:
                         raise RuntimeError(e)
 
+            with open(f_hyper_settings, 'r') as fi:
+                _hyper = json.load(fi)
+            _hyper['inference']['decode']['resume'] = checkpoint
+            with open(f_hyper_settings, 'w') as fo:
+                json.dump(_hyper, fo, indent=4)
+
         checkExist('f', checkpoint)
         decode_settings['resume'] = checkpoint
         print(fmt.format(
