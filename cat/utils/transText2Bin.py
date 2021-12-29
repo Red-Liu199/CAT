@@ -148,7 +148,7 @@ def main(args: argparse.Namespace):
 
     with open(args.output, 'wb') as fo:
         # save the file name of binary file
-        pickle.dump(randbin, fo)
+        pickle.dump(os.path.abspath(randbin), fo)
         # save the location information
         pickle.dump(_seeks, fo)
 

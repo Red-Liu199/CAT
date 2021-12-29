@@ -81,3 +81,6 @@ else
         lmplz -o $order -S 80% --discount_fallback |
         build_binary /dev/stdin $outlm"
 fi
+
+# test
+python utils/ppl_compute_ngram.py $dir
