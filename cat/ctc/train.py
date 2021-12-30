@@ -16,11 +16,12 @@ from ..shared.data import SpeechDatasetPickle, sortedPadCollate
 import os
 import argparse
 from collections import OrderedDict
-from typing import Union
+from typing import Union, Optional
 
 import torch
 import torch.nn as nn
 import torch.distributed as dist
+from torch.cuda.amp import autocast
 
 
 def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
@@ -41,26 +42,56 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
 
 
 class AMTrainer(nn.Module):
-    def __init__(self, am: model_zoo.AbsEncoder):
+    def __init__(self,
+                 am: model_zoo.AbsEncoder,
+                 use_crf: bool = False,
+                 lamb: Optional[float] = 0.01, **kwargs):
         super().__init__()
 
         self.am = am
-        self.criterion = nn.CTCLoss(reduction='none')
+        self.is_crf = use_crf
+        if use_crf:
+            from ctc_crf import CTC_CRF_LOSS as CRFLoss
+
+            self._crf_ctx = None
+            self.criterion = CRFLoss(lamb=lamb)
+        else:
+            self.criterion = nn.CTCLoss(reduction='none')
+
+    def register_crf_ctx(self, den_lm: Optional[str] = None):
+        """Register the CRF context on model device."""
+        assert self.is_crf
+
+        from ctc_crf import CRFContext
+        self._crf_ctx = CRFContext(den_lm, next(
+            iter(self.am.parameters())).device.index)
 
     def forward(self, logits, labels, input_lengths, label_lengths):
 
         netout, lens_o = self.am(logits, input_lengths)
-        lens_o = lens_o.to(torch.long)
         netout = torch.log_softmax(netout, dim=-1)
 
-        # [N, T, C] -> [T, N, C]
-        netout = netout.transpose(0, 1)
-        loss = self.criterion(netout, labels, lens_o, label_lengths)
+        if self.is_crf:
+            assert self._crf_ctx is not None
+            labels = labels.cpu()
+            lens_o = lens_o.cpu()
+            label_lengths = label_lengths.cpu()
+            with autocast(enabled=False):
+                loss = self.criterion(
+                    netout, labels, lens_o.to(torch.int), label_lengths)
+        else:
+            # [N, T, C] -> [T, N, C]
+            netout = netout.transpose(0, 1)
+            lens_o = lens_o.to(torch.long)
+            loss = self.criterion(netout, labels, lens_o, label_lengths)
 
         return loss.mean()
 
 
 def build_model(args: argparse.Namespace, configuration: dict, dist: bool = True, wrapper: bool = True) -> Union[model_zoo.AbsEncoder, AMTrainer]:
+
+    if 'ctc-trainer' not in configuration:
+        configuration['ctc-trainer'] = {}
 
     assert 'encoder' in configuration
     netconfigs = configuration['encoder']
@@ -71,11 +102,14 @@ def build_model(args: argparse.Namespace, configuration: dict, dist: bool = True
     if not wrapper:
         return am_model
 
-    model = AMTrainer(am_model)
+    model = AMTrainer(am_model, **configuration['ctc-trainer'])
     if not dist:
         return model
 
     model.cuda(args.gpu)
+    if configuration['ctc-trainer']['use_crf']:
+        assert 'den-lm' in configuration['ctc-trainer']
+        model.register_crf_ctx(configuration['ctc-trainer']['den-lm'])
     model = torch.nn.parallel.DistributedDataParallel(
         model, device_ids=[args.gpu])
     return model
