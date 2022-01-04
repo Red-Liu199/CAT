@@ -107,7 +107,7 @@ def build_model(args: argparse.Namespace, configuration: dict, dist: bool = True
         return model
 
     model.cuda(args.gpu)
-    if configuration['ctc-trainer']['use_crf']:
+    if 'use_crf' in configuration['ctc-trainer'] and configuration['ctc-trainer']['use_crf']:
         assert 'den-lm' in configuration['ctc-trainer']
         model.register_crf_ctx(configuration['ctc-trainer']['den-lm'])
     model = torch.nn.parallel.DistributedDataParallel(
