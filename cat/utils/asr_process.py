@@ -303,27 +303,30 @@ def NNTrain(
         promt: str = '{}'):
     import subprocess
 
-    assert 'sp' in settings, promt.format(f"missing 'sp' in hyper-p")
     assert 'train' in settings, promt.format("missing 'train' in hyper-p")
-
-    _, (_, spvocab) = resolve_sp_path(settings['sp'])
-    checkExist('f', spvocab)
-    f_nnconfig = os.path.join(args.expdir, 'config.json')
-    checkExist('f', f_nnconfig)
 
     if args.ngpu > -1:
         os.environ['CUDA_VISIBLE_DEVICES'] = \
             generate_visible_gpus(args.ngpu)
 
-    with open(f_nnconfig, 'r') as fi:
-        nnconfig = json.load(fi)
-    # setup the num_classes to vocab_size
-    with open(spvocab, 'r') as fi:
-        n_vocab = sum(1 for _ in fi)
-    # recursively search for 'num_classes'
-    recursive_rpl(nnconfig, 'num_classes', n_vocab)
-    with open(f_nnconfig, 'w') as fo:
-        json.dump(nnconfig, fo, indent=4)
+    if 'sp' not in settings:
+        print("WARNING:",
+              promt.format("'sp' not in hyper-setting"))
+    else:
+        _, (_, spvocab) = resolve_sp_path(settings['sp'])
+        checkExist('f', spvocab)
+        f_nnconfig = os.path.join(args.expdir, 'config.json')
+        checkExist('f', f_nnconfig)
+
+        with open(f_nnconfig, 'r') as fi:
+            nnconfig = json.load(fi)
+        # setup the num_classes to vocab_size
+        with open(spvocab, 'r') as fi:
+            n_vocab = sum(1 for _ in fi)
+        # recursively search for 'num_classes'
+        recursive_rpl(nnconfig, 'num_classes', n_vocab)
+        with open(f_nnconfig, 'w') as fo:
+            json.dump(nnconfig, fo, indent=4)
 
     if subprocess.run('command -v git', shell=True, capture_output=True).returncode != 0:
         print(promt.format("git command not found. Suppress saving git commit."))
