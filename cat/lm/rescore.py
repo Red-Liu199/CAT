@@ -11,7 +11,10 @@ Rescore N-best list
 
 from ..shared import coreutils as utils
 from . import lm_builder
-from ..shared.decoder import AbsDecoder
+from ..shared.decoder import (
+    AbsDecoder,
+    NGram
+)
 from ..shared.data import (
     NbestListDataset,
     NbestListCollate
@@ -24,7 +27,6 @@ import uuid
 import argparse
 import sentencepiece as sp
 from tqdm import tqdm
-from typing import Optional
 
 
 from torch.cuda.amp import autocast
@@ -34,24 +36,16 @@ import torch.multiprocessing as mp
 import torch
 
 
-class ModelConfig:
-    def __init__(self, f_config: Optional[str] = None, f_check: Optional[str] = None) -> None:
-        if f_config is not None:
-            assert os.path.isfile(f_config)
-        self.f_config = f_config
-        if f_check is not None:
-            assert os.path.isfile(f_check)
-        self.f_check = f_check
-
-
 def main(args):
-    assert os.path.isfile(args.nbestlist), f"File not found: {args.nbestlist}"
-    assert args.lamb >= 0.0, f"Consider using --ILM instead of negative --lamb={args.lamb}"
+    assert os.path.isfile(
+        args.nbestlist), f"N-best list file not found: {args.nbestlist}"
     assert args.spmodel is not None, "You need to specify --spmodel."
-    assert os.path.isfile(args.spmodel), f"File not found: {args.spmodel}"
+    assert os.path.isfile(
+        args.spmodel), f"SentencePiece model not found: {args.spmodel}"
 
     if not torch.cuda.is_available() or args.cpu:
-        print("> Using CPU")
+        if args.verbose:
+            print("> Using CPU")
         args.cpu = True
 
     if args.cpu:
@@ -71,11 +65,12 @@ def main(args):
     try:
         mp.set_start_method('spawn')
     except RuntimeError as re:
-        print(re)
-    q = mp.Queue(maxsize=world_size*2)
+        if args.verbose:
+            print(re)
+    q = mp.Queue(maxsize=world_size)
 
     if args.cpu:
-        model = build_lm(ModelConfig(args.lm_config, args.lm_check), 'cpu')
+        model = build_lm(args.config, args.resume, 'cpu')
         model.share_memory()
         mp.spawn(main_worker, nprocs=world_size+1,
                  args=(args, q, fmt, model))
@@ -96,12 +91,13 @@ def dataserver(args, q: mp.Queue):
     testset = NbestListDataset(args.nbestlist)
     tokenizer = sp.SentencePieceProcessor(model_file=args.spmodel)
     testloader = DataLoader(
-        testset, batch_size=1, shuffle=False,
-        num_workers=args.world_size//8,
+        testset, batch_size=(16 if args.cpu else 128),
+        shuffle=False,
+        num_workers=(args.world_size//8 if args.cpu else args.world_size),
         collate_fn=NbestListCollate(tokenizer))
 
     t_beg = time.time()
-    for batch in tqdm(testloader, total=len(testloader)):
+    for batch in tqdm(testloader, total=len(testloader), disable=(not args.verbose)):
         for k in batch:
             if isinstance(k, torch.Tensor):
                 k.share_memory_()
@@ -110,7 +106,8 @@ def dataserver(args, q: mp.Queue):
     for i in range(args.world_size*2):
         q.put(None, block=True)
     t_end = time.time()
-    print("\nTime of searching: {:.2f}s".format(t_end-t_beg))
+    if args.verbose:
+        print("\nTime of rescoring: {:.2f}s".format(t_end-t_beg))
     time.sleep(2)
 
 
@@ -135,7 +132,7 @@ def main_worker(pid: int, args: argparse.Namespace, q: mp.Queue, fmt: str = "res
             world_size=world_size, rank=args.rank)
 
     if model is None:
-        model = build_lm(ModelConfig(args.lm_config, args.lm_check), device)
+        model = build_lm(args.config, args.resume, device)
 
     writer = fmt.format(pid)
     # rescoring
@@ -144,68 +141,66 @@ def main_worker(pid: int, args: argparse.Namespace, q: mp.Queue, fmt: str = "res
             batch = q.get(block=True)
             if batch is None:
                 break
-            keys, texts, scores, input, mask = batch
-            input, mask = input.to(device), mask.to(device)
+            keys, texts, scores, in_toks, mask = batch
+            in_toks = in_toks.to(device)
 
-            logits, _ = model(input)
-            log_p = logits.log_softmax(dim=-1)
-            ll = log_p.gather(dim=-1, index=input.unsqueeze(-1)
-                              ).squeeze(-1)    # type:torch.Tensor
-            ll = ll.masked_fill_(mask, float(0.0))
-            log_p_lm = args.lamb * ll.sum(dim=-1)
+            # suppose </s> = <s>
+            dummy_targets = torch.roll(in_toks, -1, dims=1)
+            in_lens = in_toks.size(1) - mask.sum(dim=1)
+            log_lm_probs = model.score(in_toks, dummy_targets, in_lens)
 
-            # length norm
-            l_y = input.size(1) - mask.sum(dim=-1)
-            log_p_lm += 0.6 * l_y
-
-            rescored_list = {}
-            for k, t, ac_score, lm_score in zip(keys, texts, scores, log_p_lm.cpu()):
-                new_score = ac_score + lm_score
-                if k not in rescored_list:
-                    rescored_list[k] = (new_score, t)
-                else:
-                    if new_score > rescored_list[k][0]:
-                        rescored_list[k] = (new_score, t)
-
-            for key, (score, seq) in rescored_list.items():
-                fo.write(f"{key} {seq}\n")
+            final_score = scores + args.alpha * log_lm_probs.cpu() + args.beta * in_lens
+            indiv = {}
+            for k, t, s in zip(keys, texts, final_score):
+                if k not in indiv:
+                    indiv[k] = (s, t)
+                elif indiv[k][0] < s:
+                    indiv[k] = (s, t)
+            for k, (s, t) in indiv.items():
+                fo.write(f"{k} {t}\n")
             del batch
 
     q.get()
 
 
-def build_lm(model_config: ModelConfig, device='cuda') -> AbsDecoder:
+def build_lm(f_config: str, f_check: str, device='cuda') -> AbsDecoder:
     if isinstance(device, int):
         device = f'cuda:{device}'
 
-    assert isinstance(model_config, ModelConfig)
-    with open(model_config.f_config, 'r') as fi:
+    with open(f_config, 'r') as fi:
         configures = json.load(fi)
     model = lm_builder(None, configures, dist=False)
-    model = utils.load_checkpoint(model.to(device), model_config.f_check)
+    if not isinstance(model.lm, NGram):
+        model = utils.load_checkpoint(model.to(device), f_check)
     model = model.lm
     model.eval()
     return model
 
 
-if __name__ == "__main__":
-    parser = utils.BasicDDPParser(istraining=False)
+def RescoreParser():
+    parser = utils.BasicDDPParser(
+        istraining=False, prog="Rescore with give n-best list and LM")
 
     parser.add_argument("nbestlist", type=str,
                         help="Path to N-best list files.")
     parser.add_argument("output", type=str, help="The output text file. ")
-    parser.add_argument("--lm-config", type=str,
-                        help="Config of LM.")
-    parser.add_argument("--lm-check", type=str,
-                        help="Checkpoint of LM.")
-    parser.add_argument("--lamb", type=float,
-                        help="Setup the weight(s) of LM score.")
+
+    parser.add_argument("--alpha", type=float, default=0.3,
+                        help="The 'alpha' value for LM integration, a.k.a. the LM weight")
+    parser.add_argument("--beta", type=float, default=0.6,
+                        help="The 'beta' value for LM integration, a.k.a. the penalty of tokens.")
     parser.add_argument("--spmodel", type=str, default='',
                         help="SPM model location.")
 
     parser.add_argument("--nj", type=int, default=-1)
     parser.add_argument("--cpu", action='store_true', default=False)
+    parser.add_argument("--verbose", action='store_true', default=False)
 
+    return parser
+
+
+if __name__ == "__main__":
+    parser = RescoreParser()
     args = parser.parse_args()
 
     main(args)

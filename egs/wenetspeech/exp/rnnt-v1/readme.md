@@ -18,6 +18,39 @@ test_meeting  %SER 91.77 | %CER 20.97 [46214 / 220385, 1224 ins, 22925 del, 2206
 test_net      %SER 65.49 | %CER 12.76 [53035 / 415746, 1943 ins, 12961 del, 38131 sub ]
 aishell-test    %SER 49.99 | %CER 7.22 [7560 / 104765, 249 ins, 201 del, 7110 sub ] 
 
+0.25 3.53125
+dev     %SER 67.00 | %CER 9.80 [32384 / 330498, 2439 ins, 11058 del, 18887 sub ]
+test_meeting    %SER 91.17 | %CER 19.44 [42845 / 220385, 2662 ins, 17412 del, 22771 sub ]
+test_net        %SER 63.70 | %CER 12.26 [50975 / 415746, 4384 ins, 8751 del, 37840 sub ]
+aishell-test    %SER 47.41 | %CER 6.78 [7105 / 104765, 728 ins, 95 del, 6282 sub ]
+
+0.25 2.5
+dev     %SER 67.25 | %CER 9.87 [32629 / 330498, 2039 ins, 11994 del, 18596 sub ]
+aishell-test    %SER 46.71 | %CER 6.63 [6951 / 104765, 511 ins, 114 del, 6326 sub ]
+test_meeting    %SER 90.96 | %CER 19.41 [42785 / 220385, 2305 ins, 17977 del, 22503 sub ]
+test_net        %SER 63.34 | %CER 12.16 [50563 / 415746, 3467 ins, 9473 del, 37623 sub ]
+
+0.04 0.9
+dev     %SER 69.08 | %CER 10.35 [34223 / 330498, 1665 ins, 13278 del, 19280 sub ]
+
+alpga 0.05 beta 0.8
+dev     %SER 69.22 | %CER 10.41 [34402 / 330498, 1615 ins, 13566 del, 19221 sub ]
+
+alpha 0.05 beta 0.7
+dev     %SER 69.35 | %CER 10.47 [34590 / 330498, 1569 ins, 13838 del, 19183 sub ]
+
+alpha 0.1 beta 0.7
+dev     %SER 69.13 | %CER 10.53 [34787 / 330498, 1497 ins, 14576 del, 18714 sub ]
+
+alpha 0.05
+dev     %SER 69.53 | %CER 10.55 [34882 / 330498, 1524 ins, 14230 del, 19128 sub ]
+
+alpha 0.1
+aishell-test    %SER 47.16 | %CER 6.71 [7032 / 104765, 261 ins, 174 del, 6597 sub ]
+test_meeting    %SER 90.97 | %CER 20.21 [44533 / 220385, 1415 ins, 21368 del, 21750 sub ]
+test_net        %SER 64.17 | %CER 12.40 [51549 / 415746, 2150 ins, 12248 del, 37151 sub ]
+dev     %SER 69.29 | %CER 10.61 [35067 / 330498, 1450 ins, 14965 del, 18652 sub ]
+
 alpha 0.15
 dev     %SER 69.14 | %CER 10.70 [35366 / 330498, 1398 ins, 15736 del, 18232 sub ]
 test_meeting    %SER 91.10 | %CER 20.44 [45045 / 220385, 1327 ins, 22379 del, 21339 sub ]

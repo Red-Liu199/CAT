@@ -249,6 +249,12 @@
                 "subsample": {
                     "type": "number"
                 },
+                "lmdir": {
+                    "type": "string"
+                },
+                "search-hyper": {
+                    "type": "boolean"
+                },
                 "decode": {
                     "description": "Configuration of decoding. Run 'python -m cat.[topo].decode -h' for support options",
                     "type": "object"

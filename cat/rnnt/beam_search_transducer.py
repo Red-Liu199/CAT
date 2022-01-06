@@ -292,16 +292,27 @@ class TransducerBeamSearcher():
         umax_portion: float = 0.35,  # for alsd, librispeech
         prefix_merge: bool = True,
         lm_module: Optional[AbsDecoder] = None,
-        alpha: float = 0.0,
-        beta: float = 0.6,
+        alpha: Optional[float] = None,
+        beta: Optional[float] = 0.6,
         state_beam: float = 2.3,
         expand_beam: float = 2.3,
         temperature: float = 1.0,
         word_prefix_tree: Optional[str] = None,
-        rescore: bool = False
+        rescore: bool = False,
+        verbose: bool = True
     ):
         super(TransducerBeamSearcher, self).__init__()
         assert blank_id == bos_id
+
+        if alpha == 0.0:
+            # disable lm fusion/rescore
+            if verbose:
+                print(f"WARNING: "
+                      f"alpha = 0 will disable LM interation whatever beta is.")
+            beta = None
+            alpha = None
+            lm_module = None
+
         self.decoder = decoder
         self.joint = joint
         self.blank_id = blank_id
@@ -311,16 +322,16 @@ class TransducerBeamSearcher():
         self.lm = lm_module
         self.alpha_ = alpha
 
-        if lm_module is None and alpha > 0.0:
+        if lm_module is None and alpha is not None:
             raise ValueError("Language model is not provided.")
 
         self.is_latency_control = False
         self.is_prefix = prefix_merge
-        self.rescore = rescore and self.alpha_ > 0.0
+        self.rescore = rescore and (self.alpha_ is not None)
         self.beta_ = beta
         if self.rescore:
             # disable fusion
-            self.alpha_ = 0.0
+            self.alpha_ = None
             self.rescore_weight = alpha
         if algo == 'default':
             self.searcher = self.default_beam_search
@@ -361,8 +372,8 @@ class TransducerBeamSearcher():
 
     def call_rescore(self, decoded_hypos: List[Hypothesis]):
         """Do rescoring with LM"""
-        assert self.rescore and self.rescore_weight > 0.0, \
-            f"Expect enable rescore=True and alpha > 0.0, instead rescore={self.rescore} alpha={self.rescore_weight}"
+        assert self.rescore and self.rescore_weight is not None, \
+            f"Expect enable rescore=True with alpha specified, alpha={self.rescore_weight}"
 
         # [B, U]
         dummy_tensor = decoded_hypos[0].pred.new_empty(1)
@@ -401,7 +412,7 @@ class TransducerBeamSearcher():
             Output from transcription network with shape
             [1, time_len, hiddens].
         """
-        use_lm = self.alpha_ > 0.0
+        use_lm = self.alpha_ is not None
         # min between beam and max_target_lent
         tn_i = tn_output[0]
         dummy_tensor = torch.empty(
@@ -510,7 +521,7 @@ class TransducerBeamSearcher():
         tn_output: [1, T, D]
         """
 
-        use_lm = self.alpha_ > 0.0
+        use_lm = self.alpha_ is not None
         use_wpt = self.word_prefix_tree is not None
 
         tn_out = tn_out[0]
@@ -682,7 +693,7 @@ class TransducerBeamSearcher():
         tn_output: [N, T, D]
         """
 
-        use_lm = self.alpha_ > 0.0
+        use_lm = self.alpha_ is not None
 
         dummy_tensor = tn_out.new_empty(1, dtype=torch.long)
         N = tn_out.size(0)
@@ -850,7 +861,7 @@ class TransducerBeamSearcher():
 
         tn_output: [1, T, D]        
         """
-        use_lm = self.alpha_ > 0.0
+        use_lm = self.alpha_ is not None
 
         dummy_tensor = tn_out.new_empty(1, dtype=torch.long)
         B = [Hypothesis(

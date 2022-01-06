@@ -115,8 +115,13 @@ def worker(pid: int, args: argparse.Namespace, q: mp.Queue, fmt: str, model: Abs
         searcher = CTCBeamDecoder(
             labels, beam_width=args.beam_size, num_processes=1)
     else:
+        if args.alpha is None:
+            args.alpha = 0.0
+        if args.beta is None:
+            args.beta = 0.0
+
         searcher = CTCBeamDecoder(
-            labels, model_path=args.lm_path, alpha=args.lm_alpha, beta=args.lm_beta,
+            labels, model_path=args.lm_path, alpha=args.alpha, beta=args.beta,
             beam_width=args.beam_size, num_processes=1, is_token_based=True)
 
     local_writer = fmt.format(pid)
@@ -164,9 +169,9 @@ def DecoderParser():
     parser.add_argument("--input_scp", type=str, default=None)
     parser.add_argument("--output_prefix", type=str, default='./decode')
     parser.add_argument("--lm-path", type=str, help="Path to KenLM model.")
-    parser.add_argument("--lm-alpha", type=float, default=0.3,
+    parser.add_argument("--alpha", type=float, default=0.3,
                         help="The 'alpha' value for LM integration, a.k.a. the LM weight")
-    parser.add_argument("--lm-beta", type=float, default=0.6,
+    parser.add_argument("--beta", type=float, default=0.6,
                         help="The 'beta' value for LM integration, a.k.a. the penalty of tokens.")
     parser.add_argument("--beam_size", type=int, default=3)
     parser.add_argument("--spmodel", type=str, default='',

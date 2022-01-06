@@ -2,11 +2,12 @@
     "data": {
         "train": "train_m",
         "dev": [
-            "test_meeting",
-            "test_net",
             "dev"
         ],
         "test": [
+            "dev",
+            "test_meeting",
+            "test_net",
             "aishell-test"
         ],
         "filter": ":1000",
@@ -32,16 +33,17 @@
             "num": 10
         },
         "subsample": 4,
-        "lmdir": "exp/lm-aishell",
+        "search-hyper": false,
+        "lmdir": "exp/lm-trans",
         "decode": {
             "algo": "rna",
             "beam_size": 16,
             "cpu": true,
             "rescore": true,
             "nj": 80,
-            "alpha": 0.2,
-            "beta": 0.6,
-            "resume": "exp/rnnt-v1/checks/best-10.pt"
+            "resume": "exp/rnnt-v1/checks/best-10.pt",
+            "alpha": 0.25,
+            "beta": 3.53125
         },
         "er": {
             "mode": "cer",

@@ -215,6 +215,12 @@ def main(args: argparse.Namespace):
         f"%SER {_ser*100:.2f} | %{prefix} {_wer*100:.2f} [{_err} / {_sum}, {_ins} ins, {_del} del, {_sub} sub ]"
 
     sys.stdout.write(pretty_str+'\n')
+    return {
+        'ser': _ser,
+        'wer': _wer,
+        'ins': _ins,
+        'del': _del,
+        'sub': _sub}
 
 
 def WERParser():

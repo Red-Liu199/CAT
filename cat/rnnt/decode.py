@@ -50,9 +50,11 @@ def main(args):
         world_size = torch.cuda.device_count()
     args.world_size = world_size
 
-    if args.rescore and args.alpha <= 0.0:
-        raise RuntimeError(
-            f"Trying to do rescoring with alpha={args.alpha}")
+    if args.rescore and args.alpha is None:
+        print("WARNING: "
+              f"trying to rescore with alpha not specified.\n"
+              "set rescore=False")
+        args.rescore = False
 
     cachedir = '/tmp'
     fmt = os.path.join(cachedir, str(uuid.uuid4())+r".{}.tmp")
@@ -122,12 +124,12 @@ def dataserver(args, q: mp.Queue):
     time.sleep(2)
 
 
-def main_worker(gpu: int, args: argparse.Namespace, q: mp.Queue, fmt: str, models=None):
-    if gpu == args.world_size:
+def main_worker(pid: int, args: argparse.Namespace, q: mp.Queue, fmt: str, models=None):
+    if pid == args.world_size:
         return dataserver(args, q)
-    args.gpu = gpu
+    args.gpu = pid
     # only support one node
-    args.rank = gpu
+    args.rank = pid
     world_size = args.world_size
 
     if args.cpu:
@@ -139,7 +141,7 @@ def main_worker(gpu: int, args: argparse.Namespace, q: mp.Queue, fmt: str, model
 
         model, ext_lm = models
     else:
-        device = gpu
+        device = pid
         torch.cuda.set_device(device)
         dist.init_process_group(
             backend='nccl', init_method=args.dist_url,
@@ -153,9 +155,9 @@ def main_worker(gpu: int, args: argparse.Namespace, q: mp.Queue, fmt: str, model
         nbest=args.beam_size, algo=args.algo, umax_portion=args.umax_portion,
         prefix_merge=True, lm_module=ext_lm, alpha=args.alpha, beta=args.beta,
         state_beam=2.3, expand_beam=2.3, temperature=1.0,
-        word_prefix_tree=args.word_tree, rescore=args.rescore)
+        word_prefix_tree=args.word_tree, rescore=args.rescore, verbose=(pid == 0))
 
-    local_writer = fmt.format(gpu)
+    local_writer = fmt.format(pid)
     sp = spm.SentencePieceProcessor(model_file=args.spmodel)
     nbest = {}
     with torch.no_grad(), autocast(enabled=(True if device != 'cpu' else False)), open(local_writer, 'w') as fi:
@@ -197,7 +199,7 @@ def build_model(args, device) -> Tuple[torch.nn.Module, Union[torch.nn.Module, N
     model = utils.load_checkpoint(model, args.resume)
     model.eval()
 
-    if args.alpha == 0.0 or args.lm_config is None or args.lm_check is None:
+    if args.alpha is None or args.lm_config is None or args.lm_check is None:
         return model, None
     else:
         assert args.lm_check is not None
@@ -222,9 +224,9 @@ def DecoderParser():
                         help="Config of external LM.")
     parser.add_argument("--lm-check", type=str, default=None,
                         help="Checkpoint of external LM.")
-    parser.add_argument("--alpha", type=float, default=0.0,
+    parser.add_argument("--alpha", type=float, default=None,
                         help="Weight of external LM.")
-    parser.add_argument("--beta", type=float, default=0.0,
+    parser.add_argument("--beta", type=float, default=None,
                         help="Penalty value of external LM.")
 
     parser.add_argument("--input_scp", type=str, default=None)

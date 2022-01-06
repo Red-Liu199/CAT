@@ -52,7 +52,8 @@ class Manager(object):
         setattr(args, 'n_steps', 0)
         if args.databalance:
             utils.distprint(
-                "> Enable data balanced loading, which takes a while to initialize...", args.gpu)
+                "> Enable data balanced loading\n"
+                "  this takes a while for large dataset.", args.gpu)
             train_sampler = BalancedDistributedSampler(
                 tr_set, args.batch_size, args.len_norm)
             trainloader = DataLoader(
