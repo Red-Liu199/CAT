@@ -1,0 +1,52 @@
+{
+    "data": {
+        "train": "train_m",
+        "dev": [
+            "dev"
+        ],
+        "test": [
+            "dev",
+            "test_meeting",
+            "test_net",
+            "aishell-test"
+        ],
+        "filter": ":1000",
+        "lang": "zh-cn"
+    },
+    "sp": {
+        "model_type": "char",
+        "add_dummy_prefix": false,
+        "use_all_vocab": true,
+        "model_prefix": "sentencepiece/wenetspeech_char/spm",
+        "vocab_size": 5147
+    },
+    "topo": "ctc",
+    "train": {
+        "batch_size": 512,
+        "grad-norm": 5.0,
+        "databalance": true,
+        "checkall": true,
+        "amp": true,
+        "len-norm": "L**1.2"
+    },
+    "inference": {
+        "avgmodel": {
+            "mode": "best",
+            "num": 10
+        },
+        "search-hyper": true,
+        "decode": {
+            "beam_size": 16,
+            "nj": 20,
+            "lm-path": "exp/lm-trans/5gram.klm",
+            "resume": "exp/ctc-v1/checks/best-10.pt",
+            "alpha": 0.125,
+            "beta": 2.90625
+        },
+        "er": {
+            "mode": "cer",
+            "oracle": false
+        }
+    },
+    "commit": "e1b5a63b4e7ee6f01953b9ed23717690845f7b10"
+}

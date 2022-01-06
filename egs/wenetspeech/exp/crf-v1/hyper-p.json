@@ -1,0 +1,32 @@
+{
+    "data": {
+        "train": "train_m",
+        "dev": [
+            "dev"
+        ],
+        "test": [
+            "test_meeting",
+            "test_net",
+            "dev",
+            "aishell-test"
+        ],
+        "filter": ":1000",
+        "lang": "zh-cn"
+    },
+    "topo": "ctc",
+    "train": {
+        "batch_size": 512,
+        "grad-norm": 5.0,
+        "databalance": true,
+        "checkall": true,
+        "amp": true,
+        "len-norm": "L**1.2"
+    },
+    "inference": {
+        "avgmodel": {
+            "mode": "last",
+            "num": 10
+        }
+    },
+    "commit": "d12381016a758d85b49e158831de3d5003123bcc"
+}
