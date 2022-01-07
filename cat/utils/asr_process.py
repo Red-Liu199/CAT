@@ -139,6 +139,7 @@ def parsingData(f_scp: str, f_label: str, f_out: str, filter: Optional[str] = No
     f_opened = {}
     cnt_frames = 0
     cnt_tokens = 0
+    linfo = []
     with open(f_scp, 'r') as fi_scp:
         for line in tqdm(fi_scp, total=total_lines):
             key, loc_ark = line.split()
@@ -150,6 +151,7 @@ def parsingData(f_scp: str, f_label: str, f_out: str, filter: Optional[str] = No
                 cnt_rm += 1
                 continue
 
+            linfo.append(feature.shape[0])
             pkl_data.append([key, loc_ark, tag])
             cnt_frames += feature.shape[0]
             cnt_tokens += tag.shape[0]
@@ -159,6 +161,10 @@ def parsingData(f_scp: str, f_label: str, f_out: str, filter: Optional[str] = No
 
     with open(f_out, 'wb') as fo:
         pickle.dump(pkl_data, fo)
+    
+    # save length info in case of further usage
+    with open(f_out+'.linfo', 'wb') as fo:
+        pickle.dump(linfo, fo)
 
     print(f"parsingData: remove {cnt_rm} unqualified sequences.")
     print(

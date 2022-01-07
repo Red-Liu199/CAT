@@ -59,15 +59,14 @@ class AbsDataset(Dataset):
         raise NotImplementedError
 
     def get_seq_len(self) -> List[int]:
-        cache_f = os.path.join('.cache/', get_sha256(self.f_path)+".pkl")
-        if os.path.isfile(cache_f):
-            with open(cache_f, 'rb') as fi:
+        # try to find length info otherwise read from features
+        f_linfo = self.f_path+'.linfo'
+        if os.path.isfile(f_linfo):
+            with open(f_linfo, 'rb') as fi:
                 return pickle.load(fi)
         else:
             ls = self.impl_get_len()
-
-            os.makedirs('.cache', exist_ok=True)
-            with open(cache_f, 'wb') as fo:
+            with open(f_linfo, 'wb') as fo:
                 pickle.dump(ls, fo)
             return ls
 
