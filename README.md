@@ -11,6 +11,10 @@
 - [ ] rename `*_process.*` -> `*_pipe.*`
 - [ ] \[low priorty\] pythonize n-gram training pipeline
 
+## Known issue
+
+- BalancedDistributedSampler is of poor efficiency with multi-node DDP. 
+
 ## Installation
 
 1. Install main dependencies
