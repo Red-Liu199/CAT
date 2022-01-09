@@ -58,7 +58,8 @@ class Manager(object):
                 tr_set, args.batch_size, args.len_norm)
             trainloader = DataLoader(
                 tr_set, batch_sampler=train_sampler,
-                num_workers=args.workers, collate_fn=collate_fn, persistent_workers=True)
+                num_workers=args.workers, collate_fn=collate_fn,
+                prefetch_factor=10, persistent_workers=True)
             utils.distprint(
                 "> Seq length info for balanced loading generated.", args.gpu)
             args.n_steps = train_sampler.total_size//args.batch_size//args.grad_accum_fold
@@ -66,7 +67,8 @@ class Manager(object):
             train_sampler = DistributedSampler(tr_set)
             trainloader = DataLoader(
                 tr_set, batch_size=args.batch_size//dist.get_world_size(), shuffle=False,
-                num_workers=args.workers, sampler=train_sampler, collate_fn=collate_fn, persistent_workers=True)
+                num_workers=args.workers, sampler=train_sampler, collate_fn=collate_fn,
+                prefetch_factor=10, persistent_workers=True)
             args.n_steps = len(trainloader)//args.grad_accum_fold
 
         val_sampler = DistributedSampler(val_set, shuffle=False)
@@ -244,7 +246,7 @@ def GetScheduler(scheduler_configs: dict, param_list: Iterable) -> scheduler.Sch
 '''
 NOTE (Huahuan):
     with --databalance, batch size on each device might be different,
-    however, torch DDP automatically make a allreduce on gradients
+    however, torch DDP automatically make the allreduce on gradients
     then average them by world size during backward.
     which assumes the batch sizes across devices are the same.
     To address this, we re-calculate the loss in a hack way:

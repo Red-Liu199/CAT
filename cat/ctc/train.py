@@ -11,7 +11,7 @@ and is more non-hard-coding style.
 from ..shared import Manager
 from ..shared import coreutils as utils
 from ..shared import encoder as model_zoo
-from ..shared.data import SpeechDatasetPickle, sortedPadCollate
+from ..shared.data import ModifiedSpeechDataset, sortedPadCollate
 
 import os
 import argparse
@@ -34,7 +34,7 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         backend=args.dist_backend, init_method=args.dist_url,
         world_size=args.world_size, rank=args.rank)
 
-    manager = Manager(SpeechDatasetPickle,
+    manager = Manager(ModifiedSpeechDataset,
                       sortedPadCollate(), args, build_model)
 
     # training

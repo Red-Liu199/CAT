@@ -8,12 +8,12 @@ opts=$(python utils/parseopt.py '{
             "help": "Path to the working directory."
         },
         "--outlm":{
-            "type":"str",
+            "type": "str",
             "default": "ngram.klm",
             "help": "Name of output N-gram file. Default: ngram.klm"
         },
         "-o":{
-            "type":"int",
+            "type": "int",
             "default": 5,
             "dest": "order",
             "help": "Max order of n-gram. default: 5"
@@ -25,6 +25,11 @@ opts=$(python utils/parseopt.py '{
         "--large-corpus":{
             "action": "store_true",
             "help": "Use on-the-fly encoding for large corpus."
+        },
+        "--opts-ngram":{
+            "type": "str",
+            "default": " ",
+            "help": "Custom options passed to KenLM lmplz executable. Default: "
         }
     }' $0 $*) && eval $opts || exit 1
 
@@ -75,10 +80,10 @@ fi
 
 if [ $arpa == "True" ]; then
     eval "$processing |
-        lmplz -o $order -S 80% --discount_fallback >$outlm"
+        lmplz -o $order $opts_ngram -S 80% --discount_fallback >$outlm"
 else
     eval "$processing |
-        lmplz -o $order -S 80% --discount_fallback |
+        lmplz -o $order $opts_ngram -S 80% --discount_fallback |
         build_binary /dev/stdin $outlm"
 fi
 

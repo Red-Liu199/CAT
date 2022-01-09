@@ -14,6 +14,7 @@ import kaldiio
 import pickle
 import math
 import hashlib
+import numpy as np
 from typing import Tuple, Sequence, List, Optional, Union
 
 import torch
@@ -70,58 +71,37 @@ class AbsDataset(Dataset):
                 pickle.dump(ls, fo)
             return ls
 
+# NOTE (Huahuan):
+#    deprecate old speech dataset for better CPU memory efficiency,
+#    ... check https://pytorch.org/docs/stable/data.html#multi-process-data-loading
+#    ... for why this happened.
 
-class SpeechDatasetPickle(AbsDataset):
-    def __init__(self, pickle_path):
-        super().__init__(pickle_path)
-        with open(pickle_path, 'rb') as f:
-            self.dataset = pickle.load(f)
-        self.freader = FeatureReader()
+class ModifiedSpeechDataset(AbsDataset):
+    def __init__(self, path: str) -> None:
+        super().__init__(path)
+        self.dataset = None
+        with open(path, 'rb') as fi:
+            self.f_data = pickle.load(fi)   # type: str
+            self._seeks = pickle.load(fi)   # type: np.array
+
+    def __len__(self) -> int:
+        return self._seeks.shape[0]
+
+    def __getitem__(self, index):
+        if self.dataset is None:
+            self.dataset = open(self.f_data, 'rb')
+
+        self.dataset.seek(self._seeks[index], 0)
+        mat = np.load(self.dataset)
+        label = np.load(self.dataset)
+        return torch.from_numpy(mat), torch.from_numpy(label)
 
     def impl_get_len(self):
-        _ls = []
-        for _, feature_path, _ in self.dataset:
-            mat = self.freader(feature_path)
-            _ls.append(mat.shape[0])
-
-        '''
-        Files are opened in the parent process, so we close them.
-        In __getitem__ function, they would be created again. This avoids
-        errors with dataloder num_worker >= 1.
-        '''
-        del self.freader
-        self.freader = FeatureReader()
+        _ls = np.empty(len(self), dtype=np.int64)
+        for i in range(len(self)):
+            feature, _ = self[i]
+            _ls[i] = feature.size(0)
         return _ls
-
-    def __len__(self):
-        return len(self.dataset)
-
-    def __getitem__(self, idx):
-        _, feature_path, label = self.dataset[idx]
-        mat = self.freader(feature_path)
-        return torch.tensor(mat, dtype=torch.float), torch.IntTensor(label)
-
-
-class SpeechDatasetMemPickle(AbsDataset):
-    def __init__(self, pickle_path):
-        super().__init__(pickle_path)
-        with open(pickle_path, 'rb') as f:
-            self.dataset = pickle.load(f)
-
-        self.data_batch = []
-        freader = FeatureReader()
-
-        for data in self.dataset:
-            key, feature_path, label = data
-            mat = freader(feature_path)
-            self.data_batch.append(
-                [torch.tensor(mat, dtype=torch.float), torch.IntTensor(label)])
-
-    def __len__(self):
-        return len(self.data_batch)
-
-    def __getitem__(self, idx):
-        return self.data_batch[idx]
 
 
 class InferDataset(AbsDataset):

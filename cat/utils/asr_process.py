@@ -88,27 +88,46 @@ def sentencepiece_train(intext: str, **kwargs):
     spm.SentencePieceTrainer.Train(**DEFAULT_SETTINGS)
 
 
-def parsingData(f_scp: str, f_label: str, f_out: str, filter: Optional[str] = None, spm=None, iszh: bool = False):
+def parsingData(
+        f_scps: Union[List[str], str],
+        f_labels: Union[List[str], str],
+        f_out: str,
+        filter: Optional[str] = None,
+        spm=None,
+        iszh: bool = False):
     """Parsing audio feature and text label into pickle file.
 
     Args:
-        f_scp   (str): Kaldi-like-style .scp file.
-        f_label (str): Pure text file include utterance id and sentence labels. Split by space.
+        f_scps   (str, list): Kaldi-like-style .scp file(s).
+        f_labels (str, list): Pure text file(s) include utterance id and sentence labels. Split by space.
         f_out   (str): Ouput pickle file location.
         filter (str, optional): identifier for filtering out seqs with unqualified length. 
             such as '100:2000' means remove those whose length is shorter than 100 or longer than 2000. Default: None
         spm (sentencepiece.SentencePieceProcessor optional): If `spm` is None, lines in `f_label` MUST be token indices, 
             otherwise it should be text.
+        iszh (bool, optional): whether is chinese-liked lang (charater-based)
     """
     import kaldiio
     import numpy as np
     from tqdm import tqdm
+    f_data = f_out+'.npy'
+    f_linfo = f_out + '.linfo'
 
-    checkExist('f', [f_scp, f_label])
+    if os.path.isfile(f_out):
+        print("\nWARNING: parsingData\n"
+              f"  file exists: {f_out}, "
+              "rm it if you want to update the data.\n")
+        checkExist('f', f_data)
+        return
+
+    if isinstance(f_scps, str):
+        f_scps = [f_scps]
+    if isinstance(f_labels, str):
+        f_labels = [f_labels]
+
+    checkExist('f', f_scps+f_labels)
     checkExist('d', os.path.dirname(f_out))
 
-    pkl_data = []
-    cnt_rm = 0
     l_min = 1
     l_max = float('inf')
     if filter is not None:
@@ -119,90 +138,82 @@ def parsingData(f_scp: str, f_label: str, f_out: str, filter: Optional[str] = No
         if u_bound != '':
             l_max = int(u_bound)
 
-    with open(f_label, 'r') as fi_label:
-        labels = fi_label.readlines()
+    # process label files
+    labels = []
+    for _f_lb in f_labels:
+        with open(_f_lb, 'r') as fi_label:
+            labels += fi_label.readlines()
     labels = [l.split() for l in labels]
+    num_label_lines = len(labels)
+
     if spm is None:
-        labels = {l[0]: np.asarray([int(i) for i in l[1:]]) for l in labels}
+        # assume the labels are given in number ids
+        labels = {l[0]: np.asarray(
+            [int(i) for i in l[1:]], dtype=np.int64) for l in labels}
     else:
         if iszh:
-            labels = {l[0]: np.asarray(spm.encode(''.join(l[1:])))
+            labels = {l[0]: np.asarray(spm.encode(''.join(l[1:])), dtype=np.int64)
                       for l in labels}
         else:
-            labels = {l[0]: np.asarray(spm.encode(' '.join(l[1:])))
+            labels = {l[0]: np.asarray(spm.encode(' '.join(l[1:])), dtype=np.int64)
                       for l in labels}
 
-    total_lines = sum(1 for _ in open(f_scp, 'r'))
-    assert len(
-        labels) == total_lines, f"parsingData: f_scp and f_label should match on the # lines, instead {total_lines} {len(labels)}"
+    num_utts = [sum(1 for _ in open(_f_scp, 'r')) for _f_scp in f_scps]
+    total_utts = sum(num_utts)
+    assert total_utts == num_label_lines, \
+        "parsingData: f_scp and f_label should match on the # lines, " \
+        f"instead {total_utts} != {len(labels)}"
 
     f_opened = {}
     cnt_frames = 0
     cnt_tokens = 0
-    linfo = []
-    with open(f_scp, 'r') as fi_scp:
-        for line in tqdm(fi_scp, total=total_lines):
-            key, loc_ark = line.split()
-            tag = labels[key]
-            feature = kaldiio.load_mat(
-                loc_ark, fd_dict=f_opened)   # type:np.ndarray
+    linfo = np.empty(total_utts, dtype=np.int64)
+    _seeks = np.empty(total_utts, dtype=np.int64)
+    _keys = []
+    idx = 0
+    cnt_rm = 0
 
-            if feature.shape[0] < l_min or feature.shape[0] > l_max:
-                cnt_rm += 1
-                continue
+    with open(f_data, 'wb') as fo_bin:
+        for n, _f_scp in enumerate(f_scps):
+            with open(_f_scp, 'r') as fi_scp:
+                for line in tqdm(fi_scp, total=num_utts[n]):
+                    key, loc_ark = line.split()
+                    tag = labels[key]
+                    feature = kaldiio.load_mat(
+                        loc_ark, fd_dict=f_opened)   # type:np.ndarray
 
-            linfo.append(feature.shape[0])
-            pkl_data.append([key, loc_ark, tag])
-            cnt_frames += feature.shape[0]
-            cnt_tokens += tag.shape[0]
+                    if feature.shape[0] < l_min or feature.shape[0] > l_max:
+                        cnt_rm += 1
+                        continue
+
+                    linfo[idx] = feature.shape[0]
+                    _seeks[idx] = fo_bin.tell()
+                    _keys.append(key)
+                    np.save(fo_bin, np.asarray(feature, dtype=np.float32))
+                    np.save(fo_bin, np.asarray(tag, dtype=np.int64))
+
+                    cnt_frames += feature.shape[0]
+                    cnt_tokens += tag.shape[0]
+                    idx += 1
+
+    linfo = linfo[:idx]
+    _seeks = _seeks[:idx]
 
     for f in f_opened.values():
         f.close()
 
     with open(f_out, 'wb') as fo:
-        pickle.dump(pkl_data, fo)
-    
+        pickle.dump(f_data, fo)
+        pickle.dump(_seeks, fo)
+        pickle.dump(_keys, fo)
+
     # save length info in case of further usage
-    with open(f_out+'.linfo', 'wb') as fo:
+    with open(f_linfo, 'wb') as fo:
         pickle.dump(linfo, fo)
 
     print(f"parsingData: remove {cnt_rm} unqualified sequences.")
     print(
-        f"...# frames: {cnt_frames} | # tokens: {cnt_tokens} | # seqs: {len(pkl_data)}")
-
-
-def combinePickle(f_in: Union[List[str], str], f_out: str, rm_src: bool = False):
-    """Combine several pickle files into one.
-
-    Args:
-        f_in   (list, str)     : pickle file(s) to be merged.
-        f_out  (str)           : destination file.
-        rm_src (bool, optional): specify whether rm original files.
-    """
-    import shutil
-
-    if isinstance(f_in, str):
-        f_in = [f_in]
-
-    checkExist('f', f_in)
-    checkExist('d', os.path.dirname(f_out))
-
-    if len(f_in) == 1:
-        if rm_src:
-            shutil.move(f_in[0], f_out)
-        else:
-            shutil.copy(f_in[0], f_out)
-        return
-
-    datasets = []
-    for f_pkl in f_in:
-        print("combinePickle: merging {}".format(f_pkl))
-        with open(f_pkl, 'rb') as fi:
-            datasets += pickle.load(fi)
-
-    print("combinePickle: export to {}".format(f_out))
-    with open(f_out, 'wb') as fo:
-        pickle.dump(datasets, fo)
+        f"...# frames: {cnt_frames} | # tokens: {cnt_tokens} | # seqs: {idx}")
 
 
 def checkExist(f_type: Literal['d', 'f'], f_list: Union[str, List[str]]):
@@ -679,12 +690,10 @@ if __name__ == "__main__":
                 filter = data_settings['filter']
             else:
                 filter = None
-            for f_s, f_t in zip(f_scps, f_texts):
-                f_pkl_tmp = os.path.join('/tmp', str(uuid.uuid4()))
-                parsingData(f_scp=f_s, f_label=f_t, f_out=f_pkl_tmp,
-                            filter=filter, spm=spmodel, iszh=iszh)
-            combinePickle(f_pkl_tmp, os.path.join(
-                d_pkl, dataset+'.pkl'), rm_src=True)
+
+            parsingData(f_scps, f_texts, f_out=os.path.join(
+                d_pkl, dataset+'.pkl'),
+                filter=filter, spm=spmodel, iszh=iszh)
 
         # generate word prefix tree from train set
         from word_prefix_tree import WordPrefixParser
@@ -943,7 +952,7 @@ if __name__ == "__main__":
         if hyper_settings['topo'] == 'rnnt' and 'algo' in decode_settings \
                 and decode_settings['algo'] == 'alsd' and 'umax-portion' not in decode_settings:
             # trying to compute a reasonable portion value from trainset
-            from cat.shared.data import SpeechDatasetPickle
+            from cat.shared.data import ModifiedSpeechDataset
             import numpy as np
             f_pkl = os.path.join(args.expdir, f'pkl/train.pkl')
             if os.path.isfile(f_pkl):
@@ -954,7 +963,7 @@ if __name__ == "__main__":
                         f"Can't deal with 'subsample'={sub_factor} in hyper-p['inference']")
                     print(fmt.format(
                         f"resolving portion data from train set, might takes a while."))
-                    dataset = SpeechDatasetPickle(f_pkl)
+                    dataset = ModifiedSpeechDataset(f_pkl)
                     lt = np.asarray(dataset.get_seq_len()
                                     ).astype(np.float64)
                     ly = []
