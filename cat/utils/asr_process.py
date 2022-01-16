@@ -486,7 +486,19 @@ def hyperParamSearch(
         lm_check: Union[str, None],
         dev_set: Optional[str] = None,
         topo: Literal['ctc', 'rnnt'] = 'rnnt',
-        fmt: str = '{}'):
+        fmt: str = '{}',
+        f_nbestlist: Optional[str] = None):
+    """Search for hyper params alpha/beta for LM integration
+
+    decode_settings : decode settings
+    er_settings : wer/cer evaluation settings
+    lm_config : language model configuration
+    lm_check : checkpoint of model, can be none for ngram model.
+    dev_set : dev set to evaluate the perf.
+    topo : 'ctc' or 'rnnt'
+    fmt : format string for hints
+    f_nbestlist : existing n-best list file, optional.
+    """
 
     if 'alpha' in decode_settings and 'beta' in decode_settings:
         return decode_settings['alpha'], decode_settings['beta']
@@ -521,17 +533,21 @@ def hyperParamSearch(
         raise RuntimeError(f"Unknown topology: {topo}")
 
     cache_dir = '/tmp'
-    decode_settings['output_prefix'] = os.path.join(
-        cache_dir, str(uuid.uuid4()))
-    nbestlist = decode_settings['output_prefix']+'.nbest'
-    decode_settings['alpha'] = None
-    decode_settings['beta'] = None
-    # generate nbest-list file
-    decode_settings['dist-url'] = f"tcp://localhost:{get_free_port()}"
-    print(fmt.format(f"generate n-best list w/o LM at {nbestlist}"))
-    DecoderMain(updateNamespaceFromDict(
-        decode_settings, DecoderParser()))
-    os.remove(decode_settings['output_prefix'])
+    if f_nbestlist is None:
+        decode_settings['output_prefix'] = os.path.join(
+            cache_dir, str(uuid.uuid4()))
+        nbestlist = decode_settings['output_prefix']+'.nbest'
+        decode_settings['alpha'] = None
+        decode_settings['beta'] = None
+        # generate nbest-list file
+        decode_settings['dist-url'] = f"tcp://localhost:{get_free_port()}"
+        print(fmt.format(f"generate n-best list w/o LM at {nbestlist}"))
+        DecoderMain(updateNamespaceFromDict(
+            decode_settings, DecoderParser()))
+        os.remove(decode_settings['output_prefix'])
+    else:
+        nbestlist = f_nbestlist
+
     rescore_setting = {
         'nbestlist': nbestlist,
         'config': lm_config,
@@ -614,7 +630,9 @@ def hyperParamSearch(
         # stage 2: fix alpha, search beta in range
         _search(beta_range, beta_interval, val, 1)
 
-    os.remove(nbestlist)
+    if f_nbestlist is None:
+        os.remove(nbestlist)
+
     del _evaluate
     del _search
     return tuple(tuning_val)
@@ -1017,6 +1035,11 @@ if __name__ == "__main__":
 
                 # FIXME: this canonot be spawned via mp_spawn, otherwise error would be raised
                 #        possibly due to the usage of mp.Queue
+                if os.path.isfile(decode_settings['output_prefix']):
+                    print(fmt.format(
+                        f"{decode_settings['output_prefix']} exists, skip this one."))
+                    continue
+
                 DecoderMain(updateNamespaceFromDict(
                     decode_settings, DecoderParser()))
                 decode_settings['dist-url'] = f"tcp://localhost:{get_free_port()}"
@@ -1054,10 +1077,15 @@ if __name__ == "__main__":
             eval_set = testsets[0]
             del decode_settings['alpha']
             del decode_settings['beta']
+            if 'nbestlist' in inference_settings:
+                checkExist('f', inference_settings['nbestlist'])
+            else:
+                inference_settings['nbestlist'] = None
+
             _alpha, _beta = hyperParamSearch(
                 decode_settings, err_settings,
                 lm_info['config'], lm_info['check'],
-                eval_set, hyper_settings['topo'], fmt)
+                eval_set, hyper_settings['topo'], fmt, inference_settings['nbestlist'])
             print(fmt.format(
                 f"found best setting: alpha = {_alpha:.2f} | {_beta:.2f}"))
             print(fmt.format(f"write back setting to {f_hyper_settings}"))
