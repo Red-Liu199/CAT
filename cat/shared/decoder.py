@@ -258,6 +258,13 @@ class CausalTransformer(AbsDecoder):
             vocab_size=num_classes, n_embd=dim_hid,
             n_layer=num_layers, n_head=num_head, attn_pdrop=attn_dropout)
         self.trans = GPT2Model(configuration)
+        # FIXME (huahun): 
+        # hacked fix of the issue related to Huggingface,
+        # ... see https://github.com/huggingface/transformers/issues/14859
+        for name, buffer in self.trans.named_buffers():
+            if '.masked_bias' in name:
+                buffer.data = torch.tensor(float('-inf'))
+
         # use my own token embedding layer
         self.trans.wte = None
         self.n_head = num_head

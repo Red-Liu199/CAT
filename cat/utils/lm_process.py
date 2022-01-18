@@ -146,8 +146,10 @@ if __name__ == "__main__":
             args.expdir, 'checks/bestckpt.pt')
         print(fmt.format(
             f"set 'resume' to {hyper_settings['train']['resume']}"))
-        hyper_settings['train']['eval'] = os.path.join(
-            args.expdir, 'lmbin/test.pkl')
-        print(fmt.format(f"set 'eval' to {hyper_settings['train']['eval']}"))
+        if 'eval' not in hyper_settings['train']:
+            hyper_settings['train']['eval'] = os.path.join(
+                args.expdir, 'lmbin/test.pkl')
+            print(fmt.format(
+                f"set 'eval' to {hyper_settings['train']['eval']}"))
         NNTrain(args, hyper_settings, f_hyper_settings, os.path.join(
             args.expdir, 'lmbin/{}.pkl'), LMParser(), LMMain, fmt)
