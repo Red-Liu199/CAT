@@ -27,7 +27,8 @@
         "grad-accum-fold": 1,
         "databalance": true,
         "checkall": true,
-        "amp": true
+        "amp": true,
+        "resume": "./best-10.pt"
     },
-    "commit": "32b024b548adb4e8ab0aadf6df9b3bdd14249ef3"
+    "commit": "3a22c0067730c190830ecf5bc5a78ee14c7a453e"
 }
