@@ -142,8 +142,9 @@ if __name__ == "__main__":
             sys.path.append(cwd)
         from cat.lm.train import LMParser
         from cat.lm.train import main as LMMain
-        hyper_settings['train']['resume'] = os.path.join(
-            args.expdir, 'checks/bestckpt.pt')
+        if 'resume' not in hyper_settings['train']:
+            hyper_settings['train']['resume'] = os.path.join(
+                args.expdir, 'checks/bestckpt.pt')
         print(fmt.format(
             f"set 'resume' to {hyper_settings['train']['resume']}"))
         if 'eval' not in hyper_settings['train']:

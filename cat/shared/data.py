@@ -76,6 +76,7 @@ class AbsDataset(Dataset):
 #    ... check https://pytorch.org/docs/stable/data.html#multi-process-data-loading
 #    ... for why this happened.
 
+
 class ModifiedSpeechDataset(AbsDataset):
     def __init__(self, path: str) -> None:
         super().__init__(path)
@@ -367,6 +368,7 @@ class BalancedDistributedSampler(DistributedSampler):
                  length_norm: Optional[str] = None,
                  num_replicas: Optional[int] = None,
                  rank: Optional[int] = None,
+                 local_rank: int = None,
                  shuffle: bool = True,
                  seed: int = 0,
                  drop_last: bool = False) -> None:
@@ -384,8 +386,11 @@ class BalancedDistributedSampler(DistributedSampler):
         # scan data length, this might take a while
         if rank is None:
             rank = dist.get_rank()
+        if local_rank is None:
+            # using 1 node
+            local_rank = rank
 
-        if rank == 0:
+        if local_rank == 0:
             # save length info into cache file
             dataset.get_seq_len()
 
@@ -446,34 +451,3 @@ def group_indices(args: Tuple[List[List[int]], List[int], Union[str, None], int,
         idx_groups[k] = g_grouped
 
     return idx_groups, p_id
-
-
-class InferenceDistributedSampler(BalancedDistributedSampler):
-    def __init__(self, dataset: torch.utils.data.Dataset, length_norm: Optional[str] = None) -> None:
-        world_size = dist.get_world_size()
-        super().__init__(dataset, world_size, length_norm=length_norm, shuffle=False)
-
-    def __iter__(self):
-        indices = list(range(len(self.dataset)))  # type: ignore[arg-type]
-
-        # split samples to make it evenly divisible
-        num_samples = len(self.dataset)
-        res_size = num_samples % self.num_replicas
-        if res_size == 0:
-            res_indices = []
-            indices = list(range(num_samples))
-        else:
-            indices = list(range(num_samples-res_size))
-            res_indices = list(range(num_samples-res_size, num_samples))
-
-        # Add implementation here
-        partial_indices = []
-        batches = sorted(indices, key=lambda i: self._lens[i], reverse=True)
-        batches = utils.group_by_lens(
-            batches, [self._lens[i] for i in batches],
-            self.num_replicas, self._l_norm, False)
-        partial_indices = batches[self.rank]
-
-        if res_size > 0 and self.rank < res_size:
-            partial_indices.append(res_indices[self.rank])
-        return iter(partial_indices)

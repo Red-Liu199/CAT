@@ -1079,6 +1079,8 @@ if __name__ == "__main__":
             del decode_settings['beta']
             if 'nbestlist' in inference_settings:
                 checkExist('f', inference_settings['nbestlist'])
+                print(fmt.format(
+                    f"you specify 'nbestlist'={inference_settings['nbestlist']}, ensure the first test set match this file."))
             else:
                 inference_settings['nbestlist'] = None
 

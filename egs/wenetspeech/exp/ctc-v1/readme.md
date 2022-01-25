@@ -17,13 +17,9 @@ test_net        %SER 74.35 | %CER 15.44 [64172 / 415746, 2045 ins, 14216 del, 47
 dev     %SER 76.34 | %CER 12.24 [40467 / 330498, 1272 ins, 15956 del, 23239 sub ]
 aishell-test    %SER 59.98 | %CER 8.78 [9202 / 104765, 339 ins, 187 del, 8676 sub ]
 
-0.2
-dev     %SER 72.51 | %CER 11.49 [37985 / 330498, 1279 ins, 16235 del, 20471 sub ]
-
-0.4
-dev     %SER 72.35 | %CER 11.92 [39409 / 330498, 1056 ins, 19281 del, 19072 sub ]
-
-
++trans lm aishell-test
+setting: alpha = 0.56 | beta = 0.88
+%SER 49.60 | %CER 7.19 [7534 / 104765, 227 ins, 263 del, 7044 sub ]
 
 ```
 

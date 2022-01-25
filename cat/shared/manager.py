@@ -55,11 +55,11 @@ class Manager(object):
                 "> Enable data balanced loading\n"
                 "  this takes a while for large dataset.", args.gpu)
             train_sampler = BalancedDistributedSampler(
-                tr_set, args.batch_size, args.len_norm)
+                tr_set, args.batch_size, args.len_norm, local_rank=args.gpu)
             trainloader = DataLoader(
                 tr_set, batch_sampler=train_sampler,
                 num_workers=args.workers, collate_fn=collate_fn,
-                prefetch_factor=10, persistent_workers=True)
+                prefetch_factor=4, persistent_workers=True)
             utils.distprint(
                 "> Seq length info for balanced loading generated.", args.gpu)
             args.n_steps = train_sampler.total_size//args.batch_size//args.grad_accum_fold
@@ -68,7 +68,7 @@ class Manager(object):
             trainloader = DataLoader(
                 tr_set, batch_size=args.batch_size//dist.get_world_size(), shuffle=False,
                 num_workers=args.workers, sampler=train_sampler, collate_fn=collate_fn,
-                prefetch_factor=10, persistent_workers=True)
+                prefetch_factor=4, persistent_workers=True)
             args.n_steps = len(trainloader)//args.grad_accum_fold
 
         val_sampler = DistributedSampler(val_set, shuffle=False)

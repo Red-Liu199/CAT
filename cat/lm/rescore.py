@@ -6,7 +6,10 @@
 
 This script is ported from cat.rnnt.decode
 
-Rescore N-best list
+Rescore N-best list.
+
+P.S. CPU is faster when rescoring with n-gram model, while GPU
+     would be faster rescoring with NN model.
 """
 
 from ..shared import coreutils as utils
@@ -91,7 +94,7 @@ def dataserver(args, q: mp.Queue):
     testset = NbestListDataset(args.nbestlist)
     tokenizer = sp.SentencePieceProcessor(model_file=args.spmodel)
     testloader = DataLoader(
-        testset, batch_size=(16 if args.cpu else 128),
+        testset, batch_size=(4 if args.cpu else 32),
         shuffle=False,
         num_workers=(args.world_size//8 if args.cpu else args.world_size),
         collate_fn=NbestListCollate(tokenizer))
@@ -136,7 +139,8 @@ def main_worker(pid: int, args: argparse.Namespace, q: mp.Queue, fmt: str = "res
 
     writer = fmt.format(pid)
     # rescoring
-    with autocast(enabled=(True if device != 'cpu' else False)), open(writer, 'w') as fo:
+    with torch.no_grad(), \
+            autocast(enabled=(True if device != 'cpu' else False)), open(writer, 'w') as fo:
         while True:
             batch = q.get(block=True)
             if batch is None:

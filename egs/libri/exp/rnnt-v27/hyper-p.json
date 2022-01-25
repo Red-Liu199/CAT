@@ -6,6 +6,8 @@
             "dev_other"
         ],
         "test": [
+            "dev_clean",
+            "dev_other",
             "test_clean",
             "test_other"
         ],
@@ -28,21 +30,16 @@
             "mode": "best",
             "num": 10
         },
-        "lmdir": "exp/lm-v9",
-        "subsample": 4,
         "decode": {
-            "algo": "alsd",
+            "algo": "rna",
             "beam_size": 16,
             "cpu": true,
             "nj": 80,
-            "thread-per-woker": 1,
-            "resume": "best_10.pt",
-            "lm-weight": 0.45,
-            "umax-portion": 0.34695994761134896
+            "resume": "best_10.pt"
         },
         "er": {
             "mode": "wer",
-            "oracle": true
+            "oracle": false
         }
     },
     "commit": "70fe4c19b10ee562fbcf86956bcc150fb71b1060"

@@ -137,6 +137,9 @@ def worker(pid: int, args: argparse.Namespace, q: mp.Queue, fmt: str, model: Abs
             probs = torch.softmax(model(x, x_lens)[0], dim=-1)
             beam_results, beam_scores, _, out_lens = searcher.decode(
                 probs)
+            # make it in decending order
+            # -log(p) -> log(p)
+            beam_scores = -beam_scores
 
             nbest[key] = [(score.item(), sp.decode(hypo[:lh].tolist()))
                           for score, hypo, lh in zip(beam_scores[0], beam_results[0], out_lens[0])]

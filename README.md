@@ -11,29 +11,32 @@
 - [ ] rename `*_process.*` -> `*_pipe.*`
 - [ ] \[low priorty\] pythonize n-gram training pipeline
 
-## Known issue
-
-- BalancedDistributedSampler is of poor efficiency with multi-node DDP. 
-
 ## Installation
+
+0. Clone the repo
+
+    ```bash
+    git clone --recurse-submodules git@github.com:maxwellzh/Transducer-dev.git
+    ```
 
 1. Install main dependencies
   
    - CUDA compatible machine, NVIDIA driver installed and NVIDIA toolkit available.
    - PyTorch: `>=1.9.0` is recommended
-   - [CAT](https://github.com/thu-spmi/CAT): **This is optional if you just do language model training.** 
-      After installing the CAT, please refers to the details in [tools/README.md](tools/README.md)
-     and link directory.
+   - Third-party tools:
+      - KenLM: refer to the installation [guide](tools/README.md)
+      - [CAT](https://github.com/thu-spmi/CAT): **This is optional if you just do language model training.** 
+         After installing the CAT, please refers to the details in [tools/README.md](tools/README.md)
+        and link directory.
      
-      ```bash
-      cd tools/
-      ln -s <CAT> ./
-      ```
+         ```bash
+         cd tools/
+         ln -s <CAT> ./
+         ```
    
 2. Python packages
 
    ```bash
-   git clone git@github.com:maxwellzh/Transducer-dev.git
    cd Transducer-dev/
    pip install -r requirements.txt
    ```
