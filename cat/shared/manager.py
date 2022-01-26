@@ -43,7 +43,8 @@ class Manager(object):
         super().__init__()
 
         utils.check_parser(args, ['rank', 'gpu', 'workers', 'trset', 'devset', 'databalance',
-                                  'batch_size', 'grad_accum_fold', 'config', 'dir', 'debug', 'logsdir', 'resume'])
+                                  'batch_size', 'grad_accum_fold', 'config', 'dir', 'debug',
+                                  'logsdir', 'resume', 'init_model'])
 
         # setup dataloader
         tr_set = Dataset(args.trset)
@@ -141,13 +142,19 @@ class Manager(object):
         self.epoch = 0      # type:int
         self.step = 0       # type:int
 
+        assert args.resume is None or args.init_model is None, f"Don't specify both --resume and --init-model"
         if args.resume is not None:
             utils.distprint(
                 f"> Resuming from: {args.resume}", args.gpu)
-            loc = f'cuda:{args.gpu}'
             checkpoint = torch.load(
-                args.resume, map_location=loc)  # type: OrderedDict
+                args.resume, map_location=f'cuda:{args.gpu}')  # type: OrderedDict
             self.load(checkpoint)
+        elif args.init_model is not None:
+            utils.distprint(
+                f"> Initialize model from: {args.init_model}", args.gpu)
+            checkpoint = torch.load(
+                args.init_model, map_location=f'cuda:{args.gpu}')  # type: OrderedDict
+            self.model.load_state_dict(checkpoint['model'])
 
     def run(self, args: argparse.Namespace):
 

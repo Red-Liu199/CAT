@@ -236,6 +236,8 @@ def BasicDDPParser(istraining: bool = True, prog: str = '') -> argparse.Argument
                         help="Path to configuration file of backbone.")
     parser.add_argument("--resume", type=str, default=None,
                         help="Path to location of checkpoint.")
+    parser.add_argument("--init-model", type=str, default=None,
+                        help="Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself (w/o optimizer)")
 
     parser.add_argument('-j', '--workers', default=1, type=int, metavar='N',
                         help='number of data loading workers (default: 1)')

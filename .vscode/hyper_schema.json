@@ -218,6 +218,9 @@
                 },
                 "resume": {
                     "type": "string"
+                },
+                "init-model": {
+                    "type": "string"
                 }
             }
         },
