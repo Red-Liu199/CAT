@@ -34,9 +34,8 @@
             "mode": "best",
             "num": 10
         },
-        "subsample": 4,
         "decode": {
-            "algo": "alsd",
+            "algo": "rna",
             "beam_size": 64,
             "cpu": true
         },
@@ -45,5 +44,5 @@
             "oracle": true
         }
     },
-    "commit": "60aa5175c9630bcb5ea1790444732fc948b05865"
+    "commit": "ac122d981911a9e933e331da0e2cbf9ed0d9fd13"
 }

@@ -221,6 +221,9 @@
                 },
                 "init-model": {
                     "type": "string"
+                },
+                "verbose": {
+                    "type": "boolean"
                 }
             }
         },

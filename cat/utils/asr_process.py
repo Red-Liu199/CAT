@@ -867,9 +867,6 @@ if __name__ == "__main__":
             print(fmt.format(
                 "in case you didn't backup the setting:\n"
                 f"current setting: alpha = {decode_settings['alpha']} | beta = {decode_settings['beta']}"))
-            # these values won't be used, just as a hack
-            # decode_settings['alpha'] = 1.0
-            # decode_settings['beta'] = 1.0
 
         if 'config' not in decode_settings:
             decode_settings['config'] = os.path.join(

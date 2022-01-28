@@ -27,9 +27,8 @@
             "mode": "best",
             "num": 10
         },
-        "subsample": 4,
         "decode": {
-            "algo": "alsd",
+            "algo": "rna",
             "beam_size": 32,
             "cpu": true
         },

@@ -218,6 +218,8 @@ def BasicDDPParser(istraining: bool = True, prog: str = '') -> argparse.Argument
 
         parser.add_argument("--debug", action="store_true",
                             help="Configure to debug settings, would overwrite most of the options.")
+        parser.add_argument("--verbose", action="store_true",
+                            help="Configure to print out more detailed info.")
         parser.add_argument("--checkall", action="store_true",
                             help="Save all checkpoints instead only the recent one.")
 

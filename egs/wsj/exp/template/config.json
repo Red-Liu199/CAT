@@ -24,29 +24,20 @@
     "decoder": {
         "type": "LSTMPredictNet",
         "kwargs": {
-            "classical": false,
             "hdim": 128,
             "num_classes": 1024,
             "num_layers": 1,
-            "variational_noise": [
-                0.0,
-                0.075
-            ]
+            "with_head": false
         }
     },
     "encoder": {
         "type": "ConformerNet",
         "kwargs": {
-            "conv": "vgg2l",
-            "d_head": -1,
-            "dropout": 0.3,
-            "dropout_attn": 0.3,
             "hdim": 128,
             "idim": 80,
-            "kernel_size": 15,
             "num_cells": 6,
-            "num_classes": 1024,
-            "num_heads": 4
+            "num_heads": 4,
+            "with_head": false
         }
     },
     "scheduler": {
@@ -54,8 +45,7 @@
         "kwargs": {
             "epoch_min": 10,
             "gamma": 0.1,
-            "lr_stop": 1e-06,
-            "reverse_metric_direc": true
+            "lr_stop": 1e-06
         },
         "optimizer": {
             "type": "Adam",

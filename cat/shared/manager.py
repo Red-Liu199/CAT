@@ -12,6 +12,7 @@ from .monitor import MonitorWriter, BASE_METRIC
 
 import os
 import argparse
+import time
 import json
 import shutil
 from collections import OrderedDict
@@ -307,7 +308,7 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
 
         return detach_loss, n_batch
 
-    utils.check_parser(args, ['grad_accum_fold', 'n_steps',
+    utils.check_parser(args, ['grad_accum_fold', 'n_steps', 'verbose',
                               'print_freq', 'rank', 'gpu', 'debug', 'amp', 'grad_norm'])
 
     model = manager.model
@@ -323,12 +324,17 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
     assert fold >= 1
     detach_loss = 0.0
     n_batch = 0
+    t_data = 0.
+    t_last_step = time.time()
+    t_last_batch = time.time()
     for i, minibatch in tqdm(enumerate(trainloader), desc=f'Epoch {manager.epoch} | train',
-                             unit='batch', total=fold*args.n_steps, disable=(args.gpu != 0), leave=False):
+                             unit='batch', total=fold*args.n_steps, disable=(args.gpu != 0 or args.verbose), leave=False):
 
         features, input_lengths, labels, label_lengths = minibatch
-        features, labels, input_lengths, label_lengths = features.cuda(
-            args.gpu, non_blocking=True), labels, input_lengths, label_lengths
+        # since the gradient fold could be > 1, we need to accumulate the time
+        if args.verbose:
+            t_data += time.time() - t_last_batch
+        features = features.cuda(args.gpu, non_blocking=True)
 
         if manager.specaug is not None:
             features, input_lengths = manager.specaug(features, input_lengths)
@@ -375,6 +381,14 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
 
             n_time = (i+1)//fold
 
+            if args.verbose:
+                utils.distprint(
+                    f"[{manager.epoch} - {n_time}/{args.n_steps}] | data {t_data:6.3f} | time {time.time()-t_last_step:6.3f} | "
+                    f"loss {tolog['loss']:.2e} | lr {tolog['lr']:.2e}",
+                    args.gpu)
+                t_data = 0.0
+                t_last_step = time.time()
+
             if n_time == args.n_steps or (args.debug and n_time >= 20):
                 dist.barrier()
                 break
@@ -386,6 +400,9 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
             # gradient accumulation w/o sync
             with model.no_sync():
                 detach_loss, n_batch = _go_step(detach_loss, n_batch)
+
+        if args.verbose:
+            t_last_batch = time.time()
 
 
 @torch.no_grad()

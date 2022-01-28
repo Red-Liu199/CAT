@@ -16,11 +16,7 @@
             "num_cells": 12,
             "idim": 80,
             "hdim": 512,
-            "conv": "conv2d",
             "num_heads": 4,
-            "dropout": 0.3,
-            "dropout_attn": 0.3,
-            "kernel_size": 15,
             "with_head": false
         }
     },
@@ -30,11 +26,7 @@
             "num_classes": 5147,
             "hdim": 512,
             "num_layers": 1,
-            "with_head": false,
-            "variational_noise": [
-                0.0,
-                0.075
-            ]
+            "with_head": false
         }
     },
     "joint": {

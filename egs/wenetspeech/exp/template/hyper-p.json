@@ -31,13 +31,10 @@
             "mode": "best",
             "num": 10
         },
-        "subsample": 4,
         "decode": {
             "algo": "rna",
-            "beam_size": 16,
-            "cpu": true,
-            "rescore": false,
-            "nj": 80
+            "beam_size": 64,
+            "cpu": true
         },
         "er": {
             "mode": "cer",

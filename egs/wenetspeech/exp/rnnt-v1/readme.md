@@ -18,11 +18,18 @@ test_meeting  %SER 91.77 | %CER 20.97 [46214 / 220385, 1224 ins, 22925 del, 2206
 test_net      %SER 65.49 | %CER 12.76 [53035 / 415746, 1943 ins, 12961 del, 38131 sub ]
 aishell-test    %SER 49.99 | %CER 7.22 [7560 / 104765, 249 ins, 201 del, 7110 sub ] 
 
-0.25 3.53125
++lm trans
+alpha=0.25 beta=3.53125
 dev     %SER 67.00 | %CER 9.80 [32384 / 330498, 2439 ins, 11058 del, 18887 sub ]
 test_meeting    %SER 91.17 | %CER 19.44 [42845 / 220385, 2662 ins, 17412 del, 22771 sub ]
 test_net        %SER 63.70 | %CER 12.26 [50975 / 415746, 4384 ins, 8751 del, 37840 sub ]
 aishell-test    %SER 47.41 | %CER 6.78 [7105 / 104765, 728 ins, 95 del, 6282 sub ]
+
++lm trans
+dev     %SER 67.00 | %CER 9.80 [32384 / 330498, 2439 ins, 11058 del, 18887 sub ]  alpha = 0.25 | beta = 3.53125
+test_meeting    %SER 90.85 | %CER 19.40 [42749 / 220385, 2210 ins, 18117 del, 22422 sub ]  alpha = 0.19 | beta = 2.28
+test_net        %SER 62.97 | %CER 12.11 [50361 / 415746, 2923 ins, 10528 del, 36910 sub ]  alpha = 0.31 | beta = 2.28
+aishell-test    %SER 44.15 | %CER 6.23 [6525 / 104765, 220 ins, 256 del, 6049 sub ]  alpha = 0.50 | beta = 1.50
 ```
 
 ### Tuning on aishell-1
