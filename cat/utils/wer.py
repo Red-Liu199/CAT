@@ -154,21 +154,18 @@ def main(args: argparse.Namespace):
             l_hy[i] = (key, seqs)
 
         for i, s in enumerate(l_gt):
-            sl = s.split()
-            key, g_s = sl[0], ' '.join(sl[1:])
+            key, g_s = s.split(maxsplit=1)
             l_gt[i] = (key, processor(g_s))
 
         l_hy = sorted(l_hy, key=lambda item: item[0])
         l_gt = sorted(l_gt, key=lambda item: item[0])
     elif args.stripid:
         for i, s in enumerate(l_gt):
-            sl = s.split()
-            key, g_s = sl[0], ' '.join(sl[1:])
+            key, g_s = s.split(maxsplit=1)
             l_gt[i] = (key, processor(g_s))
 
         for i, s in enumerate(l_hy):
-            sl = s.split()
-            key, g_s = sl[0], ' '.join(sl[1:])
+            key, g_s = s.split(maxsplit=1)
             l_hy[i] = (key, processor(g_s))
 
         l_hy = sorted(l_hy, key=lambda item: item[0])

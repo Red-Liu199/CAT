@@ -281,6 +281,11 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
             loss, norm_size = loss
         else:
             norm_size = features.size(0)
+
+        if torch.isinf(loss):
+            print(f"Warning: GPU[{args.gpu}] detect infinite loss, zero it out.")
+            loss.data.zero_()
+
         loss = loss / fold
         if not isinstance(norm_size, torch.Tensor):
             norm_size = input_lengths.new_tensor(

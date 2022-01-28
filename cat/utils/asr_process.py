@@ -84,6 +84,13 @@ def sentencepiece_train(intext: str, **kwargs):
         "unk_surface": "<unk>"
     }
     DEFAULT_SETTINGS.update(kwargs)
+    if 'user_defined_symbols' in DEFAULT_SETTINGS:
+        if os.path.isfile(DEFAULT_SETTINGS['user_defined_symbols']):
+            with open(DEFAULT_SETTINGS['user_defined_symbols'], 'r') as fi:
+                syms = fi.readlines()
+            DEFAULT_SETTINGS['user_defined_symbols'] = [x.strip()
+                                                        for x in syms]
+
     # available options https://github.com/google/sentencepiece/blob/master/doc/options.md
     spm.SentencePieceTrainer.Train(**DEFAULT_SETTINGS)
 
