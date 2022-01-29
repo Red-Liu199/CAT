@@ -283,7 +283,7 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
             norm_size = features.size(0)
 
         if torch.isinf(loss):
-            print(f"Warning: GPU[{args.gpu}] detect infinite loss, zero it out.")
+            # FIXME: this is not a proper fixing
             loss.data.zero_()
 
         loss = loss / fold

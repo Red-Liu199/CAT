@@ -78,7 +78,8 @@ class AMTrainer(nn.Module):
             label_lengths = label_lengths.cpu()
             with autocast(enabled=False):
                 loss = self.criterion(
-                    netout, labels, lens_o.to(torch.int), label_lengths)
+                    netout.float(), labels.to(torch.int),
+                    lens_o.to(torch.int), label_lengths.to(torch.int))
         else:
             # [N, T, C] -> [T, N, C]
             netout = netout.transpose(0, 1)
