@@ -6,9 +6,7 @@
         ],
         "test": [
             "test_meeting",
-            "test_net",
-            "dev",
-            "aishell-test"
+            "test_net"
         ],
         "filter": ":1000",
         "lang": "zh-cn"
@@ -19,14 +17,7 @@
         "grad-norm": 5.0,
         "databalance": true,
         "checkall": true,
-        "amp": true,
-        "len-norm": "L**1.2"
+        "amp": true
     },
-    "inference": {
-        "avgmodel": {
-            "mode": "last",
-            "num": 10
-        }
-    },
-    "commit": "d12381016a758d85b49e158831de3d5003123bcc"
+    "commit": "7d675520d33600c43f70e9811b27a468628b2970"
 }

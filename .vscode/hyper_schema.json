@@ -3,7 +3,6 @@
     "type": "object",
     "required": [
         "data",
-        "sp",
         "train"
     ],
     "properties": {

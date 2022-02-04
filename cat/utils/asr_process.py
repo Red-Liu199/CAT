@@ -676,8 +676,10 @@ if __name__ == "__main__":
     if s_beg <= 1 and s_end >= 1:
         print("{0} {1} {0}".format("="*20, "Stage 1 Tokenizer training"))
         fmt = "Stage 1  Tokenizer training: {}"
-
-        SentencePieceTrain(hyper_settings, f_hyper_settings, fmt)
+        if 'sp' not in hyper_settings:
+            print(fmt.format(f"missing 'sp' in hyper-setting, skip tokenizer training."))
+        else:
+            SentencePieceTrain(hyper_settings, f_hyper_settings, fmt)
 
     ############ Stage 2  Pickle data ############
     if s_beg <= 2 and s_end >= 2:
@@ -687,17 +689,23 @@ if __name__ == "__main__":
 
         assert 'data' in hyper_settings, fmt.format(
             f"missing 'data' in hyper-setting file {f_hyper_settings}")
-        assert 'sp' in hyper_settings, fmt.format(
-            f"missing 'sp' in hyper-setting file {f_hyper_settings}")
         if 'lang' in hyper_settings['data']:
             # check if it's chinese-like languages
             iszh = ('zh' == hyper_settings['data']['lang'].split('-')[0])
         else:
             iszh = False
 
-        _, (f_spm, _) = resolve_sp_path(hyper_settings['sp'])
-        checkExist('f', f_spm)
-        spmodel = spm.SentencePieceProcessor(model_file=f_spm)
+        if 'sp' not in hyper_settings:
+            print(fmt.format(
+                f"missing 'sp' in hyper-setting file, assume the ground truth text files as tokenized ones."))
+            istokenized = True
+            spmodel = None
+        else:
+            # use sentence piece to do tokenization
+            _, (f_spm, _) = resolve_sp_path(hyper_settings['sp'])
+            checkExist('f', f_spm)
+            spmodel = spm.SentencePieceProcessor(model_file=f_spm)
+            istokenized = False
 
         data_settings = hyper_settings['data']
         if 'filter' not in data_settings:
@@ -708,7 +716,7 @@ if __name__ == "__main__":
         for dataset in ['train', 'dev', 'test']:
             assert dataset in data_settings, fmt.format(
                 f"missing '{dataset}' in hyper-p['data']")
-            print(fmt.format(f" parsing {dataset} data..."))
+            print(fmt.format(f"parsing {dataset} data..."))
             f_texts = expandPath('t', data_settings[dataset], cwd)
             f_scps = expandPath('s', data_settings[dataset], cwd)
             if dataset == 'train':
@@ -720,18 +728,19 @@ if __name__ == "__main__":
                 d_pkl, dataset+'.pkl'),
                 filter=filter, spm=spmodel, iszh=iszh)
 
-        # generate word prefix tree from train set
-        from word_prefix_tree import WordPrefixParser
-        from word_prefix_tree import main as WPTMain
-        f_text = expandPath('t', data_settings['train'], cwd)[0]
-        wpt_settings = {
-            'intext': f_text,
-            'spmodel': f_spm,
-            'stripid': True,
-            'output': os.path.join(d_pkl, 'wpt.pkl')}
+        if not istokenized:
+            # generate word prefix tree from train set
+            from word_prefix_tree import WordPrefixParser
+            from word_prefix_tree import main as WPTMain
+            f_text = expandPath('t', data_settings['train'], cwd)[0]
+            wpt_settings = {
+                'intext': f_text,
+                'spmodel': f_spm,
+                'stripid': True,
+                'output': os.path.join(d_pkl, 'wpt.pkl')}
 
-        mp_spawn(WPTMain, updateNamespaceFromDict(wpt_settings, WordPrefixParser(), [
-            wpt_settings['intext'], wpt_settings['spmodel']]))
+            mp_spawn(WPTMain, updateNamespaceFromDict(wpt_settings, WordPrefixParser(), [
+                wpt_settings['intext'], wpt_settings['spmodel']]))
 
     ############ Stage 3  NN training ############
     if s_beg <= 3 and s_end >= 3:

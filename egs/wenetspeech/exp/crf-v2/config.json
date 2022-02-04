@@ -9,7 +9,7 @@
     "ctc-trainer": {
         "use_crf": true,
         "lamb": 0.01,
-        "den-lm": "../../tools/CAT/egs/n_wenetspeech/data/den_meta/den_lm.fst"
+        "den-lm": "../../tools/CAT/egs/wenetspeech/data/den_meta/den_lm.fst"
     },
     "encoder": {
         "type": "ConformerNet",
