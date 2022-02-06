@@ -165,7 +165,12 @@ def main(args: argparse.Namespace):
             l_gt[i] = (key, processor(g_s))
 
         for i, s in enumerate(l_hy):
-            key, g_s = s.split(maxsplit=1)
+            try:
+                key, g_s = s.split(maxsplit=1)
+            except ValueError:
+                # sentence is empty
+                key = s.strip()
+                g_s = ''
             l_hy[i] = (key, processor(g_s))
 
         l_hy = sorted(l_hy, key=lambda item: item[0])

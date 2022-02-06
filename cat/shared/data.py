@@ -209,6 +209,10 @@ class NbestListDataset(AbsDataset):
 
 
 class NbestListCollate():
+    """Collator for N-best list file.
+    The passing tokenizer should have method `encode` to convert text to indices.
+    """
+
     def __init__(self, tokenizer, bos_id: int = 0) -> None:
         self._tokenizer = tokenizer
         assert isinstance(

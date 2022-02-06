@@ -92,11 +92,20 @@ def main(args):
 
 def dataserver(args, q: mp.Queue):
     testset = NbestListDataset(args.nbestlist)
-    tokenizer = sp.SentencePieceProcessor(model_file=args.spmodel)
+
+    if args.tokenizer == 'sentencepiece':
+        tokenizer = sp.SentencePieceProcessor(model_file=args.spmodel)
+    elif args.tokenizer == 'jieba':
+        from ..shared.tokenizer import JiebaTokenizer
+        tokenizer = JiebaTokenizer(userdict=args.spmodel)
+    else:
+        raise RuntimeError(
+            f"Unknown tokenizer type \'{args.tokenizer}\', expected one of ['sentencepiece', 'jieba']")
+
     testloader = DataLoader(
         testset, batch_size=(4 if args.cpu else 32),
         shuffle=False,
-        num_workers=(args.world_size//8 if args.cpu else args.world_size),
+        num_workers=0,
         collate_fn=NbestListCollate(tokenizer))
 
     t_beg = time.time()
@@ -193,8 +202,11 @@ def RescoreParser():
                         help="The 'alpha' value for LM integration, a.k.a. the LM weight")
     parser.add_argument("--beta", type=float, default=0.6,
                         help="The 'beta' value for LM integration, a.k.a. the penalty of tokens.")
+    # TODO (huahun): rename this option to tokenizer-file
     parser.add_argument("--spmodel", type=str, default='',
                         help="SPM model location.")
+    parser.add_argument("--tokenizer", type=str, choices=['sentencepiece', 'jieba'], default='sentencepiece',
+                        help="Specify which tokenizer to use.")
 
     parser.add_argument("--nj", type=int, default=-1)
     parser.add_argument("--cpu", action='store_true', default=False)

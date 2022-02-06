@@ -32,18 +32,12 @@
             "mode": "best",
             "num": 10
         },
-        "subsample": 4,
-        "search-hyper": false,
-        "lmdir": "exp/lm-trans",
         "decode": {
             "algo": "rna",
             "beam_size": 16,
             "cpu": true,
-            "rescore": true,
             "nj": 80,
             "resume": "exp/rnnt-v1/checks/best-10.pt",
-            "alpha": 0.25,
-            "beta": 3.53125
         },
         "er": {
             "mode": "cer",

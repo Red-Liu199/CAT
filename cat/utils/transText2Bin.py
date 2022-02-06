@@ -23,7 +23,7 @@ import argparse
 import pickle
 import os
 import uuid
-import sentencepiece as spm
+import sentencepiece as sp
 from multiprocessing import Pool
 from typing import Union, Tuple, List
 
@@ -47,11 +47,25 @@ def text2bin(arguments: Tuple[argparse.Namespace, str, int, int]):
     if idx_end == -1:
         idx_end = float('inf')
 
-    if args.spm is not None:
-        spmodel = spm.SentencePieceProcessor(model_file=args.spm)
-        processor = spmodel.encode
-    else:
+    if args.tokenizer == 'raw':
         def processor(line): return [int(x) for x in line.split()]
+    elif args.tokenizer == 'sentencepiece':
+        assert os.path.isfile(args.spm)
+        spmodel = sp.SentencePieceProcessor(model_file=args.spm)
+        processor = spmodel.encode
+    elif args.tokenizer == 'jieba':
+        try:
+            import cat
+        except ModuleNotFoundError:
+            import sys
+            sys.path.append(os.getcwd())
+        from cat.shared.tokenizer import JiebaTokenizer
+        assert os.path.isfile(args.spm)
+        tknz = JiebaTokenizer(userdict=args.spm)
+        processor = tknz.encode
+    else:
+        raise RuntimeError(
+            f"Unknown tokenizer type \'{args.tokenizer}\', expected one of ['raw', 'sentencepiece', 'jieba']")
 
     dataset = []
     cnt_process = 0
@@ -62,7 +76,7 @@ def text2bin(arguments: Tuple[argparse.Namespace, str, int, int]):
             if i < idx_beg or i >= idx_end:
                 continue
             tot_line += 1
-            l_data = processor(line)
+            l_data = processor(line.strip())
 
             if args.truncate != -1:
                 # <s> + seq
@@ -161,8 +175,11 @@ def TextProcessingParser():
     parser.add_argument("intext", type=str,
                         help="Input text files (in token id if no --spm, or text  with --spm).")
     parser.add_argument("output", type=str, help="Ouput file.")
+    # TODO (huahun): rename this option to tokenizer-file
     parser.add_argument("--spm", type=str,
                         help="Location of sentencepiece model.")
+    parser.add_argument("--tokenizer", type=str, choices=['sentencepiece', 'jieba', 'raw'], default='sentencepiece',
+                        help="Specify which tokenizer to use.")
     parser.add_argument("--nj", type=int, default=1,
                         help="Number of threads. Default: 1")
     parser.add_argument("--concat", type=int, default=-1,

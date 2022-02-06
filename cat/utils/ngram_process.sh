@@ -78,14 +78,16 @@ else
     processing="python utils/readtextbin.py $textbin"
 fi
 
+# we need to manually rm the bos since lmplz tool would add it
 if [ $arpa == "True" ]; then
-    eval "$processing |
+    eval "$processing | cut -d ' ' -f 2- |
         lmplz -o $order $opts_ngram -S 80% --discount_fallback >$outlm"
 else
-    eval "$processing |
+    eval "$processing | cut -d ' ' -f 2- |
         lmplz -o $order $opts_ngram -S 80% --discount_fallback |
         build_binary /dev/stdin $outlm"
 fi
 
 # test
-python utils/ppl_compute_ngram.py $dir
+echo "N-gram LM training is finished. Use following command to evaluate model performance."
+echo "python utils/ppl_compute_ngram.py $dir"
