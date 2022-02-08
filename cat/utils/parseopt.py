@@ -38,6 +38,9 @@ if __name__ == "__main__":
 
     try:
         for arg, value in vars(parser.parse_args(argsin)).items():
+            if isinstance(value, list):
+                # deal with nargs='+' and nargs='*'
+                value = '\"'+' '.join([str(x) for x in value])+'\"'
             print(f"{arg}={value};")
 
     except SystemExit as se:

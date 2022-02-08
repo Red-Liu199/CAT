@@ -47,17 +47,20 @@ if __name__ == "__main__":
     if s_beg <= 1 and s_end >= 1:
         print("{0} {1} {0}".format("="*20, "Stage 1 Tokenizer training"))
         fmt = "Stage 1  Tokenizer training: {}"
-
-        assert 'sp' in hyper_settings, fmt.format(
-            f"missing 'sp' in hyper-setting file {f_hyper_settings}")
-
-        _, (spmodel, spvocab) = resolve_sp_path(hyper_settings['sp'])
-        try:
-            checkExist('f', [spmodel, spvocab])
+        if 'sp' not in hyper_settings:
             print(fmt.format(
-                f"found existing sentencepiece model at {spmodel}, skipped training."))
-        except FileNotFoundError:
-            SentencePieceTrain(hyper_settings, f_hyper_settings, fmt)
+                f"warning: missing 'sp' property in hyper-setting file {f_hyper_settings}, skip sentencepiece training."))
+        else:
+            assert 'sp' in hyper_settings, fmt.format(
+                f"missing 'sp' in hyper-setting file {f_hyper_settings}")
+
+            _, (spmodel, spvocab) = resolve_sp_path(hyper_settings['sp'])
+            try:
+                checkExist('f', [spmodel, spvocab])
+                print(fmt.format(
+                    f"found existing sentencepiece model at {spmodel}, skipped training."))
+            except FileNotFoundError:
+                SentencePieceTrain(hyper_settings, f_hyper_settings, fmt)
 
     ############ Stage 2  Pickle data ############
     if s_beg <= 2 and s_end >= 2:
