@@ -103,7 +103,7 @@ def dataserver(args, q: mp.Queue):
             f"Unknown tokenizer type \'{args.tokenizer}\', expected one of ['sentencepiece', 'jieba']")
 
     testloader = DataLoader(
-        testset, batch_size=(4 if args.cpu else 32),
+        testset, batch_size=4,
         shuffle=False,
         num_workers=0,
         collate_fn=NbestListCollate(tokenizer))

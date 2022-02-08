@@ -147,8 +147,8 @@ def worker(pid: int, args: argparse.Namespace, q: mp.Queue, fmt: str, model: Abs
             fi.write("{} {}\n".format(key, best_seq))
             del batch
 
-    with open(f"{local_writer}.nbest", 'wb') as fi:
-        pickle.dump(nbest, fi)
+    with open(f"{local_writer}.nbest", 'wb') as fo:
+        pickle.dump(nbest, fo)
     q.get()
 
 

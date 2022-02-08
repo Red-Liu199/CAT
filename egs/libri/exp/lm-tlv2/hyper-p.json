@@ -1,0 +1,19 @@
+{
+    "data": {
+        "train": [
+            "data/tlv2/train.txt"
+        ],
+        "dev": [
+            "data/tlv2/dev.txt"
+        ],
+        "test": [
+            "data/tlv2/test.txt"
+        ]
+    },
+    "sp": {
+        "model_type": "unigram",
+        "vocab_size": 1024,
+        "model_prefix": "sentencepiece/libri_unigram_1024/spm"
+    },
+    "commit": "bb42e467fca4fbd08e5c0b9745da8583f56c15ad"
+}
