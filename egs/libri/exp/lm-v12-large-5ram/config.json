@@ -2,7 +2,7 @@
     "decoder": {
         "type": "NGram",
         "kwargs": {
-            "f_binlm": "exp/lm-v12-large-5ram/5gram-libri-large-01122.klm",
+            "f_binlm": "exp/lm-v12-large-5ram/5gram-libri-large.klm",
             "gram_order": 5,
             "num_classes": 1024
         }
