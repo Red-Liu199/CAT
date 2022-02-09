@@ -63,6 +63,8 @@ def main(args):
     randomstr = str(uuid.uuid4())
     cachedir = '/tmp'
     assert os.path.isdir(cachedir), f"Cache directory not found: {cachedir}"
+    if not os.access(cachedir, os.W_OK):
+        raise PermissionError(f"Permission denied for writing to {cachedir}")
     fmt = os.path.join(cachedir, randomstr+r".{}.tmp")
 
     try:

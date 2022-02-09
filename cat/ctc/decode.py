@@ -43,6 +43,8 @@ def main(args: argparse.Namespace):
     args.world_size = world_size
 
     cachedir = '/tmp'
+    if not os.access(cachedir, os.W_OK):
+        raise PermissionError(f"Permission denied for writing to {cachedir}")
     fmt = os.path.join(cachedir, str(uuid.uuid4())+r".{}.tmp")
 
     try:

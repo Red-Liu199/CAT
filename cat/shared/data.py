@@ -68,8 +68,12 @@ class AbsDataset(Dataset):
                 return pickle.load(fi)
         else:
             ls = self.impl_get_len()
-            with open(f_linfo, 'wb') as fo:
-                pickle.dump(ls, fo)
+            if not os.access(f_linfo, os.W_OK):
+                print(
+                    f"Cannot write length info into dir: {os.path.dirname(f_linfo)}. Would reload it at the next time")
+            else:
+                with open(f_linfo, 'wb') as fo:
+                    pickle.dump(ls, fo)
             return ls
 
 
