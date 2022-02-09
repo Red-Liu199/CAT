@@ -30,7 +30,7 @@ if __name__ == "__main__":
                 f"--num-lines={args.num_lines} < 0 is invalid, expected valud >= 0")
         num_lines = args.num_lines
     else:
-        num_lines = float('inf')
+        num_lines = sum(1 for _ in open(args.corpus, 'r'))
 
     # prepare excluding list
     excluding_list = set()
@@ -62,3 +62,7 @@ if __name__ == "__main__":
                 cnt += 1
         except IOError:
             exit(0)
+
+    if cnt < num_lines:
+        raise RuntimeError(
+            f"Source corpus text doesn't have enough unique lines to export: {cnt} in total, expect {num_lines}")

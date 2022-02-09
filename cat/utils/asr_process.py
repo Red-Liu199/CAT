@@ -23,7 +23,8 @@ def mp_spawn(target: Callable, args: Union[tuple, argparse.Namespace]):
     worker.start()
     worker.join()
     if worker.exitcode is not None and worker.exitcode != 0:
-        raise RuntimeError("worker unexpectedly terminated.")
+        print("Worker unexpectedly terminated. See above info.")
+        exit(1)
 
 
 def resolve_sp_path(config: dict, prefix: Optional[str] = None, allow_making: bool = False):
@@ -210,7 +211,7 @@ def parsingData(
         f.close()
 
     with open(f_out, 'wb') as fo:
-        pickle.dump(f_data, fo)
+        pickle.dump(os.path.basename(f_data), fo)
         pickle.dump(_seeks, fo)
         pickle.dump(_keys, fo)
 

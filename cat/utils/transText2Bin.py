@@ -9,7 +9,7 @@ would create two files: (suppose --output=<f_text>)
 
 How to get the parsed data:
     with open('<f_text>', 'rb') as fi:
-        f_bin = pickle.load(fi)
+        f_bin = os.path.join(os.path.dirname('<f_text>'), pickle.load(fi))
         f_seeks = pickle.load(fi)
     
     with open(f_bin, 'rb') as fi:
@@ -148,9 +148,9 @@ def main(args: argparse.Namespace):
 
     print("> Sub-process done. Begin merging...")
 
-    randbin = '{}.bin'.format(args.output)
+    f_data = '{}.bin'.format(args.output)
     _seeks = []
-    with open(randbin, 'wb') as fo:
+    with open(f_data, 'wb') as fo:
         for i in range(num_threads):
             with open(fmt.format(i), 'rb') as fi:
                 part_dataset = pickle.load(fi)
@@ -162,11 +162,11 @@ def main(args: argparse.Namespace):
 
     with open(args.output, 'wb') as fo:
         # save the file name of binary file
-        pickle.dump(os.path.abspath(randbin), fo)
+        pickle.dump(os.path.basename(f_data), fo)
         # save the location information
         pickle.dump(_seeks, fo)
 
-    print("> Merged: Index {} --> binary {}".format(args.output, randbin))
+    print("> Merged: Index {} --> binary {}".format(args.output, f_data))
 
 
 def TextProcessingParser():

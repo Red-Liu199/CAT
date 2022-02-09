@@ -9,6 +9,7 @@
 
 from . import coreutils as utils
 
+import io
 import os
 import kaldiio
 import pickle
@@ -71,55 +72,77 @@ class AbsDataset(Dataset):
                 pickle.dump(ls, fo)
             return ls
 
+
+class IndexMappingDataset(AbsDataset):
+    def __init__(self, f_index: str) -> None:
+        super().__init__(f_index)
+        self.dataset = None
+        with open(f_index, 'rb') as fi:
+            self.f_data = os.path.join(os.path.dirname(
+                f_index), pickle.load(fi))  # type: str
+            if not os.path.isfile(self.f_data):
+                raise FileNotFoundError(
+                    f"\n{self.__class__.__name__}:\n"
+                    f"From indexing file {f_index} mapping to {self.f_data}\n"
+                    f"... but {self.f_data} is not found.")
+            self.offsets = pickle.load(fi)
+
+    def impl_get_len(self):
+        _ls = np.empty(len(self), dtype=np.int64)
+        for i in range(len(self)):
+            ''' NOTE (huahuan): 
+            suppose `__getitem__` method returns a tuple
+            ... where the first item is the feature;
+            ... if not the case, impl your custom `impl_get_len` method.
+            '''
+            x = self[i][0]
+            _ls[i] = x.size(0)
+        return _ls
+
+    def __len__(self) -> int:
+        return len(self.offsets)
+
+    @staticmethod
+    def _readbuffer(fileio: "io.BufferedReader"):
+        raise NotImplementedError
+
+    def __getitem__(self, index: int):
+        if self.dataset is None:
+            self.dataset = open(self.f_data, 'rb')
+        self.dataset.seek(self.offsets[index], 0)
+        # you should impl `_readbuffer` method of your derived class
+        return self._readbuffer(self.dataset)
+
+
 # NOTE (Huahuan):
 #    deprecate old speech dataset for better CPU memory efficiency,
 #    ... check https://pytorch.org/docs/stable/data.html#multi-process-data-loading
 #    ... for why this happened.
 
 
-class ModifiedSpeechDataset(AbsDataset):
-    def __init__(self, path: str) -> None:
-        super().__init__(path)
-        self.dataset = None
-        with open(path, 'rb') as fi:
-            self.f_data = pickle.load(fi)   # type: str
-            self._seeks = pickle.load(fi)   # type: np.array
+class ModifiedSpeechDataset(IndexMappingDataset):
+    """Speech dataset"""
 
-    def __len__(self) -> int:
-        return self._seeks.shape[0]
+    def __init__(self, f_index: str) -> None:
+        super().__init__(f_index)
 
-    def __getitem__(self, index):
-        if self.dataset is None:
-            self.dataset = open(self.f_data, 'rb')
-
-        self.dataset.seek(self._seeks[index], 0)
-        mat = np.load(self.dataset)
-        label = np.load(self.dataset)
+    @staticmethod
+    def _readbuffer(fileio: "io.BufferedReader"):
+        mat = np.load(fileio)
+        label = np.load(fileio)
         return torch.from_numpy(mat), torch.from_numpy(label)
 
-    def impl_get_len(self):
-        _ls = np.empty(len(self), dtype=np.int64)
-        for i in range(len(self)):
-            feature, _ = self[i]
-            _ls[i] = feature.size(0)
-        return _ls
 
+class CorpusDataset(IndexMappingDataset):
+    """LM corpus dataset"""
 
-class InferDataset(AbsDataset):
-    def __init__(self, scp_path) -> None:
-        super().__init__(scp_path)
-        with open(scp_path, 'r') as fi:
-            lines = fi.readlines()
-        self.dataset = [x.split() for x in lines]
-        self.freader = FeatureReader()
+    def __init__(self, f_index: str) -> None:
+        super().__init__(f_index)
 
-    def __len__(self):
-        return len(self.dataset)
-
-    def __getitem__(self, index):
-        key, feature_path = self.dataset[index]
-        mat = self.freader(feature_path)
-        return key, torch.tensor(mat, dtype=torch.float), torch.LongTensor([mat.shape[0]])
+    @staticmethod
+    def _readbuffer(fileio: "io.BufferedReader"):
+        x, y = pickle.load(fileio)
+        return torch.LongTensor(x), torch.LongTensor(y)
 
 
 class ScpDataset(AbsDataset):
@@ -157,35 +180,6 @@ class ScpDataset(AbsDataset):
         key, mat_path = self._dataset[index]
         mat = self.freader(mat_path)
         return [key, torch.tensor(mat, dtype=torch.float)]
-
-
-class CorpusDataset(AbsDataset):
-    def __init__(self, pickle_path: str) -> None:
-        super().__init__(pickle_path)
-        assert os.path.isfile(pickle_path)
-
-        self.dataset = None
-        with open(pickle_path, 'rb') as fi:
-            self._pathbin = pickle.load(fi)
-            self._seeks = pickle.load(fi)
-
-    def impl_get_len(self):
-        _ls = []
-        with open(self._pathbin, 'rb') as fi:
-            for _ in range(len(self)):
-                _ls.append(len(pickle.load(fi)[0]))
-        return _ls
-
-    def __len__(self):
-        return len(self._seeks)
-
-    def __getitem__(self, index: int) -> torch.LongTensor:
-        if self.dataset is None:
-            self.dataset = open(self._pathbin, 'rb')
-
-        self.dataset.seek(self._seeks[index], 0)
-        x, y = pickle.load(self.dataset)
-        return torch.LongTensor(x), torch.LongTensor(y)
 
 
 class NbestListDataset(AbsDataset):

@@ -196,6 +196,10 @@ class Manager(object):
                 # self.monitor.export()
 
             if state == 2:
+                # backup the last checkpoint
+                if args.checkall and self.rank == 0 and not self.DEBUG:
+                    shutil.copyfile(checkpoint, os.path.join(
+                        args.checksdir, "checkpoint.pt"))
                 utils.distprint("Terminated: GPU[%d]" % self.rank, args.gpu)
                 dist.barrier()
                 break
