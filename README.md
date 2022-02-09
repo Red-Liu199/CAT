@@ -146,7 +146,7 @@ egs/<task>/exp/template
 
 `hyper-p.json`, example taken from `egs/libri`
 
-```json
+```
 {
     // data pre-processing related
     "data": {
