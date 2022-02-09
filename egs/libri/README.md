@@ -1,35 +1,41 @@
-[960 hour英文数据集，阅读类型
-
+## Data
+- 960 hour英文数据集，阅读类型
 - [Github page](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/libri)
 - 特征提取：80维FBank+CMVN
-- PN: prediction network, TN: transcription network, or encoder
-- If no further statement, joint network is feed-forward model, PN is LSTM and TN is Conformer, they just differ in hidden size/number of layers in experiments.
+- Text corpus数据准备
 
+	```bash
+	# in egs/libri/
+	bash local/prepare_extra_corpus.sh
+	```
+- `hyper-p.json`中配置LM训练数据集
+	```json
+	"data": {
+	
+		"train": ["data/librispeech.txt", "train_960"],
+		
+		"dev": ["dev_clean", "dev_other"],
+		
+		"test": ["test_clean", "test_other"],
+		...
+	},
+	...
+	```
+	其中`train, dev, test`分别设置训练、开发、测试集数据，以训练集数据为例，其中包含`data/librispeech.txt` 和 `train_960`。`utils/*_process.py[sh]` 脚本对此的处理逻辑是：
+	1. 首先尝试直接将其解析为文件，如果该文件存在，则直接选取；例如`data/librispeech.txt`如果存在，则可以直接读取；
+	2. 若第1步未找到文件，则尝试在CAT对应egs目录下搜索；例如`train_960`在当前目录没有这一文件，则会尝试在`tools/CAT/egs/libri/data`下寻找`train_960`目录，并取`train_960/text`作为数据
+	第1步解析到的文件会直接被作为LM训练语料；第2步解析的文件会将居首用` `, `\t` 分割的句子id去除，作为训练语料。该解析过程代码位于[priorResolvePath](https://github.com/maxwellzh/Transducer-dev/blob/586501dfd9b01eb8300085812e77be846b4617b7/cat/utils/asr_process.py#L396-L428)
+- 对ASR训练而言，声学特征和文本特征必须匹配，因此只支持上述第二种数据解析方式
 
-Results in `%WER (%WER with LM) / %WER on averaging model [%WER oracle]`
+## Result
 
-| ID                                                                                                 | Notes                                                                                                    | test-clean       | test-other       | ext LM         | \# params (M)           |
-| -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ---------------- | ---------------- | -------------- | ----------------------- |
-| [v1](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/libri/exp/rnnt-v1-wp1024)           | BPE1024, all from scratch                                                                                | 5.63             | 13.33            | -              | 13.11                   |
-| v3                                                                                                 | `v1` + pretrained and fixed PN & TN                                                                      | 11.66            | 21.64            | -              | trainable\:? all\:13.11 |
-| [v4](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/libri/exp/rnnt-v4-joint-pretrained) | `v1` + pretrained PN & TN                                                                                | 5.35             | 12.66            | -              | 13.11                   |
-| [v5](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/libri/exp/rnnt-v5-lstmonAM)         | `v1` + pretrained and fixed PN & TN, 2 extra LSTM on TN                                                  | 6.44             | 15.06            | -              | trainable\:5.52         |
-| [v7](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/libri/exp/rnnt-v7-lstmOnBothSide)   | `v5` + 2 extra LSTM on PN                                                                                | 6.54             | 15.42            | -              | trainable\:9.72         |
-| [v9](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/libri/exp/rnnt-v9-embeddingPN)      | `v1` + replace PN with embedding only layer                                                              | 7.94(6.28)       | 17.00(14.29)     | 0.3 LSTM       | 8.65                    |
-| [v11](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/libri/exp/rnnt-v11-longrun)        | BPE4096 + stop at 40k steps                                                                              | 5.55(5.34)       | 12.47(12.10)     | 0.1 LSTM       | 13.06                   |
-| [v19](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/libri/exp/rnnt-v19)                | `v1` + rm redundant linear layers, variational noise, sync BN, time reduction 2, batch size\: 560 -> 512 | 4.64             | 11.54            | -              | 10.33                   |
-| [v20](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/libri/exp/rnnt-v19)                | `v19` + peak factor\: 1.0 -> 5.0, stop lr\: 1e-6 -> 1e-3                                                 | 4.50/4.30        | 10.76/10.17      | -              | 10.33                   |
-| [v21](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/libri/exp/rnnt-v21)                | `v20` + stop at 200 epochs                                                                               | 4.05/3.81        | 10.03/9.38       | -              | 10.33                   |
-| [v23](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/libri/exp/rnnt-v23)                | `v21` + fix dataloader bug                                                                               | 3.75/3.65        | 9.50/9.01        | -              | 10.33                   |
-| [v24](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/libri/exp/rnnt-v24)                | follow settings of aishell `v14`                                                                         | 3.19/2.97        | 7.89/7.31        | -              | 81.01                   |
-| [v25](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/libri/exp/rnnt-v25)                | `v24` + adjust scheduler                                                                                 | 3.01/2.70        | 7.46/6.70        | -              | ↑                       |
-| [v26](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/libri/exp/rnnt-v26)                | same encoder as the ASRU advancing libri model                                                           | 2.68\[1.99\]     | 6.28\[5.22\]     | -              | 62.24                   |
-| [v27](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/libri/exp/rnnt-v27)                | 2048 batch size + large conformer                                                                        | **2.37\[2.00\]** | **5.46\[4.63\]** | -              | 120.42                  |
-| [v28](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/libri/exp/rnnt-v28)                | `v27` + Conformer: large -> medium                                                                       | 2.72\[2.18\]     | 6.45\[5.82\]     | -              | 32.48                   | 
-| [ESPNET-2](https://github.com/espnet/espnet/tree/master/egs2/librispeech/asr1#with-transformer-lm) | Conformer encoder                                                                                        | 2.6(2.1)         | 6.0(4.7)         | transformer LM | ?                       |
+format in `%WER (%WER with LM) / %WER on averaging model [%WER oracle]`
 
-- `v24` 训得不太好，学习率太小
-- `v25` 仍有改进空间，～100epoch即过拟合
+| ID                                                                                                 | Notes                                   | test-clean       | test-other       | ext LM         | \# params (M) |
+| -------------------------------------------------------------------------------------------------- | --------------------------------------- | ---------------- | ---------------- | -------------- | ------------- |
+| CRF-v1                                                                                             | CTC-CRF phone modeling, conformer model | 2.76             | 5.53             | -              | 115.12        |
+| [v27](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/libri/exp/rnnt-v27)                | 2048 batch size + large conformer       | **2.37\[2.05\]** | **5.46\[4.55\]** | transformer LM | 120.42        |
+| [ESPNET-2](https://github.com/espnet/espnet/tree/master/egs2/librispeech/asr1#with-transformer-lm) | Conformer encoder                       | 2.6(2.1)         | 6.0(4.7)         | transformer LM | ?             |
 
 ## Beam search
 test-clean, `# frames=1940626` -> `total time=19406.26 s`
@@ -55,30 +61,29 @@ test-clean, `# frames=1940626` -> `total time=19406.26 s`
 
 - Time is measured on server15 with 80 processes
 
-Fusion, fix $\beta=0.6$ in experiments:
+LM integration formula:
 $$
 \begin{aligned}
 &\text{without LM: } \hat{y} = \mathop{\arg\max}_y (\log P_{RNN-T}(Y|X)) \\
-&\text{with LM: } \hat{y} = \mathop{\arg\max}_y (\log P_{RNN-T}(Y|X) + \lambda \log P_{LM}(Y) + \beta |Y|)
+&\text{with LM: } \hat{y} = \mathop{\arg\max}_y (\log P_{RNN-T}(Y|X) + \alpha \log P_{LM}(Y) + \beta |Y|)
 \end{aligned}
 $$
 
-Language model
+Language model (char modeling if no further statement)
 
-| ID                                                                                    | LM          | Data                                | \#param      | ppl   | word level ppl |
-| ------------------------------------------------------------------------------------- | ----------- | ----------------------------------- | ------------ | ----- | -------------- |
-| [lm-v8](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/libri/exp/lm-v8)    | Transformer | Libri transcript                    | 10.27M       | 27.39 | 220.53         |
-| [lm-v9](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/libri/exp/lm-v9)    | Transformer | Libri transcript + text book corpus | 87.42M       | 15.74 | 89.39          |
-| [lm-5gram](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/libri/exp/5gram) | 5-gram      | Libri transcript + text book corpus | 15GB on disk | 25.58 | 197.32         |
+| ID                                                                                               | Model                  | Data                                | \#param (M)   | ppl   | word level ppl |
+| ------------------------------------------------------------------------------------------------ | ---------------------- | ----------------------------------- | ------------- | ----- | -------------- |
+| [lm-v10](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/libri/exp/lm-v10)             | Transformer            | Libri transcript + text book corpus | 87.42         | 13.25 | ?              |
+| [lm-v11](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/libri/exp/lm-v11-trans-5gram) | 5-gram                 | Libri transcript                    | 489MB on disk | 32.20 | ?              |
+| [lm-v12](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/libri/exp/lm-v12-large-5ram)  | 5-gram                 | Libri transcript + text book corpus | 15GB on disk  | 23.15 | ?              | 
+| -                                                                                                | char 5gram TRF         |                                     |               |       |                |
+| -                                                                                                | word 3gram -> char TRF |                                     |               |       |                |
 
+LM integration results (baseline result from `rnnt-v27`), $\alpha$ and $\beta$ are searched on `dev-other` set
 
-| Model | $\lambda$         | beam size | test-clean | time    | test-other | time    |
-| ----- | ----------------- | --------- | ---------- | ------- | ---------- | ------- |
-| no lm | 0.0               | 8         | 2.38       | 127.48  | 5.42       | 126.23  |
-| no lm | 0.0               | 16        | 2.38       | 142.44  | 5.40       | 140.31  |
-| lm-v8 | 0.2               | 8         | 2.31       | 401.47  | 5.17       | 381.06  |
-| lm-v9 | 0.2               | 8         | 2.11       | ~2300   | 4.82       | ~2300   |
-| lm-v9 | 0.35              | 16        | 1.99       | 3992.16 | 4.52       | 3201.48 |
-| lm-v9 | 0.40              | 16        | 1.97       | -       | 4.47       | -       |
-| lm-v9 | 0.45              | 16        | 1.96       | -       | 4.44       | -       |
-| 5gram | 0.35 (well-tuned) | 16        | 2.14       | 191.54  | 4.80       | 187.82  |
+| Model    | method  | $\alpha$ | $\beta$ | dev-clean | dev-other | test-clean | test-other |
+| -------- | ------- | -------- | ------- | --------- | --------- | ---------- | ---------- |
+| baseline | -       | -        | -       | 2.18      | 5.34      | 2.39       | 5.41       |
+| lm-v10   | rescore | 0.75     | 0.88    | 1.90      | 4.34      | 2.05       | 4.55       |
+| lm-v11   | rescore | 0.50     | 1.03    | 2.25      | 5.06      | 2.42       | 5.24       |
+| lm-v12   | rescore | 0.63     | 1.19    | 2.10      | 4.76      | 2.20       | 4.96       | 

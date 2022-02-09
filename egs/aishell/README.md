@@ -1,10 +1,13 @@
+## Data
 170 hour普通话数据集，阅读类型
 
 - [Github page](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell)
 - 基础设置参考[[Librispeech]]
 - 特征提取增加了3倍变速
 
-Results in`%WER (%WER with LM) [%WER oracle]`
+## Result
+
+format in `%WER (%WER with LM) [%WER oracle]`
 
 | ID                                                                                                                                                | Notes                                                                          | test %CER         | averaging | \#params (M) |
 | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ----------------- | --------- | ------------ |
@@ -18,7 +21,9 @@ Results in`%WER (%WER with LM) [%WER oracle]`
 | [v11](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/rnnt-v11)                                                             | `v10` + disable time warp, stop epoch\: 100 -> 80                              | 5.19\[3.99\]      | best 10   | ↑            |
 | [v12](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/rnnt-v12)                                                             | `v10` + PN mask, stop epoch\: 100 -> 80                                        | 4.86\[3.46\]      | last 10   | ↑            |
 | [v13](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/rnnt-v13)                                                             | `v12` + PN mask ratio: 0.2 -> 0.3, No. PN mask: 4 -> 3, stop epochs: 80 -> 100 | 4.81\[3.53\]      | best 10   | ↑            |
-| [v14](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/rnnt-v14)                                                             | `v12` + subsample: conv2d -> vgg2l, stop epochs: 80 -> 100                     | **4.77** \[3.41\] | best 10   | 84.30        |
+| [v14](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/rnnt-v14)                                                             | `v12` + subsample: conv2d -> vgg2l, stop epochs: 80 -> 100                     | **4.77** \[3.41\] | ↑         | 84.30        |
+| [v15](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/rnnt-v15)                                                             | `v14` + add `<bos>` token + 5-gram LM trained on transcript                    | 4.82/4.69         | ↑         | ↑            |
+| [CTC-v1](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/aishell/exp/ctc-v1)                                                            | use the same encoder and tokenizer as `v15`                                    | 5.75/5.38         | ↑         | 68.19        |
 | [ESPnet-1](https://github.com/espnet/espnet/blob/master/egs/aishell/asr1/RESULTS.md#conformer-transducer-with-auxiliary-task-ctc-weight--05)      | RNN-T + CTC                                                                    | 4.8               | ?         | ~84.30       |
 | [ESPnet-2](https://github.com/espnet/espnet/tree/master/egs2/aishell/asr1#conformer--specaug--speed-perturbation-featsraw-n_fft512-hop_length128) | CTC/Attention, result with transformer LM in `()`                              | 4.9(4.7)          | ?         | ?            |
 
@@ -55,6 +60,6 @@ $$
 
 | Model | $\lambda$ | ppl   | CER (%) | RTF  |
 | ----- | --------- | ----- | ------- | ---- |
-| no lm | -         | -     | 4.82    | 0.53 | 
-| lm-v4 | 0.15      | 77.22 | 4.69    | 1.11 |
-| lm-v5 | 0.50      | 64.97 | 3.67    | 1.30 |
+| no lm | -         | -     | 4.82    | 0.53 |
+| lm-v5 | 0.15      | 77.22 | 4.69    | 1.11 |
+| lm-v4 | 0.50      | 64.97 | 3.67    | 1.30 |

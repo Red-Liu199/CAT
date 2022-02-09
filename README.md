@@ -1,12 +1,8 @@
 # Transducer toolkit for speech recognition
 
-## In-house SOTA Results 
+## TODO
 
-- [Librispeech](egs/libri): 1.96/4.44, WER% for test-clean/test-other
-- [AIshell-1](egs/aishell): 4.69 %CER and 3.67 with extra corpus
-
-## Road Map
-
+- [ ] universal tokenizer support
 - [ ] Internal language model estimation
 - [ ] rename `*_process.*` -> `*_pipe.*`
 - [ ] \[low priorty\] pythonize n-gram training pipeline
@@ -28,7 +24,7 @@
       - [CAT](https://github.com/thu-spmi/CAT): **This is optional if you just do language model training.** 
          After installing the CAT, please refers to the details in [tools/README.md](tools/README.md)
         and link directory.
-     
+       
          ```bash
          cd tools/
          ln -s <CAT> ./
@@ -84,12 +80,11 @@ In this repo, we support RNN-T, Language model and CTC/CTC-CRF model training as
   python utils/lm_process.py exp/template
   ```
 
-- **CTC:** Training CTC model shares most of the configurations with RNN-T. Set `"topo":"ctc"` in the `hyper-p.json` file to enable CTC training.
- Unfortunately, there's no available template file like RNN-T and LM training. 
- I'll add it soon or later, but that is not on my current schedule.
+- **CTC:** Training CTC model shares most of the configurations with RNN-T. Add `"topo": "ctc"` in the `hyper-p.json` file to enable CTC training.
+ **NOTE:** CTC-CRF training is somewhat more complex, which means you should be familiar with the CAT tool and there is no such "one-click" script like training RNN-T/CTC model.
 
   ```bash
-  # same as RNN-T, cd egs/<task>/
+  # train CTC, the same as RNN-T, cd egs/<task>/
   python utils/asr_process.py exp/template
   ```
 
@@ -109,9 +104,9 @@ cp ../../.vscode/{hyper_schema,schemas}.json ./.vscode/
 
 And add following contents into the file `egs/<task>/.vscode/settings.json`:
 
-```
+```json
 {
-    ...,		// there might be existing settings
+    ...,        // there might be existing settings
     "json.schemas": [
         {
             "fileMatch": [
@@ -134,46 +129,67 @@ With all these properly setup, intellisense will be enable when editting `egs/<t
 For more about how schema works, refer to [JSON editing in Visual Studio Code](https://code.visualstudio.com/docs/languages/json)
 
 <img src="assets/intellisense.gif" alt="intellisense" style="zoom:50%;" />
-  
-Also, you can manually check the details of settings as following:
 
-**Global hyper-parameter setting:** `exp/<task>/template/hyper-p.json`, example taken from `egs/libri`
+Also, you can manually check the details of settings as following.
+
+### Configuration of training
+
+Basically, I use two files to control the whole pipeline of data-preparation / tokenizer training / model training / evaluation, which commonly look like
 
 ```
+egs/<task>/exp/template
+├── config.json
+└── hyper-p.json
+```
+
+#### Hyper-parameter configuration
+
+`hyper-p.json`, example taken from `egs/libri`
+
+```json
 {
-    "data": {    // data pre-processing related
+    // data pre-processing related
+    "data": {
         "train": ...,
         "dev": ...,
         "test": ...,
-        "filter": ":2000",    // for ASR task only, filter out sentences longer than 2000 (frames)
-        "text_processing": {  // for LM task only, truncate the sentences by 128 (tokens)
+        // "filter" is for ASR task only, filter out utterances shorter than 10 and longer than 2000 (frames)
+        "filter": "10:2000",
+        // "text_processing" is for LM task only. code: utils/transText2Bin.py
+        "text_processing": {
+            // truncate the utterances by 128 (tokens)
             "truncate": 128
         }
     },
-    "sp": {    // SentencePiece model training related, for supported options, refer to:
-               // https://github.com/google/sentencepiece/blob/master/doc/options.md 
+    // SentencePiece model training related, for supported options, refer to:
+    // https://github.com/google/sentencepiece/blob/master/doc/options.md 
+    "sp": {
         ...
     },
-    "train": {    // NN training related setting, for supported options (in egs/<task>/):
-                  // for RNN-T task, run 'python -m cat.rnnt -h'
-                  // for CTC task, run 'python -m cat.ctc -h'
-                  // for LM task, run 'python -m cat.lm -h'
+    // NN training related setting, for supported options (in egs/<task>/):
+    // RNN-T: run 'python -m cat.rnnt -h'
+    // CTC: run 'python -m cat.ctc -h'
+    // LM: run 'python -m cat.lm -h'
+    "train": {
         ...
     },
-    "inference": {    // for ASR only, decoding related setting
-        "avgmodel": {        // model averaging setting, optional
+    // "inference" is for ASR only, decoding related setting
+    "inference": {
+        // model averaging setting, optional
+        "avgmodel": {
             "mode": "best",  // 'best' of 'last'
             "num": 10        // number of checkpoints to be averaged
         },
-        "subsample": 4,      // optional, tell the subsampling factor of RNN-T encoder
-        "decode": {   // decoding setting, for support options (in egs/<task>/):
-                      // RNN-T: run 'python -m cat.rnnt.decode -h'
-                      // CTC: run 'python -m cat.ctc.decode -h'
+        // decoding setting, for support options (in egs/<task>/):
+        // RNN-T: run 'python -m cat.rnnt.decode -h'
+        // CTC: run 'python -m cat.ctc.decode -h'
+        "decode": {
             ...
         },
-        "er": {		// WER/CER computing setting
-            "mode": "wer",		// 'wer' or 'cer'
-            "oracle": true		// compute oracle wer for N-best list or not
+        // WER/CER computing setting, run `python utils/wer.py -h` for more options
+        "er": {
+            "mode": "wer",  // 'wer' or 'cer'
+            "oracle": true  // compute oracle wer for N-best list or not
         }
     },
     // the git commit hash, useful to reproduce the experiment
@@ -181,45 +197,58 @@ Also, you can manually check the details of settings as following:
 }
 ```
 
-**NN configuration:** `exp/<task>/template/config.json`, example taken from `egs/libri`
+#### Neural network configuration
+
+`config.json`, example taken from `egs/libri`
 
 ```
 {
+    // for ASR only, code: cat/shared/_specaug.py
     "specaug_config": {
-      // for ASR only, check class 'SpecAug' in cat/shared/_specaug.py for details
         ...
     },
+    // required for CRF, optional for CTC, code: `build_model()` in cat/ctc/train.py
+    "ctc-trainer": {
+        "use_crf": false,           // enable CRF loss or not, if false, following two options would be useless.
+        "lamb": 0.01,               // weight of CTC loss once enable CRF loss
+        "den-lm": "/path/to/den_lm" // location of denominator LM
+    },
+    // required for RNN-T, code: class 'TransducerTrainer' in cat/rnnt/train.py
     "transducer": {
-      // for RNN-T only, check class 'TransducerTrainer' in cat/rnnt/train.py for details
         ...
     },
-    "joint": {	// for RNN-T only
-        "type": ...,   // can be any of modules in cat/rnnt/__init__.py
-        "kwargs": {    // setting according to 'type'
+    // required for RNN-T, code: cat/rnnt/joint.py
+    "joint": {
+        "type": ...,   // can be any class derived from 'AbsJointNet' in cat/rnnt/joint.py
+        "kwargs": {    // arguments according to 'type'
             ...
         }
     },
-    "encoder": {	// for ASR only
-        "type": ...,   // can be any of derived classes of 'AbsEncoder' in cat/shared/encoder.py
-        "kwargs": {    // setting according to 'type'
+    // required for ASR task, code: cat/shared/encoder.py
+    "encoder": {
+        "type": ...,   // can be any class derived from 'AbsEncoder' in cat/shared/encoder.py
+        "kwargs": {    // arguments according to 'type'
             ...
         }
     },
-    "decoder": {	// for both RNN-T and LM
-        "type": ...,   // can be any of derived classes of 'AbsDecoder' in cat/shared/decoder.py 
-        "kwargs": {
+    // required for both RNN-T and LM, code: cat/shared/decoder.py 
+    "decoder": {
+        "type": ...,   // can be any class derived from 'AbsDecoder' in cat/shared/decoder.py 
+        "kwargs": {    // arguments according to 'type'
             ...
         }
     },
-    "scheduler": {	// scheduler setting
-        "type": ...,   // can be any of derived classes of `Scheduler` in cat/shared/scheduler.py
-        "kwargs": {    // setting according to 'type'
+    // scheduler settings, required for all NN model training. code: cat/shared/scheduler.py
+    "scheduler": {
+        "type": ...,   // can be any class derived from `Scheduler` in cat/shared/scheduler.py
+        "kwargs": {    // arguments according to 'type'
             ...
         },
-        "optimizer": {  // optimizer settings
+        // optimizer settings
+        "optimizer": {
             "type": ...,       // all available ones in torch.optim
-            "use_zero": true,  // flag of whether use ZeroRedundancyOptimizer for less memory usage.
-            "kwargs": {        // setting according to 'type'
+            "use_zero": true,  // flag of whether use 'ZeroRedundancyOptimizer' for less memory usage.
+            "kwargs": {        // arguments according to 'type'
                 ...
             }
         }
