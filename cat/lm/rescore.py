@@ -105,7 +105,7 @@ def dataserver(args, q: mp.Queue):
             f"Unknown tokenizer type \'{args.tokenizer}\', expected one of ['sentencepiece', 'jieba']")
 
     testloader = DataLoader(
-        testset, batch_size=4,
+        testset, batch_size=1,
         shuffle=False,
         num_workers=0,
         collate_fn=NbestListCollate(tokenizer))
@@ -135,15 +135,9 @@ def main_worker(pid: int, args: argparse.Namespace, q: mp.Queue, fmt: str = "res
     if args.cpu:
         device = 'cpu'
         torch.set_num_threads(1)
-        dist.init_process_group(
-            backend='gloo', init_method=args.dist_url,
-            world_size=world_size, rank=args.rank)
     else:
         device = pid
         torch.cuda.set_device(device)
-        dist.init_process_group(
-            backend='nccl', init_method=args.dist_url,
-            world_size=world_size, rank=args.rank)
 
     if model is None:
         model = build_lm(args.config, args.resume, device)

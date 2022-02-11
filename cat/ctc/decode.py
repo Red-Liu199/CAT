@@ -102,12 +102,7 @@ def dataserver(args, q: mp.Queue):
 def worker(pid: int, args: argparse.Namespace, q: mp.Queue, fmt: str, model: AbsEncoder):
     if pid == args.world_size:
         return dataserver(args, q)
-    world_size = args.world_size
-
     torch.set_num_threads(args.thread_per_woker)
-    dist.init_process_group(
-        backend='gloo', init_method=args.dist_url,
-        world_size=world_size, rank=pid)
 
     sp = spm.SentencePieceProcessor(model_file=args.spmodel)
     vocab_size = sp.get_piece_size()

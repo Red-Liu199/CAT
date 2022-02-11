@@ -6,11 +6,12 @@ Uage:
 
 
 import os
+import sys
 import json
 import uuid
 import pickle
 import argparse
-from typing import Union, Literal, List, Tuple, Optional, Callable
+from typing import Union, Literal, List, Tuple, Optional, Callable, Dict
 from multiprocessing import Process
 
 
@@ -23,7 +24,7 @@ def mp_spawn(target: Callable, args: Union[tuple, argparse.Namespace]):
     worker.start()
     worker.join()
     if worker.exitcode is not None and worker.exitcode != 0:
-        print("Worker unexpectedly terminated. See above info.")
+        sys.stderr.write("Worker unexpectedly terminated. See above info.\n")
         exit(1)
 
 
@@ -31,8 +32,8 @@ def resolve_sp_path(config: dict, prefix: Optional[str] = None, allow_making: bo
     if 'model_prefix' in config:
         spdir = os.path.dirname(config['model_prefix'])
         if not os.path.isdir(spdir):
-            print(
-                f"Warning: trying to resolve from an empty directory: {spdir}")
+            sys.stderr.write(
+                f"WARNING: trying to resolve from an empty directory: {spdir}\n")
             if allow_making:
                 os.makedirs(spdir)
         return config, (config['model_prefix']+'.model', config['model_prefix']+'.vocab')
@@ -122,9 +123,9 @@ def parsingData(
     f_linfo = f_out + '.linfo'
 
     if os.path.isfile(f_out):
-        print("\nWARNING: parsingData\n"
-              f"  file exists: {f_out}, "
-              "rm it if you want to update the data.\n")
+        sys.stderr.write("\nWARNING: parsingData\n"
+                         f"  file exists: {f_out}, "
+                         "rm it if you want to update the data.\n\n")
         checkExist('f', f_data)
         return
 
@@ -335,8 +336,7 @@ def NNTrain(
             generate_visible_gpus(args.ngpu)
 
     if 'sp' not in settings:
-        print("WARNING:",
-              promt.format("'sp' not in hyper-setting"))
+        sys.stderr.write("WARNING: 'sp' not in hyper-setting\n")
     else:
         _, (_, spvocab) = resolve_sp_path(settings['sp'])
         checkExist('f', spvocab)
@@ -354,7 +354,8 @@ def NNTrain(
             json.dump(nnconfig, fo, indent=4)
 
     if subprocess.run('command -v git', shell=True, capture_output=True).returncode != 0:
-        print(promt.format("git command not found. Suppress saving git commit."))
+        sys.stderr.write(
+            "WARNING: git command not found. Suppress saving git commit.\n")
     else:
         process = subprocess.run(
             "git log -n 1 --pretty=format:\"%H\"", shell=True, check=True, stdout=subprocess.PIPE)
@@ -369,26 +370,26 @@ def NNTrain(
         train_data = fmt_data.format('train')
         checkExist('f', train_data)
         training_settings['trset'] = train_data
-        print(promt.format(f"set 'trset' to {train_data}"))
+        sys.stdout.write(promt.format(f"set 'trset' to {train_data}\n"))
     if 'devset' not in training_settings:
         dev_data = fmt_data.format('dev')
         checkExist('f', dev_data)
         training_settings['devset'] = dev_data
-        print(promt.format(f"set 'devset' to {dev_data}"))
+        sys.stdout.write(promt.format(f"set 'devset' to {dev_data}\n"))
     if 'world-size' not in training_settings:
         training_settings['world-size'] = 1
     if 'rank' not in training_settings:
         training_settings['rank'] = 0
     if 'dir' not in training_settings:
         training_settings['dir'] = args.expdir
-        print(promt.format(f"set 'dir' to {args.expdir}"))
+        sys.stdout.write(promt.format(f"set 'dir' to {args.expdir}\n"))
     if 'workers' not in training_settings:
         training_settings['workers'] = 2
-        print(promt.format(f"set 'workers' to 2"))
+        sys.stdout.write(promt.format(f"set 'workers' to 2\n"))
     if 'dist-url' not in training_settings:
         training_settings['dist-url'] = f"tcp://localhost:{get_free_port()}"
-        print(promt.format(
-            f"set 'dist-url' to {training_settings['dist-url']}"))
+        sys.stdout.write(promt.format(
+            f"set 'dist-url' to {training_settings['dist-url']}\n"))
 
     mp_spawn(MainFunc, updateNamespaceFromDict(training_settings, Parser))
 
@@ -523,13 +524,13 @@ def hyperParamSearch(
     except ModuleNotFoundError:
         import sys
         sys.path.append(cwd)
-        from wer import WERParser
-        from wer import main as WERMain
+    from wer import WERParser
+    from wer import main as WERMain
 
-        from cat.lm.rescore import (
-            RescoreParser,
-            main as RescoreMain
-        )
+    from cat.lm.rescore import (
+        RescoreParser,
+        main as RescoreMain
+    )
 
     if topo == 'rnnt':
         from cat.rnnt.decode import DecoderParser
@@ -548,8 +549,8 @@ def hyperParamSearch(
         decode_settings['alpha'] = None
         decode_settings['beta'] = None
         # generate nbest-list file
-        decode_settings['dist-url'] = f"tcp://localhost:{get_free_port()}"
-        print(fmt.format(f"generate n-best list w/o LM at {nbestlist}"))
+        sys.stdout.write(fmt.format(
+            f"generate n-best list w/o LM at {nbestlist}"))
         DecoderMain(updateNamespaceFromDict(
             decode_settings, DecoderParser()))
         os.remove(decode_settings['output_prefix'])
@@ -564,9 +565,11 @@ def hyperParamSearch(
         'nj': decode_settings['nj'] if 'nj' in decode_settings else 16,
         'cpu': decode_settings['cpu'] if 'cpu' in decode_settings else True
     }
-    tuning_val = [0, 0]
 
     def _evaluate():
+        mapkey = f"{tuning_val[0]}:{tuning_val[1]}"
+        if mapkey in searchout:
+            return searchout[mapkey]
 
         rescore_setting.update({
             'alpha': tuning_val[0],
@@ -578,7 +581,6 @@ def hyperParamSearch(
         print(
             f"Setting: alpha = {tuning_val[0]:.2f} | beta = {tuning_val[1]:.2f}")
 
-        rescore_setting['dist-url'] = f"tcp://localhost:{get_free_port()}"
         RescoreMain(updateNamespaceFromDict(
             rescore_setting, RescoreParser(), [rescore_setting['nbestlist'], rescore_setting['output']]))
 
@@ -591,6 +593,7 @@ def hyperParamSearch(
                       er_settings['gt'], er_settings['hy']]))
 
         os.remove(rescore_setting['output'])
+        searchout[mapkey] = wer
         return wer
 
     def _search(
@@ -625,25 +628,51 @@ def hyperParamSearch(
         return best_m[1]
 
     val = 'wer'
-    alpha_range = (0., 1.0)
-    alpha_interval = 0.05
-    beta_range = (-1.0, 4.0)
-    beta_interval = 0.1
-    tuning_val[1] = sum(beta_range)/2
-    n_iter = 2
-    for i in range(n_iter):
-        print(fmt.format(f"searching iter: {i+1}/{n_iter}"))
+    alpha_range = [0.0, 1.0]
+    alpha_interval = 0.02
+    beta_range = [-1.0, 1.0]
+    beta_interval = 0.2
+    tuning_val = [0, sum(beta_range)/2]
+    searchout = {}  # type: Dict[str, Dict[str, Union[float, int]]]
+
+    def update_tunning_val():
+        # e.g. tunning_val = 0.5:-0.3
+        tuning_val = min(searchout.keys(),
+                         key=lambda k: searchout[k][val])  # type: str
+        return [float(x) for x in tuning_val.split(':')]
+
+    n_iter = 1
+    last_val = [None, None]
+    while last_val != tuning_val:
+        print(
+            f"\nSearching iter: {n_iter} | alpha {alpha_range} | beta {beta_range}")
+        last_val = tuning_val.copy()
         # stage 1: fix beta, search alpha in range
         _search(alpha_range, alpha_interval, val, 0)
+        tuning_val = update_tunning_val()
         # stage 2: fix alpha, search beta in range
         _search(beta_range, beta_interval, val, 1)
+        tuning_val = update_tunning_val()
+
+        cur_alpha, cur_beta = tuning_val
+
+        if cur_alpha in alpha_range:
+            da = (alpha_range[1] - alpha_range[0])/2
+            alpha_range = [cur_alpha-da, cur_alpha+da]
+
+        if cur_beta in beta_range:
+            db = (beta_range[1] - beta_range[0]) / 2
+            beta_range = [cur_beta-db, cur_beta+db]
+        n_iter += 1
 
     if f_nbestlist is None:
         os.remove(nbestlist)
 
     del _evaluate
     del _search
-    return tuple(tuning_val)
+    del update_tunning_val
+
+    return tuple(tuning_val), searchout[f"{tuning_val[0]}:{tuning_val[1]}"]
 
 
 if __name__ == "__main__":
@@ -656,6 +685,8 @@ if __name__ == "__main__":
                         type=int, default=-1, help="Stop stage of processing. Default: last stage.")
     parser.add_argument("--ngpu", type=int, default=-1,
                         help="Number of GPUs to be used.")
+    parser.add_argument("--silient", action="store_true",
+                        help="Disable detailed messages output.")
 
     args = parser.parse_args()
     s_beg = args.stage_beg
@@ -675,18 +706,21 @@ if __name__ == "__main__":
 
     ############ Stage 1  Tokenizer training ############
     if s_beg <= 1 and s_end >= 1:
-        print("{0} {1} {0}".format("="*20, "Stage 1 Tokenizer training"))
-        fmt = "Stage 1  Tokenizer training: {}"
+        if not args.silient:
+            print("{0} {1} {0}".format("="*20, "Stage 1 Tokenizer training"))
+        fmt = "# Tokenizer trainin # {}\n" if not args.silient else ""
         if 'sp' not in hyper_settings:
-            print(fmt.format(f"missing 'sp' in hyper-setting, skip tokenizer training."))
+            sys.stdout.write(fmt.format(
+                f"missing 'sp' in hyper-setting, skip tokenizer training."))
         else:
             SentencePieceTrain(hyper_settings, f_hyper_settings, fmt)
 
     ############ Stage 2  Pickle data ############
     if s_beg <= 2 and s_end >= 2:
-        print("{0} {1} {0}".format("="*20, "Stage 2 Pickle data"))
+        if not args.silient:
+            print("{0} {1} {0}".format("="*20, "Stage 2 Pickle data"))
         import sentencepiece as spm
-        fmt = "Stage 2  Pickle data: {}"
+        fmt = "# Pickle data # {}\n" if not args.silient else ""
 
         assert 'data' in hyper_settings, fmt.format(
             f"missing 'data' in hyper-setting file {f_hyper_settings}")
@@ -697,7 +731,7 @@ if __name__ == "__main__":
             iszh = False
 
         if 'sp' not in hyper_settings:
-            print(fmt.format(
+            sys.stdout.write(fmt.format(
                 f"missing 'sp' in hyper-setting file, assume the ground truth text files as tokenized ones."))
             istokenized = True
             spmodel = None
@@ -717,7 +751,7 @@ if __name__ == "__main__":
         for dataset in ['train', 'dev', 'test']:
             assert dataset in data_settings, fmt.format(
                 f"missing '{dataset}' in hyper-p['data']")
-            print(fmt.format(f"parsing {dataset} data..."))
+            sys.stdout.write(fmt.format(f"parsing {dataset} data..."))
             f_texts = expandPath('t', data_settings[dataset], cwd)
             f_scps = expandPath('s', data_settings[dataset], cwd)
             if dataset == 'train':
@@ -745,8 +779,9 @@ if __name__ == "__main__":
 
     ############ Stage 3  NN training ############
     if s_beg <= 3 and s_end >= 3:
-        print("{0} {1} {0}".format("="*20, "Stage 3 NN training"))
-        fmt = "Stage 3  NN training: {}"
+        if not args.silient:
+            print("{0} {1} {0}".format("="*20, "Stage 3 NN training"))
+        fmt = "# NN training # {}\n" if not args.silient else ""
         try:
             import cat
         except ModuleNotFoundError:
@@ -755,7 +790,7 @@ if __name__ == "__main__":
 
         if 'topo' not in hyper_settings:
             hyper_settings['topo'] = 'rnnt'
-            print(fmt.format(f"set 'topo' to 'rnnt'"))
+            sys.stdout.write(fmt.format(f"set 'topo' to 'rnnt'"))
 
         if hyper_settings['topo'] == 'rnnt':
             from cat.rnnt.train import RNNTParser
@@ -772,12 +807,18 @@ if __name__ == "__main__":
             raise ValueError(fmt.format(
                 f"Unknown topology: {hyper_settings['topo']}, expect one of ['rnnt', 'ctc']"))
 
-    ############ Stage 4  Decoding ############
+    ############ Stage 4  Decode ############
     if s_beg <= 4 and s_end >= 4:
-        print("{0} {1} {0}".format("="*20, "Stage 4 Decoding"))
-        fmt = "Stage 4  Decoding: {}"
+        if not args.silient:
+            print("{0} {1} {0}".format("="*20, "Stage 4 Decode"))
+        fmt = "# Decode # {}\n" if not args.silient else ""
         import re
         import torch
+        try:
+            import cat
+        except ModuleNotFoundError:
+            import sys
+            sys.path.append(cwd)
 
         assert 'inference' in hyper_settings, fmt.format(
             f"missing 'inference' in hyper-setting file {f_hyper_settings}")
@@ -787,7 +828,7 @@ if __name__ == "__main__":
             "missing 'test' in hyper-p['data']")
         if 'topo' not in hyper_settings:
             hyper_settings['topo'] = 'rnnt'
-            print(fmt.format(f"set 'topo' to 'rnnt'"))
+            sys.stdout.write(fmt.format(f"set 'topo' to 'rnnt'"))
 
         if hyper_settings['topo'] not in ['rnnt', 'ctc']:
             raise ValueError(fmt.format(
@@ -799,7 +840,7 @@ if __name__ == "__main__":
 
         if_search_hyper = False
         if 'search-hyper' in inference_settings and inference_settings['search-hyper']:
-            print(fmt.format(
+            sys.stdout.write(fmt.format(
                 "enable hyper-param searching, this would set dummy alpha/beta first."))
             if_search_hyper = True
 
@@ -809,7 +850,7 @@ if __name__ == "__main__":
         decode_settings = inference_settings['decode']
 
         if 'resume' in decode_settings:
-            print(fmt.format(
+            sys.stdout.write(fmt.format(
                 "setting 'resume' in decoding would overwrite the model averaging settings."))
             try:
                 checkExist('f', decode_settings['resume'])
@@ -858,8 +899,8 @@ if __name__ == "__main__":
                     torch.save(params, checkpoint)
                 except Exception as e:
                     if os.path.isfile(checkpoint):
-                        print(fmt.format(e))
-                        print(fmt.format(
+                        sys.stdout.write(fmt.format(e))
+                        sys.stdout.write(fmt.format(
                             f"Not found raw checkpoint files, use existing {checkpoint} instead."))
                     else:
                         raise RuntimeError(e)
@@ -872,7 +913,7 @@ if __name__ == "__main__":
 
         checkExist('f', checkpoint)
         decode_settings['resume'] = checkpoint
-        print(fmt.format(
+        sys.stdout.write(fmt.format(
             f"set 'resume' to {checkpoint}"))
 
         if if_search_hyper:
@@ -881,25 +922,26 @@ if __name__ == "__main__":
             if 'beta' not in decode_settings:
                 decode_settings['beta'] = None
 
-            print(fmt.format(
+            sys.stdout.write(fmt.format(
                 "in case you didn't backup the setting:\n"
                 f"current setting: alpha = {decode_settings['alpha']} | beta = {decode_settings['beta']}"))
 
         if 'config' not in decode_settings:
             decode_settings['config'] = os.path.join(
                 args.expdir, 'config.json')
-            print(fmt.format(f"set 'config' to {decode_settings['config']}"))
+            sys.stdout.write(fmt.format(
+                f"set 'config' to {decode_settings['config']}"))
             checkExist('f', decode_settings['config'])
         if 'spmodel' not in decode_settings:
             assert 'sp' in hyper_settings, fmt.format(
                 f"you should set at least one of 'sp' in hyper-p or 'spmodel' in hyper-p['inference']['decode']")
             _, (spmodel, _) = resolve_sp_path(hyper_settings['sp'])
             decode_settings['spmodel'] = spmodel
-            print(fmt.format(
+            sys.stdout.write(fmt.format(
                 f"set 'spmodel' to {decode_settings['spmodel']}"))
         if 'nj' not in decode_settings:
             decode_settings['nj'] = os.cpu_count()
-            print(fmt.format(
+            sys.stdout.write(fmt.format(
                 f"set 'nj' to {decode_settings['nj']}"))
         if hyper_settings['topo'] == 'rnnt' and (
             if_search_hyper or (
@@ -907,10 +949,11 @@ if __name__ == "__main__":
 
             if 'lmdir' not in inference_settings and \
                     ('lm-config' not in decode_settings or 'lm-check' not in decode_settings):
-                print("\n"
-                      "To use external LM with RNN-T topo, at least one option is required:\n"
-                      "  1 (higer priority): set 'lmdir' in hyper-p['inference'];\n"
-                      "  2: set both 'lm-config' and 'lm-check' in hyper-p['inference']['decode']\n")
+                sys.stderr.write(
+                    "\n"
+                    "To use external LM with RNN-T topo, at least one option is required:\n"
+                    "  1 (higer priority): set 'lmdir' in hyper-p['inference'];\n"
+                    "  2: set both 'lm-config' and 'lm-check' in hyper-p['inference']['decode']\n\n")
                 exit(1)
 
             if 'beta' in decode_settings:
@@ -925,9 +968,9 @@ if __name__ == "__main__":
                 checkExist('f', decode_settings['lm-config'])
                 decode_settings['lm-check'] = os.path.join(
                     lmdir, 'checks/bestckpt.pt')
-                print(fmt.format(
+                sys.stdout.write(fmt.format(
                     f"set 'lm-config' to {decode_settings['lm-config']}"))
-                print(fmt.format(
+                sys.stdout.write(fmt.format(
                     f"set 'lm-check' to {decode_settings['lm-check']}"))
 
             if 'rescore' in decode_settings and decode_settings['rescore']:
@@ -973,14 +1016,10 @@ if __name__ == "__main__":
             else:
                 f_text = f"ctc-{decode_settings['beam_size']}_{suffix_lm}_{suffix_avgmodel}"
             decode_out_prefix = os.path.join(decodedir, f_text)
-            print(fmt.format(
+            sys.stdout.write(fmt.format(
                 f"set 'output_prefix' to {decode_out_prefix}"))
         else:
             decode_out_prefix = decode_settings['output_prefix']
-        if 'dist-url' not in decode_settings:
-            decode_settings['dist-url'] = f"tcp://localhost:{get_free_port()}"
-            print(fmt.format(
-                f"set 'dist-url' to {decode_settings['dist-url']}"))
         if hyper_settings['topo'] == 'rnnt' and 'algo' in decode_settings \
                 and decode_settings['algo'] == 'alsd' and 'umax-portion' not in decode_settings:
             # trying to compute a reasonable portion value from trainset
@@ -988,22 +1027,21 @@ if __name__ == "__main__":
             import numpy as np
             f_pkl = os.path.join(args.expdir, f'pkl/train.pkl')
             if os.path.isfile(f_pkl):
-                # since we using conformer, there's a 1/4 subsapling, if it's not, change that
+                # since we using conformer, there's a 1/4 subsapling, if it's not, modify that
                 if "subsample" in inference_settings:
                     sub_factor = inference_settings['subsample']
                     assert sub_factor > 1, fmt.format(
                         f"Can't deal with 'subsample'={sub_factor} in hyper-p['inference']")
-                    print(fmt.format(
+                    sys.stdout.write(fmt.format(
                         f"resolving portion data from train set, might takes a while."))
                     dataset = ModifiedSpeechDataset(f_pkl)
-                    lt = np.asarray(dataset.get_seq_len()
-                                    ).astype(np.float64)
-                    ly = []
-                    for _, _, label in dataset.dataset:
-                        ly.append(len(label))
-                    assert len(lt) == len(ly), fmt.format(
-                        f"Unknown condition {len(lt)} != {len(ly)}")
-                    ly = np.asarray(ly).astype(np.float64)
+                    lt = np.asarray(dataset.get_seq_len()).astype(np.float64)
+                    # get label lengths
+                    ly = np.zeros_like(lt)
+                    for i in range(len(dataset)):
+                        _, label = dataset[i]
+                        ly[i] = label.size(0)
+
                     lt /= sub_factor
                     normal_ly = ly/lt
                     portion = np.mean(normal_ly) + 5 * np.std(normal_ly)
@@ -1016,9 +1054,11 @@ if __name__ == "__main__":
                     orin_hyper_setting['inference']['decode']['umax-portion'] = portion
                     with open(f_hyper_settings, 'w') as fo:
                         json.dump(orin_hyper_setting, fo, indent=4)
-                    print(fmt.format(
+                    sys.stdout.write(fmt.format(
                         f"set 'umax-portion' to {portion}"))
-
+            else:
+                sys.stderr.write(fmt.format(
+                    f"WARNING: no training set found in {args.expdir}. Skip counting 'umax-portion'"))
         testsets = hyper_settings['data']['test']
         if isinstance(testsets, str):
             testsets = [testsets]
@@ -1026,11 +1066,6 @@ if __name__ == "__main__":
         checkExist('f', f_scps)
 
         if not if_search_hyper:
-            try:
-                import cat
-            except ModuleNotFoundError:
-                import sys
-                sys.path.append(cwd)
             if hyper_settings['topo'] == 'rnnt':
                 from cat.rnnt.decode import DecoderParser
                 from cat.rnnt.decode import main as DecoderMain
@@ -1044,19 +1079,18 @@ if __name__ == "__main__":
             for _set, scp in zip(testsets, f_scps):
                 decode_settings['output_prefix'] = decode_out_prefix+f'_{_set}'
                 decode_settings['input_scp'] = scp
-                print(fmt.format(
+                sys.stdout.write(fmt.format(
                     f"{scp} -> {decode_settings['output_prefix']}"))
 
                 # FIXME: this canonot be spawned via mp_spawn, otherwise error would be raised
                 #        possibly due to the usage of mp.Queue
                 if os.path.isfile(decode_settings['output_prefix']):
-                    print(fmt.format(
+                    sys.stdout.write(fmt.format(
                         f"{decode_settings['output_prefix']} exists, skip this one."))
                     continue
 
                 DecoderMain(updateNamespaceFromDict(
                     decode_settings, DecoderParser()))
-                decode_settings['dist-url'] = f"tcp://localhost:{get_free_port()}"
 
         # compute wer/cer
         from wer import WERParser
@@ -1072,11 +1106,11 @@ if __name__ == "__main__":
 
         if 'oracle' not in err_settings:
             err_settings['oracle'] = True
-            print(fmt.format(f"set 'oracle' to True"))
+            sys.stdout.write(fmt.format(f"set 'oracle' to True"))
 
         if 'stripid' not in err_settings:
             err_settings['stripid'] = True
-            print(fmt.format(f"set 'stripid' to True"))
+            sys.stdout.write(fmt.format(f"set 'stripid' to True"))
 
         err_settings.update({
             'cer': True if err_settings['mode'] == 'cer' else False
@@ -1085,26 +1119,29 @@ if __name__ == "__main__":
 
         if if_search_hyper:
             if len(testsets) > 1:
-                print(fmt.format(
+                sys.stdout.write(fmt.format(
                     "found more than 1 evalute sets, take the first to do searching."))
-                print(fmt.format(f"{testsets} -> {testsets[0]}"))
+                sys.stdout.write(fmt.format(f"{testsets} -> {testsets[0]}"))
             eval_set = testsets[0]
             del decode_settings['alpha']
             del decode_settings['beta']
             if 'nbestlist' in inference_settings:
                 checkExist('f', inference_settings['nbestlist'])
-                print(fmt.format(
+                sys.stdout.write(fmt.format(
                     f"you specify 'nbestlist'={inference_settings['nbestlist']}, ensure the first test set match this file."))
             else:
                 inference_settings['nbestlist'] = None
 
-            _alpha, _beta = hyperParamSearch(
+            (_alpha, _beta), werr = hyperParamSearch(
                 decode_settings, err_settings,
                 lm_info['config'], lm_info['check'],
                 eval_set, hyper_settings['topo'], fmt, inference_settings['nbestlist'])
-            print(fmt.format(
-                f"found best setting: alpha = {_alpha:.2f} | {_beta:.2f}"))
-            print(fmt.format(f"write back setting to {f_hyper_settings}"))
+            sys.stdout.write(fmt.format(
+                f"found best setting: alpha = {_alpha} | beta = {_beta}"))
+            sys.stdout.write(
+                ' '.join([f"{k}={v}" for k, v in werr.items()])+'\n')
+            sys.stdout.write(fmt.format(
+                f"write back setting to {f_hyper_settings}"))
             with open(f_hyper_settings, 'r') as fi:
                 _tmp_setting = json.load(fi)
             _tmp_setting['inference']['search-hyper'] = False
@@ -1112,7 +1149,8 @@ if __name__ == "__main__":
             _tmp_setting['inference']['decode']['beta'] = _beta
             with open(f_hyper_settings, 'w') as fo:
                 json.dump(_tmp_setting, fo, indent=4)
-            print(fmt.format("settings have been updated, re-run this script."))
+            sys.stdout.write(fmt.format(
+                "settings have been updated, re-run this script."))
             exit(0)
 
         for _set, _text in zip(testsets, f_texts):

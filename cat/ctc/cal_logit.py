@@ -78,12 +78,8 @@ def dataserver(args, q: mp.Queue):
 def worker(pid: int, args: argparse.Namespace, q: mp.Queue, model: AbsEncoder):
     if pid == args.world_size:
         return dataserver(args, q)
-    world_size = args.world_size
 
     torch.set_num_threads(1)
-    dist.init_process_group(
-        backend='gloo', init_method=args.dist_url,
-        world_size=world_size, rank=pid)
 
     results = {}
     with torch.no_grad():

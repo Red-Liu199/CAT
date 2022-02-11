@@ -1,0 +1,25 @@
+{
+    "data": {
+        "train": "train_960",
+        "dev": [
+            "dev_clean",
+            "dev_other"
+        ],
+        "test": [
+            "test_clean",
+            "test_other"
+        ],
+        "filter": ":2000"
+    },
+    "topo": "ctc",
+    "train": {
+        "batch_size": 128,
+        "grad-accum-fold": 16,
+        "grad-norm": 5.0,
+        "databalance": true,
+        "checkall": true,
+        "amp": true,
+        "resume": "exp/crf-v1/checks/checkpoint.193.pt"
+    },
+    "commit": "94645a1e7f55803c787bc754dc1c7347bb3dd0f8"
+}

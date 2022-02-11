@@ -138,18 +138,10 @@ def main_worker(pid: int, args: argparse.Namespace, q: mp.Queue, fmt: str, model
     if args.cpu:
         device = 'cpu'
         torch.set_num_threads(args.thread_per_woker)
-        dist.init_process_group(
-            backend='gloo', init_method=args.dist_url,
-            world_size=world_size, rank=args.rank)
-
         model, ext_lm = models
     else:
         device = pid
         torch.cuda.set_device(device)
-        dist.init_process_group(
-            backend='nccl', init_method=args.dist_url,
-            world_size=world_size, rank=args.rank)
-
         model, ext_lm = build_model(args, device)
 
     searcher = TransducerBeamSearcher(

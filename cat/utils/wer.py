@@ -214,7 +214,7 @@ def main(args: argparse.Namespace):
     # format: %SER 13.60 | %WER 4.50 [ 2367 / 52576, 308 ins, 157 del, 1902 sub ]
     prefix = 'WER' if not args.cer else 'CER'
     pretty_str = \
-        f"%SER {_ser*100:.2f} | %{prefix} {_wer*100:.2f} [{_err} / {_sum}, {_ins} ins, {_del} del, {_sub} sub ]"
+        f"%SER {_ser*100:.2f} | %{prefix} {_wer*100:.2f} [ {_err} / {_sum}, {_ins} ins, {_del} del, {_sub} sub ]"
 
     sys.stdout.write(pretty_str+'\n')
     return {
