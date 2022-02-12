@@ -1,49 +1,21 @@
+#!/bin/bash
 # Copyright Tsinghua University 2021
 # Author: Huahuan Zheng (maxwellzh@outlook.com)
 # Script for training n-gram LM
 set -u
 set -e
-
 <<"PARSER"
-{
-    "dir": {
-        "type": "str",
-        "help": "Path to the LM directory."
-    },
-    "--start-stage": {
-        "type": "int",
-        "default": 1,
-        "help": "Start stage of the script."
-    },
-    "-o": {
-        "type": "int",
-        "default": 5,
-        "dest": "order",
-        "help": "Max order of n-gram. default: 5"
-    },
-    "--output": {
-        "type": "str",
-        "default": "$dir/${order}gram.klm",
-        "help": "Path of output N-gram file. Default: [dir]/[order]gram.klm"
-    },
-    "--arpa": {
-        "action": "store_true",
-        "help": "Store n-gram file as .arpa instead of binary."
-    },
-    "--large-corpus": {
-        "action": "store_true",
-        "help": "Use on-the-fly encoding for large corpus."
-    },
-    "--prune": {
-        "type": "str",
-        "default": "",
-        "nargs": "*",
-        "help": "Prune options passed to KenLM lmplz executable. Default: "
-    }
-}
+("dir", type=str, help="Path to the LM directory.")
+("--start-stage", type=int, default=1, help="Start stage of the script.")
+("-o", "--order", type=int, default=5, help="Max order of n-gram. default: 5")
+("--output", type=str, default="$dir/${order}gram.klm",
+    help="Path of output N-gram file. default: [dir]/[order]gram.klm")
+("--arpa", action="store_true", help="Store n-gram file as .arpa instead of binary.")
+("--large-corpus", action="store_true", help="Use on-the-fly encoding for large corpus.")
+("--prune", type=str, default="", nargs='*',
+    help="Prune options passed to KenLM lmplz executable. default: ")
 PARSER
 opts=$(python utils/parseopt.py $0 $*) && eval $opts || exit 1
-# argument parsed done
 
 export PATH=$PATH:../../src/bin/
 [ ! $(command -v lmplz) ] && echo "command not found: lmplz" && exit 1
@@ -58,7 +30,8 @@ export PATH=$PATH:../../src/bin/
 # ...so in the `utils/readtextbin.py` script we convert 0(<bos>, <eos>) and 1 (<unk>) to white space
 # ...if your tokenizer set different bos/eos/unk id, you should make that mapping too.
 if [ $large_corpus == "True" ]; then
-    spmodel=$(cat $dir/hyper-p.json | python -c "import sys;import json;print(json.load(sys.stdin)['sp']['model_prefix'])").model
+    spmodel="$(cat $dir/hyper-p.json |
+        python -c "import sys;import json;print(json.load(sys.stdin)['sp']['model_prefix'])").model"
     f_text=$(cat $dir/hyper-p.json |
         python -c "import sys;import json;print(json.load(sys.stdin)['data']['train'])" |
         sed "s/\[//g" | sed "s/\]//g" | sed "s/'//g" | sed "s/,/ /g")
@@ -103,8 +76,8 @@ configure['decoder']['kwargs']['gram_order'] = $order
 json.dump(configure, sys.stdout, indent=4)" >$dir/config.json.tmp
     mv $dir/config.json.tmp $dir/config.json
 fi
-echo "You may need to set the 'num_classes' in $dir/config.json to the number of vocab of your TOKENIZER"
 
 # test
-echo "N-gram LM training is finished. Use following command to evaluate model performance:"
-echo "python utils/ppl_compute_ngram.py $dir"
+# You may need to set the 'num_classes' in
+# ... $dir/config.json to the number of vocab of your TOKENIZER
+python utils/ppl_compute_ngram.py $dir

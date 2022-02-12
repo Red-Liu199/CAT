@@ -1,28 +1,33 @@
 """Parse arguments with python style
 use 'null' to indicat python None in JSON
 
+NOTE:
+    1. You should acknownledge the usage of argparse module of python first.
+    2. Shell var '$' symbol can be used in 'default', if the order of arguments are right. e.g.
+        in the following example: 
+        in the default of --output, '$input' will be replaced by <input>;
+        but note that you can't refer to '$output' in input parser, where
+        the '$output' is not initialized yet.
+    3. The line 
+        'opts=$(python utils/parseopt.py $0 $*) && eval $opts || exit 1' in
+        shell script cannot be replace to 
+        'eval $(python utils/parseopt.py $0 $*) || exit 1'
+        the latter would produce some unexpected prompt with 'example.sh -h'
+    4. To flag the start of parser, following statements are all allowed:
+        4.1 <<"PARSER"  4.2 <<'PARSER'  4.3 <<PARSER  4.4 << "PARSER" ...
+
 Usage: in shell script
 example.sh:
 <<"PARSER"
-{
-    "data":{
-        "type": "str",
-        "help": "Directory of data"
-    },
-    "--weight":{
-        "type": "int",
-        "default": 1.0,
-        "help": "Weight factor of model"
-    }
-}
+("input", type=str, help="Input file.")
+("-o", "--output", type=str, default="${input}_out",
+    help="Output file. Default: <input>_out")
 PARSER
 opts=$(python utils/parseopt.py $0 $*) && eval $opts || exit 1
-
 """
 
 import re
 import sys
-import json
 import argparse
 
 if __name__ == "__main__":
@@ -34,57 +39,31 @@ if __name__ == "__main__":
     script = sys.argv[1]
     argsin = sys.argv[2:]
 
-    parseinfo = ""
-    read_flag = False
-    sol = 0
+    # match lines in '<<PARSER' in 'PARSER'
+    parser_pattern = re.compile(
+        r"^<<\s*(?:\"PARSER\"|'PARSER'|PARSER)\s*$((?:.|\n)*?)^\s*PARSER\s*$",
+        re.MULTILINE)
+    # split lines via brackets
+    argument_pattern = re.compile(r"^[(]((?:.|\n)*?)[)]$", re.MULTILINE)
     with open(script, 'r') as fi:
-        for line in fi:
-            if line.strip().replace(' ', '') == "PARSER":
-                break
-            if read_flag:
-                parseinfo += line
-                continue
-            # in case '<<"PARSER"' '<< "PARSER"' '<<PARSER'...
-            if line.strip().translate(
-                    {' ': '', '\'': '', '\"': ''}) == "<<\"PARSER\"":
-                read_flag = True
-            sol += 1
-
-    if parseinfo == "":
-        parseinfo = "{}"
-    try:
-        arguments = json.loads(parseinfo)  # type:dict
-    except json.decoder.JSONDecodeError as err:
-        # something like
-        # Expecting ',' delimiter: line 24 column 5 (char 542)
-        errinfo = str(err)
-        errline = re.search(r"(?<=line\s)\d+", errinfo)
-        if errline is not None:
-            errline = int(errline.group(0))
-            errinfo = errinfo.replace(f"line {errline}", f"line {errline+sol}")
-        sys.stderr.write(
-            "Parsing string format error:\n\t" +
-            errinfo + '\n')
-        sys.exit(1)
+        s = fi.read()
+    parserinfo = parser_pattern.findall(s)
+    match = argument_pattern.findall(parserinfo[0])
 
     parser = argparse.ArgumentParser(prog=script)
-    for k, v in arguments.items():
-        if 'type' in v:
-            v['type'] = eval(v['type'])
-        parser.add_argument(k, **v)
-    del arguments, script
+    for arg in match:
+        eval(f"parser.add_argument({arg})")
 
     try:
         for arg, value in vars(parser.parse_args(argsin)).items():
             if isinstance(value, list):
                 # deal with nargs='+' and nargs='*'
-                value = '\"'+' '.join([str(x) for x in value])+'\"'
-            print(f"{arg}={value};")
-
+                value = f"\"{' '.join([str(x) for x in value])}\""
+            sys.stdout.write(f"export {arg}={value}; ")
     except SystemExit as se:
         # re-locate the help information to error
         if se.code == 0:
             parser.print_help(sys.stderr)
         sys.exit(1)
-
-    sys.exit(0)
+    else:
+        sys.exit(0)

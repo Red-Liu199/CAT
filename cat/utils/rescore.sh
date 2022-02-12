@@ -1,4 +1,4 @@
-#!/env/sh
+#!/bin/bash
 # Copyright 2021 Tsinghua University,
 # Author Huahuan Zheng (maxwellzh@outlook.com)
 #
@@ -6,34 +6,14 @@
 set -u
 set -e
 <<"PARSER"
-{
-    "lmdir": {
-        "type": "str",
-        "help": "Directory of language model."
-    },
-    "set": {
-        "type": "str",
-        "help": "Name of evaluation set, shoud be match with N-best list."
-    },
-    "nbestlist": {
-        "type": "str",
-        "help": "Path to the file of N-best list."
-    },
-    "--alpha": {
-        "type": "float",
-        "default": 1.0,
-        "help": "LM weight of rescoring. Default: 1.0"
-    },
-    "--beta": {
-        "type": "float",
-        "default": 0.0,
-        "help": "Token insert penalty. Default: 0.0"
-    },
-    "--sp": {
-        "type": "str",
-        "help": "Path to the SentencePiece model. If not set, would try to resolve from ./sentencepiece/"
-    }
-}
+("lmdir", type=str, help="Directory of language model.")
+("set", type=str, help="Name of evaluation set, shoud be match with N-best list.")
+("nbestlist", type=str, help="Path to the file of N-best list.")
+("-a", "--alpha", type=float, default=1.0,
+    help="LM weight of rescoring. default: 1.0")
+("-b", "--beta", type=float, default=0.0,
+    help="Token insert penalty. default: 0.0")
+("--sp", type=str, help="Path to the SentencePiece model. If not set, would try to resolve from ./sentencepiece/")
 PARSER
 opts=$(python utils/parseopt.py $0 $*) && eval $opts || exit 1
 
