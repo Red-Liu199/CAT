@@ -1,0 +1,13 @@
+{
+    "data": {
+        "train": "data/train",
+        "dev": "data/valid",
+        "test": "data/test"
+    },
+    "sp": {
+        "model_type": "word",
+        "vocab_size": 28779,
+        "use_all_vocab": true,
+        "model_prefix": "sentencepiece/word/spm"
+    }
+}

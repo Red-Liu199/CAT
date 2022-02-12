@@ -15,19 +15,19 @@
     git clone --recurse-submodules git@github.com:maxwellzh/Transducer-dev.git
     ```
 
-1. Install main dependencies
+1. Main dependencies
   
    - CUDA compatible machine, NVIDIA driver installed and NVIDIA toolkit available.
    - PyTorch: `>=1.9.0` is recommended
    - Third-party tools:
       - KenLM: refer to the installation [guide](tools/README.md)
       - [CAT](https://github.com/thu-spmi/CAT): **This is optional if you just do language model training.** 
-         After installing the CAT, please refers to the details in [tools/README.md](tools/README.md)
+         After installing the CAT, please read the [tools/README.md](tools/README.md)
         and link directory.
        
          ```bash
          cd tools/
-         ln -s <CAT> ./
+         ln -s /path/to/CAT ./
          ```
    
 2. Python packages
@@ -56,14 +56,6 @@
 
 ## Usage
 
-**Data preparation for ASR:**
-
-Currently, this repository is relied on [CAT](https://github.com/thu-spmi/CAT) for data pre-processing, basically the audio features extraction and some of the text normalization.
-
-So, before going into the task, you should do data preparation with CAT first. For more information, please refer to [tools/README.md](tools/README.md).
-
-**Training/inference:**
-
 In this repo, we support RNN-T, Language model and CTC/CTC-CRF model training as well as the inference/decoding.
 
 - **RNN-T:** refer to `egs/<task>/template/` for details. In `egs/<task>/`, run template experiment with
@@ -88,49 +80,19 @@ In this repo, we support RNN-T, Language model and CTC/CTC-CRF model training as
   python utils/asr_process.py exp/template
   ```
 
-### Settings of training
+A fully detailed document is not availabel yet. You can refer to the [Examples](#examples) and [Configurations](#configuration-of-training) for more information.
 
-If you're using Visual-Studio Code as working environment, you can setup the json schema for syntax intellisense via (in `egs/<task>/`):
+### Examples
 
-```bash
-ln -s ../../.vscode ./
-```
+#### Language model
 
-Above command would probably raise an error, if there exists a directory `egs/<task>/.vscode`, in such situation, you could manually copy the schema files
+Please refer to [README](https://github.com/maxwellzh/Transducer-dev/tree/main/egs/wikitext-2) for how to train NN LM and N-gram LM.
 
-```bash
-cp ../../.vscode/{hyper_schema,schemas}.json ./.vscode/
-```
+#### Speech recognition
 
-And add following contents into the file `egs/<task>/.vscode/settings.json`:
+Still working on it. About the data preparation, here is some info you must know:
 
-```json
-{
-    ...,        // there might be existing settings
-    "json.schemas": [
-        {
-            "fileMatch": [
-                "exp/**/config.json"
-            ],
-            "url": ".vscode/schemas.json"
-        },
-        {
-            "fileMatch": [
-                "exp/**/hyper-p.json"
-            ],
-            "url": ".vscode/hyper_schema.json"
-        }
-    ]
-}
-```
-
-With all these properly setup, intellisense will be enable when editting `egs/<task>/<any name>/config.json` and `egs/<task>/<any name>/hyper-p.json`.
-
-For more about how schema works, refer to [JSON editing in Visual Studio Code](https://code.visualstudio.com/docs/languages/json)
-
-<img src="assets/intellisense.gif" alt="intellisense" style="zoom:50%;" />
-
-Also, you can manually check the details of settings as following.
+Currently, this repository is relied on [CAT](https://github.com/thu-spmi/CAT) for data pre-processing, basically the audio features extraction and some of the text normalization. So, before going into the task, you should do data preparation with CAT first. For more information, please refer to [tools/README.md](tools/README.md).
 
 ### Configuration of training
 
@@ -256,3 +218,44 @@ egs/<task>/exp/template
 }
 ```
 
+## Usage with Visual Studio Code
+
+If you're using [Visual Studio Code](https://code.visualstudio.com/) as working environment, you can setup the json schema for syntax intellisense via (in `egs/<task>/`):
+
+```bash
+ln -s ../../.vscode ./
+```
+
+Above command would probably raise an error, if there exists a directory `egs/<task>/.vscode`, in such situation, you could manually copy the schema files
+
+```bash
+cp ../../.vscode/{hyper_schema,schemas}.json ./.vscode/
+```
+
+And add following contents into the file `egs/<task>/.vscode/settings.json`:
+
+```
+{
+    ...,        // there might be existing settings
+    "json.schemas": [
+        {
+            "fileMatch": [
+                "exp/**/config.json"
+            ],
+            "url": ".vscode/schemas.json"
+        },
+        {
+            "fileMatch": [
+                "exp/**/hyper-p.json"
+            ],
+            "url": ".vscode/hyper_schema.json"
+        }
+    ]
+}
+```
+
+With all these properly setup, intellisense will be enable when editting `egs/<task>/<any name>/config.json` and `egs/<task>/<any name>/hyper-p.json`.
+
+<img src="assets/intellisense.gif" width=400px/>
+
+For more about how schema works, refer to [JSON editing in Visual Studio Code](https://code.visualstudio.com/docs/languages/json).

@@ -14,12 +14,8 @@ Size of datasets (# sequences):
 # generate normalized data
 python local/data_prep.py
 
-# view helping info
-python utils/lm_process.py -h
-
-# create a experiment directory from template and training
-mkdir exp/myexp
-cp exp/template/*.json exp/myexp/
-
-python utils/lm_process.py exp/myexp/
+# train NN LM
+python utils/lm_process.py exp/template-word-transformer/
+# train N-gram LM
+./utils/ngram_process.sh exp/template-word-ngram/
 ```
