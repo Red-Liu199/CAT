@@ -1137,9 +1137,9 @@ if __name__ == "__main__":
                 lm_info['config'], lm_info['check'],
                 eval_set, hyper_settings['topo'], fmt, inference_settings['nbestlist'])
             sys.stdout.write(fmt.format(
-                f"found best setting: alpha = {_alpha} | beta = {_beta}"))
-            sys.stdout.write(
-                ' '.join([f"{k}={v}" for k, v in werr.items()])+'\n')
+                f"found best setting: \n"
+                f"{werr['string']}\talpha = {_alpha} | beta = {_beta}"))
+
             sys.stdout.write(fmt.format(
                 f"write back setting to {f_hyper_settings}"))
             with open(f_hyper_settings, 'r') as fi:

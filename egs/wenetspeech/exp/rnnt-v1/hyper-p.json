@@ -37,7 +37,7 @@
             "beam_size": 16,
             "cpu": true,
             "nj": 80,
-            "resume": "exp/rnnt-v1/checks/best-10.pt",
+            "resume": "exp/rnnt-v1/checks/best-10.pt"
         },
         "er": {
             "mode": "cer",

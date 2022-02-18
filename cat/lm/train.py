@@ -86,7 +86,7 @@ def evaluate(*args) -> float:
     return math.exp(default_eval(*args))
 
 
-def build_model(args, configuration, dist=True, wrapper=True) -> LMTrainer:
+def build_model(args, configuration, dist=True, wrapper=True) -> Union[LMTrainer, AbsDecoder]:
     def _build_decoder(config) -> nn.Module:
         LMNet = eval(config['type'])    # type: AbsDecoder
         NetKwargs = config['kwargs']

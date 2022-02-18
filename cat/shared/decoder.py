@@ -56,7 +56,11 @@ class AbsDecoder(nn.Module):
             if tied:
                 self.classifier.weight = self.embedding.weight
 
-    def score(self, input_ids: torch.LongTensor, targets: torch.LongTensor, input_lengths: torch.LongTensor, *args):
+    def score(self, input_ids: torch.LongTensor, targets: torch.LongTensor, input_lengths: Optional[torch.LongTensor] = None, *args):
+        if input_lengths is None:
+            input_lengths = input_ids.new_ones(
+                input_ids.size(0)) * input_ids.size(1)
+
         # [N, U, K]
         logits, _ = self.forward(input_ids, input_lengths=input_lengths, *args)
         # [N, U]
@@ -258,7 +262,7 @@ class CausalTransformer(AbsDecoder):
             vocab_size=num_classes, n_embd=dim_hid,
             n_layer=num_layers, n_head=num_head, attn_pdrop=attn_dropout)
         self.trans = GPT2Model(configuration)
-        # FIXME (huahun): 
+        # FIXME (huahun):
         # hacked fix of the issue related to Huggingface,
         # ... see https://github.com/huggingface/transformers/issues/14859
         for name, buffer in self.trans.named_buffers():
@@ -368,15 +372,20 @@ class NGram(AbsDecoder):
         self.register_buffer('scale', torch.tensor(
             10.).log_(), persistent=False)
 
-    def score(self, input_ids: torch.LongTensor, targets: torch.LongTensor, input_lengths: torch.LongTensor):
+    def score(self, input_ids: torch.LongTensor, targets: torch.LongTensor, input_lengths: Optional[torch.LongTensor] = None):
         if not torch.equal(input_ids[:, 1:], targets[:, :-1]):
             raise RuntimeError(
                 "N-gram model requires that there's no exposure mismatch between input and target.")
 
+        if input_lengths is None:
+            in_lens = [input_ids.size(1)]*input_ids.size(0)
+        else:
+            in_lens = input_lengths.cpu().tolist()
+
         # [N, ]
         log_prob = input_ids.new_full(
             input_ids.size()[:1], 0.0, dtype=torch.float)
-        for b, (seq, l) in enumerate(zip(input_ids.cpu().tolist(), input_lengths.cpu().tolist())):
+        for b, (seq, l) in enumerate(zip(input_ids.cpu().tolist(), in_lens)):
             seq = [self.vocab[i] for i in seq[:l]]
             if seq[0] == '</s>':
                 seq[0] = '<s>'
@@ -441,7 +450,7 @@ class NGram(AbsDecoder):
 
 
 class ZeroDecoder(AbsDecoder):
-    def __init__(self, hdim:int, *args, **kwargs) -> None:
+    def __init__(self, hdim: int, *args, **kwargs) -> None:
         super().__init__(num_classes=1, n_emb=1, with_head=False)
         del self.embedding
         del self.classifier

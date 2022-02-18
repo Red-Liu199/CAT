@@ -29,7 +29,7 @@ tlv2-dev	%WER 12.24 [ 2176 / 17783, 529 ins, 431 del, 1216 sub ] exp/crf-v1//fgl
 tlv2-test	%WER 11.86 [ 3262 / 27500, 558 ins, 753 del, 1951 sub ] exp/crf-v1//fglarge/tlv2-test/wer_13_1.0
 
 CRF + tlv2 corpus LM
-tlv2-dev	%WER 29.25 [ 5201 / 17783, 630 ins, 896 del, 3675 sub ] exp/crf-v1/tlv2-tgprune/tlv2-dev/wer_17_0.0
-tlv2-test	%WER 26.74 [ 7354 / 27500, 740 ins, 1327 del, 5287 sub ] exp/crf-v1/tlv2-tgprune/tlv2-test/wer_17_0.0
+tlv2-dev	%WER 10.38 [ 1845 / 17783, 453 ins, 360 del, 1032 sub ] exp/crf-v1/tlv2-fg/tlv2-dev/wer_17_0.5
+tlv2-test	%WER 9.81 [ 2697 / 27500, 479 ins, 624 del, 1594 sub ] exp/crf-v1/tlv2-fg/tlv2-test/wer_16_0.5
 ```
 

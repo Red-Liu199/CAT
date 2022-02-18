@@ -222,7 +222,8 @@ def main(args: argparse.Namespace):
         'wer': _wer,
         'ins': _ins,
         'del': _del,
-        'sub': _sub}
+        'sub': _sub,
+        'string': pretty_str}
 
 
 def WERParser():
