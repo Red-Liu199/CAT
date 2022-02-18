@@ -2,10 +2,8 @@
 
 ## TODO
 
-- [ ] universal tokenizer support
 - [ ] Internal language model estimation
 - [ ] rename `*_process.*` -> `*_pipe.*`
-- [ ] \[low priorty\] pythonize n-gram training pipeline
 
 ## Installation
 
@@ -123,10 +121,12 @@ egs/<task>/exp/template
             "truncate": 128
         }
     },
-    // SentencePiece model training related, for supported options, refer to:
-    // https://github.com/google/sentencepiece/blob/master/doc/options.md 
-    "sp": {
-        ...
+    "tokenizer": {
+        "type": ...,        // can be any class derived from 'AbsTokenizer' in cat/shared/tokenizer.py
+        "location": ...     // Path to the tokenizer file.
+        "property": ...     // keyword arguments for training the tokenizer
+                            // for SentencePiece tokenizer, please refer to:
+                            // https://github.com/google/sentencepiece/blob/master/doc/options.md
     },
     // NN training related setting, for supported options (in egs/<task>/):
     // RNN-T: run 'python -m cat.rnnt -h'

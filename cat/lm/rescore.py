@@ -13,6 +13,7 @@ P.S. CPU is faster when rescoring with n-gram model, while GPU
 """
 
 from ..shared import coreutils as utils
+from ..shared import tokenizer as tknz
 from . import lm_builder
 from ..shared.decoder import (
     AbsDecoder,
@@ -26,9 +27,7 @@ from ..shared.data import (
 import os
 import json
 import time
-import uuid
 import argparse
-import sentencepiece as sp
 from tqdm import tqdm
 
 
@@ -42,9 +41,9 @@ import torch
 def main(args):
     assert os.path.isfile(
         args.nbestlist), f"N-best list file not found: {args.nbestlist}"
-    assert args.spmodel is not None, "You need to specify --spmodel."
+    assert args.tokenizer is not None, "You need to specify --tokenizer."
     assert os.path.isfile(
-        args.spmodel), f"SentencePiece model not found: {args.spmodel}"
+        args.tokenizer), f"Tokenizer model not found: {args.tokenizer}"
 
     if not torch.cuda.is_available() or args.cpu:
         if args.verbose:
@@ -52,7 +51,7 @@ def main(args):
         args.cpu = True
 
     if args.cpu:
-        if args.nj is None:
+        if args.nj == -1:
             world_size = os.cpu_count()
         else:
             world_size = args.nj
@@ -60,12 +59,11 @@ def main(args):
         world_size = torch.cuda.device_count()
     args.world_size = world_size
 
-    randomstr = str(uuid.uuid4())
     cachedir = '/tmp'
     assert os.path.isdir(cachedir), f"Cache directory not found: {cachedir}"
     if not os.access(cachedir, os.W_OK):
         raise PermissionError(f"Permission denied for writing to {cachedir}")
-    fmt = os.path.join(cachedir, randomstr+r".{}.tmp")
+    fmt = os.path.join(cachedir, utils.gen_random_string()+r".{}.tmp")
 
     try:
         mp.set_start_method('spawn')
@@ -94,20 +92,11 @@ def main(args):
 
 def dataserver(args, q: mp.Queue):
     testset = NbestListDataset(args.nbestlist)
-
-    if args.tokenizer == 'sentencepiece':
-        tokenizer = sp.SentencePieceProcessor(model_file=args.spmodel)
-    elif args.tokenizer == 'jieba':
-        from ..shared.tokenizer import JiebaTokenizer
-        tokenizer = JiebaTokenizer(userdict=args.spmodel)
-    else:
-        raise RuntimeError(
-            f"Unknown tokenizer type \'{args.tokenizer}\', expected one of ['sentencepiece', 'jieba']")
-
+    tokenizer = tknz.load(args.tokenizer)
     testloader = DataLoader(
         testset, batch_size=1,
         shuffle=False,
-        num_workers=0,
+        num_workers=1,
         collate_fn=NbestListCollate(tokenizer))
 
     t_beg = time.time()
@@ -198,11 +187,8 @@ def RescoreParser():
                         help="The 'alpha' value for LM integration, a.k.a. the LM weight")
     parser.add_argument("--beta", type=float, default=0.6,
                         help="The 'beta' value for LM integration, a.k.a. the penalty of tokens.")
-    # TODO (huahun): rename this option to tokenizer-file
-    parser.add_argument("--spmodel", type=str, default='',
-                        help="SPM model location.")
-    parser.add_argument("--tokenizer", type=str, choices=['sentencepiece', 'jieba'], default='sentencepiece',
-                        help="Specify which tokenizer to use.")
+    parser.add_argument("--tokenizer", type=str,
+                        help="Tokenizer model location. See cat/shared/tokenizer.py for details.")
 
     parser.add_argument("--nj", type=int, default=-1)
     parser.add_argument("--cpu", action='store_true', default=False)

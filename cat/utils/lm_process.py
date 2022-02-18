@@ -3,15 +3,16 @@
 
 from asr_process import (
     checkExist,
-    resolve_sp_path,
     combineText,
     updateNamespaceFromDict,
-    NNTrain,
-    SentencePieceTrain,
-    mp_spawn
+    TrainNNModel,
+    TrainTokenizer,
+    mp_spawn,
+    readfromjson
 )
 
 import os
+import sys
 import json
 import argparse
 
@@ -26,6 +27,8 @@ if __name__ == "__main__":
                         type=int, default=-1, help="Stop stage of processing. Default: last stage.")
     parser.add_argument("--ngpu", type=int, default=-1,
                         help="Number of GPUs to be used.")
+    parser.add_argument("--silient", action="store_true",
+                        help="Disable detailed messages output.")
 
     args = parser.parse_args()
     s_beg = args.stage_beg
@@ -40,42 +43,29 @@ if __name__ == "__main__":
     checkExist('d', args.expdir)
     f_hyper_settings = os.path.join(args.expdir, 'hyper-p.json')
     checkExist('f', f_hyper_settings)
-    with open(f_hyper_settings, 'r') as fi:
-        hyper_settings = json.load(fi)
 
-    ############ Stage 1  Tokenizer training ############
+    ############ Stage 1 Tokenizer training ############
     if s_beg <= 1 and s_end >= 1:
-        print("{0} {1} {0}".format("="*20, "Stage 1 Tokenizer training"))
-        fmt = "Stage 1  Tokenizer training: {}"
-        if 'sp' not in hyper_settings:
-            print(fmt.format(
-                f"warning: missing 'sp' property in hyper-setting file {f_hyper_settings}, skip sentencepiece training."))
+        if not args.silient:
+            print("{0} {1} {0}".format("="*20, "Stage 1 Tokenizer training"))
+        fmt = "# Tokenizer trainin # {}\n" if not args.silient else ""
+        hyper_settings = readfromjson(f_hyper_settings)
+        if 'tokenizer' not in hyper_settings:
+            sys.stderr.write(
+                f"warning: missing 'tokenizer' in hyper-setting, skip tokenizer training.")
         else:
-            assert 'sp' in hyper_settings, fmt.format(
-                f"missing 'sp' in hyper-setting file {f_hyper_settings}")
-
-            _, (spmodel, spvocab) = resolve_sp_path(hyper_settings['sp'])
-            try:
-                checkExist('f', [spmodel, spvocab])
-                print(fmt.format(
-                    f"found existing sentencepiece model at {spmodel}, skipped training."))
-            except FileNotFoundError:
-                SentencePieceTrain(hyper_settings, f_hyper_settings, fmt)
+            TrainTokenizer(f_hyper_settings)
 
     ############ Stage 2  Pickle data ############
     if s_beg <= 2 and s_end >= 2:
-        print("{0} {1} {0}".format("="*20, "Stage 2 Pickle data"))
+        if not args.silient:
+            print("{0} {1} {0}".format("="*20, "Stage 2 Pickle data"))
+        fmt = "# Pickle data # {}\n" if not args.silient else ""
         from transText2Bin import TextProcessingParser
         from transText2Bin import main as ProcessingMain
-        fmt = "Stage 2  Pickle data: {}"
 
-        assert 'data' in hyper_settings, fmt.format(
-            f"missing 'data' in hyper-setting file {f_hyper_settings}")
-        assert 'sp' in hyper_settings, fmt.format(
-            f"missing 'sp' in hyper-setting file {f_hyper_settings}")
-
-        _, (spmodel, _) = resolve_sp_path(hyper_settings['sp'])
-        checkExist('f', spmodel)
+        hyper_settings = readfromjson(f_hyper_settings)
+        assert 'data' in hyper_settings, f"missing 'data' in hyper-setting file {f_hyper_settings}"
 
         data_settings = hyper_settings['data']
         if 'text_processing' not in data_settings:
@@ -84,27 +74,36 @@ if __name__ == "__main__":
             processing_settings = data_settings['text_processing']
         if 'nj' not in processing_settings:
             processing_settings['nj'] = os.cpu_count()
-            print(fmt.format(f"set 'nj' to {processing_settings['nj']}"))
-        if 'spm' not in processing_settings:
-            processing_settings['spm'] = spmodel
-            print(fmt.format(f"set 'spm' to {spmodel}"))
+            sys.stdout.write(fmt.format(
+                f"set 'nj' to {processing_settings['nj']}"))
+
+        if 'raw-tokenizer' in processing_settings and processing_settings['raw-tokenizer']:
+            pass
+        elif 'tokenizer' not in processing_settings:
+            assert 'tokenizer' in hyper_settings, (
+                "\n"
+                "At least one of these options is required:\n"
+                "1. set 'raw-tokenizer' if the text corpus is tokenized;\n"
+                "2. specify 'tokenizer' in ['data']['text_processing'];\n"
+                f"3. setup 'tokenizer' and ['tokenizer']['location'] in {f_hyper_settings}\n")
+            processing_settings['tokenizer'] = hyper_settings['tokenizer']['location']
+            sys.stdout.write(
+                f"set ['text_processing']['tokenizer']='{processing_settings['tokenizer']}'")
 
         if 'lang' in hyper_settings['data']:
             # check if it's chinese-like languages
             iszh = ('zh' == hyper_settings['data']['lang'].split('-')[0])
         else:
             iszh = False
-
-        if iszh:
-            seperator = ''
-        else:
-            seperator = ' '
+        seperator = '' if iszh else ' '
 
         pkldir = os.path.join(args.expdir, 'lmbin')
         os.makedirs(pkldir, exist_ok=True)
         for part in ['train', 'dev', 'test']:
-            assert part in data_settings, fmt.format(
-                f"missing '{part}' in hyper-p['data']")
+            if part not in data_settings:
+                sys.stderr.write(
+                    f"warining: missing '{part}' in hyper-p['data'], skip\n")
+                continue
             part_text = combineText(data_settings[part], seperator=seperator)
             if part != 'train':
                 setting = processing_settings.copy()
@@ -121,8 +120,9 @@ if __name__ == "__main__":
 
     ############ Stage 3  NN training ############
     if s_beg <= 3 and s_end >= 3:
-        print("{0} {1} {0}".format("="*20, "Stage 3 NN training"))
-        fmt = "Stage 3  NN training: {}"
+        if not args.silient:
+            print("{0} {1} {0}".format("="*20, "Stage 3 NN training"))
+        fmt = "# NN training # {}\n" if not args.silient else ""
         try:
             import cat
         except ModuleNotFoundError:
@@ -131,13 +131,15 @@ if __name__ == "__main__":
         from cat.lm.train import LMParser
         from cat.lm.train import main as LMMain
 
-        NNTrain(args, hyper_settings, f_hyper_settings, os.path.join(
+        hyper_settings = readfromjson(f_hyper_settings)
+        TrainNNModel(args, hyper_settings, f_hyper_settings, os.path.join(
             args.expdir, 'lmbin/{}.pkl'), LMParser(), LMMain, fmt)
 
-    ############ Stage 4  Evaluating ############
+    ############ Stage 4  Evaluate ############
     if s_beg <= 4 and s_end >= 4:
-        print("{0} {1} {0}".format("="*20, "Stage 4 Evaluating"))
-        fmt = "Stage 4  Evaluating: {}"
+        if not args.silient:
+            print("{0} {1} {0}".format("="*20, "Stage 4 Evaluate"))
+        fmt = "# Evaluate # {}\n" if not args.silient else ""
         try:
             import cat
         except ModuleNotFoundError:
@@ -145,15 +147,16 @@ if __name__ == "__main__":
             sys.path.append(cwd)
         from cat.lm.train import LMParser
         from cat.lm.train import main as LMMain
+        hyper_settings = readfromjson(f_hyper_settings)
         if 'resume' not in hyper_settings['train']:
             hyper_settings['train']['resume'] = os.path.join(
                 args.expdir, 'checks/bestckpt.pt')
-        print(fmt.format(
+        sys.stdout.write(fmt.format(
             f"set 'resume' to {hyper_settings['train']['resume']}"))
         if 'eval' not in hyper_settings['train']:
             hyper_settings['train']['eval'] = os.path.join(
                 args.expdir, 'lmbin/test.pkl')
-            print(fmt.format(
+            sys.stdout.write(fmt.format(
                 f"set 'eval' to {hyper_settings['train']['eval']}"))
-        NNTrain(args, hyper_settings, f_hyper_settings, os.path.join(
+        TrainNNModel(args, hyper_settings, f_hyper_settings, os.path.join(
             args.expdir, 'lmbin/{}.pkl'), LMParser(), LMMain, fmt)

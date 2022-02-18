@@ -65,105 +65,166 @@
                 }
             }
         },
-        "sp": {
-            "description": "Configuration of SentencePiece tokenizer. For all options, refer to https://github.com/google/sentencepiece/blob/master/doc/options.md",
+        "tokenizer": {
+            "description": "Configuration of tokenizer",
             "type": "object",
+            "required": [
+                "type"
+            ],
             "properties": {
-                "input_format": {
+                "type": {
                     "type": "string",
                     "examples": [
-                        "text",
-                        "tsv"
+                        "JiebaTokenizer",
+                        "SentencePieceTokenizer"
                     ],
-                    "default": "text"
+                    "default": "SentencePieceTokenizer"
                 },
-                "model_prefix": {
-                    "type": "string",
-                    "default": ""
-                },
-                "model_type": {
-                    "type": "string",
-                    "examples": [
-                        "unigram",
-                        "bpe",
-                        "word",
-                        "char"
-                    ],
-                    "default": "unigram"
-                },
-                "vocab_size": {
-                    "type": "number",
-                    "default": 8000
-                },
-                "character_coverage": {
-                    "type": "number",
-                    "default": 0.9995
-                },
-                "input_sentence_size": {
-                    "type": "number",
-                    "default": 0
-                },
-                "shrinking_factor": {
-                    "type": "number",
-                    "default": 0.75
-                },
-                "num_threads": {
-                    "type": "number",
-                    "default": 16
-                },
-                "num_sub_iterations": {
-                    "type": "number",
-                    "default": 2
-                },
-                "max_sentencepiece_length": {
-                    "type": "number",
-                    "default": 16
-                },
-                "max_sentence_length": {
-                    "type": "number",
-                    "default": 4192
-                },
-                "treat_whitespace_as_suffix": {
-                    "type": "boolean",
-                    "default": false
-                },
-                "user_defined_symbols": {
-                    "type": "string",
-                    "default": ""
-                },
-                "add_dummy_prefix": {
-                    "type": "boolean",
-                    "default": true
-                },
-                "use_all_vocab": {
-                    "type": "boolean",
-                    "default": false
-                },
-                "unk_id": {
-                    "type": "number",
-                    "default": 0
-                },
-                "bos_id": {
-                    "type": "number",
-                    "default": 1
-                },
-                "eos_id": {
-                    "type": "number",
-                    "default": 2
-                },
-                "pad_id": {
-                    "type": "number",
-                    "default": -1
-                },
-                "unk_surface": {
-                    "type": "string",
-                    "default": " ⁇ "
-                },
-                "train_extremely_large_corpus": {
-                    "type": "boolean",
-                    "default": false
+                "location": {
+                    "description": "Path to the tokenizer model",
+                    "type": "string"
                 }
-            }
+            },
+            "allOf": [
+                {
+                    "if": {
+                        "properties": {
+                            "type": {
+                                "const": "JiebaTokenizer"
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "property": {
+                                "type": "object",
+                                "properties": {
+                                    "userdict": {
+                                        "type": "string"
+                                    },
+                                    "bos_id": {
+                                        "type": "number",
+                                        "default": 0
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "type": {
+                                "const": "SentencePieceTokenizer"
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "property": {
+                                "description": "Configuration of SentencePiece tokenizer. For all options, refer to https://github.com/google/sentencepiece/blob/master/doc/options.md",
+                                "type": "object",
+                                "properties": {
+                                    "input_format": {
+                                        "type": "string",
+                                        "examples": [
+                                            "text",
+                                            "tsv"
+                                        ],
+                                        "default": "text"
+                                    },
+                                    "model_prefix": {
+                                        "type": "string",
+                                        "default": ""
+                                    },
+                                    "model_type": {
+                                        "type": "string",
+                                        "examples": [
+                                            "unigram",
+                                            "bpe",
+                                            "word",
+                                            "char"
+                                        ],
+                                        "default": "unigram"
+                                    },
+                                    "vocab_size": {
+                                        "type": "number",
+                                        "default": 8000
+                                    },
+                                    "character_coverage": {
+                                        "type": "number",
+                                        "default": 0.9995
+                                    },
+                                    "input_sentence_size": {
+                                        "type": "number",
+                                        "default": 0
+                                    },
+                                    "shrinking_factor": {
+                                        "type": "number",
+                                        "default": 0.75
+                                    },
+                                    "num_threads": {
+                                        "type": "number",
+                                        "default": 16
+                                    },
+                                    "num_sub_iterations": {
+                                        "type": "number",
+                                        "default": 2
+                                    },
+                                    "max_sentencepiece_length": {
+                                        "type": "number",
+                                        "default": 16
+                                    },
+                                    "max_sentence_length": {
+                                        "type": "number",
+                                        "default": 4192
+                                    },
+                                    "treat_whitespace_as_suffix": {
+                                        "type": "boolean",
+                                        "default": false
+                                    },
+                                    "user_defined_symbols": {
+                                        "type": "string",
+                                        "default": ""
+                                    },
+                                    "add_dummy_prefix": {
+                                        "type": "boolean",
+                                        "default": true
+                                    },
+                                    "use_all_vocab": {
+                                        "type": "boolean",
+                                        "default": false
+                                    },
+                                    "unk_id": {
+                                        "type": "number",
+                                        "default": 0
+                                    },
+                                    "bos_id": {
+                                        "type": "number",
+                                        "default": 1
+                                    },
+                                    "eos_id": {
+                                        "type": "number",
+                                        "default": 2
+                                    },
+                                    "pad_id": {
+                                        "type": "number",
+                                        "default": -1
+                                    },
+                                    "unk_surface": {
+                                        "type": "string",
+                                        "default": " ⁇ "
+                                    },
+                                    "train_extremely_large_corpus": {
+                                        "type": "boolean",
+                                        "default": false
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            ]
         },
         "topo": {
             "type": "string",

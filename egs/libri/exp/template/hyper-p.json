@@ -16,10 +16,13 @@
             "truncate": 128
         }
     },
-    "sp": {
-        "model_type": "unigram",
-        "vocab_size": 1024,
-        "model_prefix": "sentencepiece/libri_unigram_1024/spm"
+    "tokenizer": {
+        "type": "SentencePieceTokenizer",
+        "property": {
+            "model_type": "unigram",
+            "vocab_size": 1024,
+            "model_prefix": "sentencepiece/libri_unigram_1024/spm"
+        }
     },
     "train": {
         "batch_size": 256,

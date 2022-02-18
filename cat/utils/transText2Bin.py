@@ -23,7 +23,6 @@ import argparse
 import pickle
 import os
 import uuid
-import sentencepiece as sp
 from multiprocessing import Pool
 from typing import Union, Tuple, List
 
@@ -47,25 +46,17 @@ def text2bin(arguments: Tuple[argparse.Namespace, str, int, int]):
     if idx_end == -1:
         idx_end = float('inf')
 
-    if args.tokenizer == 'raw':
+    if args.raw_tokenizer:
         def processor(line): return [int(x) for x in line.split()]
-    elif args.tokenizer == 'sentencepiece':
-        assert os.path.isfile(args.spm)
-        spmodel = sp.SentencePieceProcessor(model_file=args.spm)
-        processor = spmodel.encode
-    elif args.tokenizer == 'jieba':
+    else:
         try:
             import cat
         except ModuleNotFoundError:
             import sys
             sys.path.append(os.getcwd())
-        from cat.shared.tokenizer import JiebaTokenizer
-        assert os.path.isfile(args.spm)
-        tknz = JiebaTokenizer(userdict=args.spm)
-        processor = tknz.encode
-    else:
-        raise RuntimeError(
-            f"Unknown tokenizer type \'{args.tokenizer}\', expected one of ['raw', 'sentencepiece', 'jieba']")
+        from cat.shared import tokenizer as tknz
+        tokenizer = tknz.load(args.tokenizer)
+        processor = tokenizer.encode
 
     dataset = []
     cnt_process = 0
@@ -173,13 +164,12 @@ def TextProcessingParser():
     parser = argparse.ArgumentParser(
         'Convert pure text into pickle data with multi-processing')
     parser.add_argument("intext", type=str,
-                        help="Input text files (in token id if no --spm, or text  with --spm).")
+                        help="Input text files.")
     parser.add_argument("output", type=str, help="Ouput file.")
-    # TODO (huahun): rename this option to tokenizer-file
-    parser.add_argument("--spm", type=str,
-                        help="Location of sentencepiece model.")
-    parser.add_argument("--tokenizer", type=str, choices=['sentencepiece', 'jieba', 'raw'], default='sentencepiece',
-                        help="Specify which tokenizer to use.")
+    parser.add_argument("--raw-tokenizer", action="store_true",
+                        help="Assume input text file as tokenized one, would overwrite --tokenizer")
+    parser.add_argument("--tokenizer", type=str,
+                        help="Tokenizer model location. See cat/shared/tokenizer.py for details.")
     parser.add_argument("--nj", type=int, default=1,
                         help="Number of threads. Default: 1")
     parser.add_argument("--concat", type=int, default=-1,

@@ -32,7 +32,7 @@ def main(args: argparse.Namespace):
     if not os.path.isdir(args.output_dir):
         raise RuntimeError(f"{args.output_dir} is not a directory.")
 
-    if args.nj is None:
+    if args.nj == -1:
         world_size = os.cpu_count()
     else:
         world_size = args.nj
@@ -119,7 +119,7 @@ def DecoderParser():
 
     parser.add_argument("--input_scp", type=str, default=None)
     parser.add_argument("--output-dir", type=str, help="Ouput directory.")
-    parser.add_argument("--nj", type=int, default=None)
+    parser.add_argument("--nj", type=int, default=-1)
     return parser
 
 

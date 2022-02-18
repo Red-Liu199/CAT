@@ -10,6 +10,7 @@ from ..lm import lm_builder
 from . import rnnt_builder
 from .beam_search_transducer import TransducerBeamSearcher
 from ..shared import coreutils as utils
+from ..shared import tokenizer as tknz
 from ..shared.data import (
     ScpDataset,
     TestPadCollate
@@ -18,10 +19,8 @@ from ..shared.data import (
 import os
 import json
 import time
-import uuid
 import pickle
 import argparse
-import sentencepiece as spm
 from tqdm import tqdm
 from typing import Union, Tuple
 
@@ -34,15 +33,15 @@ from torch.cuda.amp import autocast
 
 def main(args):
 
-    if not os.path.isfile(args.spmodel):
+    if args.tokenizer is None or not os.path.isfile(args.tokenizer):
         raise FileNotFoundError(
-            "Invalid sentencepiece model location: {}".format(args.spmodel))
+            "Invalid tokenizer model location: {}".format(args.tokenizer))
     if not torch.cuda.is_available() or args.cpu:
         print("> Using CPU")
         args.cpu = True
 
     if args.cpu:
-        if args.nj is None:
+        if args.nj == -1:
             world_size = os.cpu_count()
         else:
             world_size = args.nj
@@ -60,7 +59,7 @@ def main(args):
     assert os.path.isdir(cachedir), f"Cache directory not found: {cachedir}"
     if not os.access(cachedir, os.W_OK):
         raise PermissionError(f"Permission denied for writing to {cachedir}")
-    fmt = os.path.join(cachedir, str(uuid.uuid4())+r".{}.tmp")
+    fmt = os.path.join(cachedir, utils.gen_random_string()+r".{}.tmp")
 
     try:
         mp.set_start_method('spawn')
@@ -153,7 +152,7 @@ def main_worker(pid: int, args: argparse.Namespace, q: mp.Queue, fmt: str, model
         word_prefix_tree=args.word_tree, rescore=args.rescore, verbose=(pid == 0))
 
     local_writer = fmt.format(pid)
-    sp = spm.SentencePieceProcessor(model_file=args.spmodel)
+    tokenizer = tknz.load(args.tokenizer)
     nbest = {}
     with torch.no_grad(), autocast(enabled=(True if device != 'cpu' else False)), open(local_writer, 'w') as fi:
         while True:
@@ -169,9 +168,9 @@ def main_worker(pid: int, args: argparse.Namespace, q: mp.Queue, fmt: str, model
                 nbest[key] = [(score.item(), hypo)
                               for hypo, score in zip(nbest_list, scores_nbest)]
             else:
-                nbest[key] = [(score.item(), sp.decode(hypo))
+                nbest[key] = [(score.item(), tokenizer.decode(hypo))
                               for hypo, score in zip(nbest_list, scores_nbest)]
-            best_seq = sp.decode(nbest_list[0])
+            best_seq = tokenizer.decode(nbest_list[0])
             fi.write("{} {}\n".format(key, best_seq))
             del batch
 
@@ -229,9 +228,9 @@ def DecoderParser():
     parser.add_argument("--algo", type=str,
                         choices=['default', 'lc'], default='default')
     parser.add_argument("--beam_size", type=int, default=3)
-    parser.add_argument("--spmodel", type=str, default='',
-                        help="SPM model location.")
-    parser.add_argument("--nj", type=int, default=None)
+    parser.add_argument("--tokenizer", type=str,
+                        help="Tokenizer model location. See cat/shared/tokenizer.py for details.")
+    parser.add_argument("--nj", type=int, default=-1)
     parser.add_argument("--thread-per-woker", type=int, default=1)
     parser.add_argument("--umax-portion", type=float,
                         default=0.35, help="Umax/T for ALSD decoding.")

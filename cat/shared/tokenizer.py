@@ -15,6 +15,26 @@ except ModuleNotFoundError:
     sys.exit(1)
 from collections import OrderedDict
 from typing import List, Union, Iterable, Optional, Dict
+from ..shared.coreutils import gen_random_string
+
+
+def gen_cache_path() -> str:
+    return os.path.join('/tmp', gen_random_string())
+
+
+def file2bin(f_text: str) -> bytes:
+    assert os.path.isfile(f_text), f"no such file: '{f_text}'"
+    with open(f_text, 'rb') as fi:
+        data = fi.read()
+    return data
+
+
+def bin2file(bindata: bytes, f_dest: Optional[str] = None) -> str:
+    if f_dest is None:
+        f_dest = gen_cache_path()
+    with open(f_dest, 'wb') as fo:
+        fo.write(bindata)
+    return f_dest
 
 
 class AbsTokenizer:
@@ -59,25 +79,44 @@ class AbsTokenizer:
         """Load tokenizer from serialized object"""
         raise NotImplementedError
 
+    def __getstate__(self):
+        return self.state_dict()
+
+    def __setstate__(self, state: dict):
+        self.load_state_dict(state)
+
+
 # FIXME (huahuan): I'm not quite familiar with jieba, so there might be inappropriate processing
 
 
 class JiebaTokenizer(AbsTokenizer):
-    def __init__(self, userdict: Optional[str] = None, bos_id: int = 0) -> None:
+    def __init__(self, userdict: Optional[Union[str, bytes]] = None, bos_id: int = 0, lazy_init: bool = False) -> None:
         super().__init__()
+        if lazy_init:
+            return
         self._tokenizer = jieba.Tokenizer()
-        if userdict is not None:
-            assert os.path.isfile(userdict), f"{userdict} is not a valid file."
-            self._tokenizer.set_dictionary(userdict)
+        if userdict is None:
             self._tokenizer.initialize()
+            self._vocabulary = list(self._tokenizer.FREQ.items())
+            self.byte_dict = None
+        else:
+            if isinstance(userdict, str):
+                assert os.path.isfile(
+                    userdict), f"{userdict} is not a valid file."
+                self._tokenizer.set_dictionary(userdict)
+                self.byte_dict = file2bin(userdict)
+                self._tokenizer.initialize()
+            elif isinstance(userdict, bytes):
+                self.byte_dict = userdict
+                cachefile = bin2file(userdict)
+                self._tokenizer.set_dictionary(cachefile)
+                self._tokenizer.initialize()
+                os.remove(cachefile)
+            else:
+                raise ValueError(f"Unknown userdict type: {type(userdict)}")
             # we only load user custom word
             self._vocabulary = [(w, None) for w, freq in self._tokenizer.FREQ.items(
             ) if freq > 0]  # type: Dict[str, int]
-        else:
-            self._tokenizer.initialize()
-            self._vocabulary = list(self._tokenizer.FREQ.items())
-
-        self.f_dict = userdict
 
         if bos_id == 1:
             unk_id = 0
@@ -150,35 +189,40 @@ class JiebaTokenizer(AbsTokenizer):
         return OrderedDict([
             ('vocab', self._vocabulary),
             ('reverse-vocab', self._reverse_vocab),
-            ('dict-file', self.f_dict)
+            ('dict-data', self.byte_dict)
         ])
 
     def load_state_dict(self, state_dict: OrderedDict):
         assert 'vocab' in state_dict
         assert 'reverse-vocab' in state_dict
-        assert 'dict-file' in state_dict
+        assert 'dict-data' in state_dict
 
         self._vocabulary = state_dict['vocab']
         self._reverse_vocab = state_dict['reverse-vocab']
-        self.f_dict = state_dict['dict-file']
-        if self.f_dict is not None:
-            self._tokenizer = jieba.Tokenizer(self.f_dict)
-        self._tokenizer.initialize()
+        self.byte_dict = state_dict['dict-data']
+        if self.byte_dict is not None:
+            cachefile = bin2file(self.byte_dict)
+            self._tokenizer = jieba.Tokenizer(cachefile)
+            self._tokenizer.initialize()
+            os.remove(cachefile)
+        else:
+            self._tokenizer.initialize()
 
 
 class SentencePieceTokenizer(AbsTokenizer):
     """SentencePiece tokenizer wrapper."""
 
-    def __init__(self, spmodel: str = None) -> None:
+    def __init__(self, spmodel: Optional[Union[str, bytes]] = None, lazy_init: bool = False) -> None:
         super().__init__()
-        if spmodel is None:
+        if lazy_init:
             # lazy initialize
             return
+        assert spmodel is not None
         if not os.path.isfile(spmodel):
             raise RuntimeError(
                 f"{self.__class__.__name__}: sentencepiece model path \'{spmodel}\' is invalid.")
         self._tokenzier = sp.SentencePieceProcessor(model_file=spmodel)
-        self.f_model = spmodel
+        self.byte_model = file2bin(spmodel)
 
     def encode(self, strings: Union[str, Iterable[str]]) -> Union[List[int], List[List[int]]]:
         return self._tokenzier.Encode(strings)
@@ -198,13 +242,16 @@ class SentencePieceTokenizer(AbsTokenizer):
 
     def state_dict(self) -> OrderedDict:
         return OrderedDict([
-            ('spmodel', self.f_model)
+            ('model-data', self.byte_model)
         ])
 
     def load_state_dict(self, state_dict: OrderedDict):
-        assert 'spmodel' in state_dict
-        self.f_model = state_dict['spmodel']
-        self._tokenzier = sp.SentencePieceProcessor(model_file=self.f_model)
+        assert 'model-data' in state_dict
+        self.byte_model = state_dict['model-data']
+        if self.byte_model is not None:
+            cachefile = bin2file(self.byte_model)
+            self._tokenzier = sp.SentencePieceProcessor(model_file=cachefile)
+            os.remove(cachefile)
 
 
 def save(obj: AbsTokenizer, target: str):
@@ -212,14 +259,14 @@ def save(obj: AbsTokenizer, target: str):
     assert isinstance(
         obj, AbsTokenizer), "tokenizer.save: input object is not AbsTokenizer instance."
     with open(target, 'wb') as fo:
-        pickle.dump(obj.__class__.__name__, fo)
-        pickle.dump(obj.state_dict(), fo)
+        pickle.dump(obj, fo)
 
 
 def load(src: str) -> AbsTokenizer:
     assert os.path.isfile(src)
     with open(src, 'rb') as fi:
-        ctok = pickle.load(fi)
-        tokenizer = eval(ctok)()    # type: AbsTokenizer
-        tokenizer.load_state_dict(pickle.load(fi))
+        tokenizer = pickle.load(fi)
+
+    assert isinstance(
+        tokenizer, AbsTokenizer), "tokenizer.load: loaded object is not AbsTokenizer instance."
     return tokenizer

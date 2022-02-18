@@ -28,6 +28,20 @@ def mp_spawn(target: Callable, args: Union[tuple, argparse.Namespace]):
         exit(1)
 
 
+def readfromjson(file: str) -> dict:
+    checkExist('f', file)
+    with open(file, 'r') as fi:
+        data = json.load(fi)
+    return data
+
+
+def dumpjson(obj: dict, target: str):
+    assert os.access(os.path.dirname(target),
+                     os.W_OK), f"{target} is not writable."
+    with open(target, 'w') as fo:
+        json.dump(obj, fo, indent=4)
+
+
 def resolve_sp_path(config: dict, prefix: Optional[str] = None, allow_making: bool = False):
     if 'model_prefix' in config:
         spdir = os.path.dirname(config['model_prefix'])
@@ -102,7 +116,7 @@ def parsingData(
         f_labels: Union[List[str], str],
         f_out: str,
         filter: Optional[str] = None,
-        spm=None,
+        tokenizer=None,
         iszh: bool = False):
     """Parsing audio feature and text label into pickle file.
 
@@ -112,7 +126,7 @@ def parsingData(
         f_out   (str): Ouput pickle file location.
         filter (str, optional): identifier for filtering out seqs with unqualified length. 
             such as '100:2000' means remove those whose length is shorter than 100 or longer than 2000. Default: None
-        spm (sentencepiece.SentencePieceProcessor optional): If `spm` is None, lines in `f_label` MUST be token indices, 
+        tokenizer (AbsTokenizer, optional): If `tokenizer` is None, lines in `f_label` MUST be token indices, 
             otherwise it should be text.
         iszh (bool, optional): whether is chinese-liked lang (charater-based)
     """
@@ -123,8 +137,8 @@ def parsingData(
     f_linfo = f_out + '.linfo'
 
     if os.path.isfile(f_out):
-        sys.stderr.write("\nWARNING: parsingData\n"
-                         f"  file exists: {f_out}, "
+        sys.stderr.write("warning: parsingData() "
+                         f"file exists: {f_out}, "
                          "rm it if you want to update the data.\n\n")
         checkExist('f', f_data)
         return
@@ -155,16 +169,16 @@ def parsingData(
     labels = [l.split() for l in labels]
     num_label_lines = len(labels)
 
-    if spm is None:
+    if tokenizer is None:
         # assume the labels are given in number ids
         labels = {l[0]: np.asarray(
             [int(i) for i in l[1:]], dtype=np.int64) for l in labels}
     else:
         if iszh:
-            labels = {l[0]: np.asarray(spm.encode(''.join(l[1:])), dtype=np.int64)
+            labels = {l[0]: np.asarray(tokenizer.encode(''.join(l[1:])), dtype=np.int64)
                       for l in labels}
         else:
-            labels = {l[0]: np.asarray(spm.encode(' '.join(l[1:])), dtype=np.int64)
+            labels = {l[0]: np.asarray(tokenizer.encode(' '.join(l[1:])), dtype=np.int64)
                       for l in labels}
 
     num_utts = [sum(1 for _ in open(_f_scp, 'r')) for _f_scp in f_scps]
@@ -319,7 +333,7 @@ def get_free_port():
     return s.getsockname()[1]
 
 
-def NNTrain(
+def TrainNNModel(
         args: argparse.Namespace,
         settings: dict,
         f_hyper_p: str,
@@ -327,69 +341,70 @@ def NNTrain(
         Parser: argparse.ArgumentParser,
         MainFunc: Callable[[argparse.Namespace], None],
         promt: str = '{}'):
-    import subprocess
-
     assert 'train' in settings, promt.format("missing 'train' in hyper-p")
 
     if args.ngpu > -1:
         os.environ['CUDA_VISIBLE_DEVICES'] = \
             generate_visible_gpus(args.ngpu)
 
-    if 'sp' not in settings:
-        sys.stderr.write("WARNING: 'sp' not in hyper-setting\n")
+    if 'tokenizer' not in settings:
+        sys.stderr.write(
+            f"warning: missing property 'tokenizer': {f_hyper_p}\n")
     else:
-        _, (_, spvocab) = resolve_sp_path(settings['sp'])
-        checkExist('f', spvocab)
+        try:
+            import cat
+        except ModuleNotFoundError:
+            sys.path.append(cwd)
+        from cat.shared import tokenizer as tknz
+        checkExist('f', settings['tokenizer']['location'])
+        tokenizer = tknz.load(settings['tokenizer']['location'])
+
         f_nnconfig = os.path.join(args.expdir, 'config.json')
         checkExist('f', f_nnconfig)
 
-        with open(f_nnconfig, 'r') as fi:
-            nnconfig = json.load(fi)
-        # setup the num_classes to vocab_size
-        with open(spvocab, 'r') as fi:
-            n_vocab = sum(1 for _ in fi)
+        nnconfig = readfromjson(f_nnconfig)
         # recursively search for 'num_classes'
-        recursive_rpl(nnconfig, 'num_classes', n_vocab)
-        with open(f_nnconfig, 'w') as fo:
-            json.dump(nnconfig, fo, indent=4)
+        recursive_rpl(nnconfig, 'num_classes', tokenizer.vocab_size)
+        dumpjson(nnconfig, f_nnconfig)
+        del tokenizer
 
+    import subprocess
     if subprocess.run('command -v git', shell=True, capture_output=True).returncode != 0:
         sys.stderr.write(
-            "WARNING: git command not found. Suppress saving git commit.\n")
+            "warning: git command not found. Skip saving commit.\n")
     else:
         process = subprocess.run(
             "git log -n 1 --pretty=format:\"%H\"", shell=True, check=True, stdout=subprocess.PIPE)
-        with open(f_hyper_p, 'r') as fi:
-            orin_settings = json.load(fi)
+        
+        orin_settings = readfromjson(f_hyper_p)
         orin_settings['commit'] = process.stdout.decode('utf-8')
-        with open(f_hyper_p, 'w') as fo:
-            json.dump(orin_settings, fo, indent=4)
+        dumpjson(orin_settings, f_hyper_p)
 
     training_settings = settings['train']
     if 'trset' not in training_settings:
         train_data = fmt_data.format('train')
         checkExist('f', train_data)
         training_settings['trset'] = train_data
-        sys.stdout.write(promt.format(f"set 'trset' to {train_data}\n"))
+        sys.stdout.write(promt.format(f"set 'trset' to {train_data}"))
     if 'devset' not in training_settings:
         dev_data = fmt_data.format('dev')
         checkExist('f', dev_data)
         training_settings['devset'] = dev_data
-        sys.stdout.write(promt.format(f"set 'devset' to {dev_data}\n"))
+        sys.stdout.write(promt.format(f"set 'devset' to {dev_data}"))
     if 'world-size' not in training_settings:
         training_settings['world-size'] = 1
     if 'rank' not in training_settings:
         training_settings['rank'] = 0
     if 'dir' not in training_settings:
         training_settings['dir'] = args.expdir
-        sys.stdout.write(promt.format(f"set 'dir' to {args.expdir}\n"))
+        sys.stdout.write(promt.format(f"set 'dir' to {args.expdir}"))
     if 'workers' not in training_settings:
         training_settings['workers'] = 2
-        sys.stdout.write(promt.format(f"set 'workers' to 2\n"))
+        sys.stdout.write(promt.format(f"set 'workers' to 2"))
     if 'dist-url' not in training_settings:
         training_settings['dist-url'] = f"tcp://localhost:{get_free_port()}"
         sys.stdout.write(promt.format(
-            f"set 'dist-url' to {training_settings['dist-url']}\n"))
+            f"set 'dist-url' to {training_settings['dist-url']}"))
 
     mp_spawn(MainFunc, updateNamespaceFromDict(training_settings, Parser))
 
@@ -451,40 +466,60 @@ def combineText(datasets: Union[str, List[str]], f_out: Optional[str] = None, se
     return f_out
 
 
-def SentencePieceTrain(
-        settings: dict,
-        f_hyper: str, promt: str = '{}'):
-    assert 'data' in settings, promt.format(
-        f"missing 'data' in hyper-setting file {f_hyper}")
-    assert 'sp' in settings, promt.format(
-        f"missing 'sp' in hyper-setting file {f_hyper}")
-    f_corpus_tmp = os.path.join('/tmp', str(uuid.uuid4()))
-    assert 'train' in settings['data'], promt.format(
-        "missing 'train' in hyper-p['data']")
-    if 'lang' in settings['data']:
+def TrainTokenizer(f_hyper: str):
+    checkExist('f', f_hyper)
+    hyper_settings = readfromjson(f_hyper)
+
+    assert 'data' in hyper_settings, f"missing property 'data': {f_hyper}"
+    assert 'train' in hyper_settings[
+        'data'], f"missing property 'train' in ['data']: {f_hyper}"
+    assert 'tokenizer' in hyper_settings, f"missing property 'tokenizer': {f_hyper}"
+    assert 'type' in hyper_settings[
+        'tokenizer'], f"missing property 'type' in ['tokenizer']: {f_hyper}"
+    if 'location' not in hyper_settings['tokenizer']:
+        sys.stderr.write(
+            f"missing property 'location' in ['tokenizer']: {f_hyper}\n")
+        sys.stderr.write(f"set ['tokenizer']='tokenizer.tknz'\n")
+        hyper_settings['tokenizer']['location'] = os.path.join(
+            os.path.dirname(f_hyper), 'tokenizer.tknz')
+    assert os.access(os.path.dirname(hyper_settings['tokenizer']['location']),
+                     os.W_OK), f"['tokenizer']['location'] is not writable: '{hyper_settings['tokenizer']['location']}'"
+
+    if 'lang' in hyper_settings['data']:
         # check if it's chinese-like languages
-        iszh = ('zh' == settings['data']['lang'].split('-')[0])
+        iszh = ('zh' == hyper_settings['data']['lang'].split('-')[0])
     else:
         iszh = False
+    seperator = '' if iszh else ' '
 
-    if iszh:
-        seperator = ''
-    else:
-        seperator = ' '
     f_corpus_tmp = combineText(
-        settings['data']['train'], seperator=seperator)
-    sp_settings, (_, vocab) = resolve_sp_path(
-        settings['sp'], os.path.basename(os.getcwd()), allow_making=True)
-    sentencepiece_train(f_corpus_tmp, **sp_settings)
+        hyper_settings['data']['train'], seperator=seperator)
+    tokenizer_type = hyper_settings['tokenizer']['type']
+    if 'property' not in hyper_settings['tokenizer']:
+        hyper_settings['tokenizer']['property'] = {}
 
-    checkExist('f', vocab)
-    with open(vocab, 'r') as fi:
-        n_vocab = sum(1 for _ in fi)
-    sp_settings['vocab_size'] = n_vocab
-    settings['sp'] = sp_settings
-    with open(f_hyper, 'w') as fo:
-        json.dump(settings, fo, indent=4)
+    try:
+        import cat
+    except ModuleNotFoundError:
+        sys.path.append(os.getcwd())
+    from cat.shared import tokenizer as tknz
+    if tokenizer_type == 'SentencePieceTokenizer':
+        sp_settings, (f_tokenizer, _) = resolve_sp_path(
+            hyper_settings['tokenizer']['property'], os.path.basename(os.getcwd()), allow_making=True)
+        sentencepiece_train(f_corpus_tmp, **sp_settings)
+        hyper_settings['tokenizer']['property'] = sp_settings
+        tokenizer = tknz.SentencePieceTokenizer(spmodel=f_tokenizer)
+        hyper_settings['tokenizer']['property']['vocab_size'] = tokenizer.vocab_size
+    elif tokenizer_type == 'JiebaTokenizer':
+        # jieba tokenizer doesn't need training
+        tokenizer = tknz.JiebaTokenizer(
+            **hyper_settings['tokenizer']['property'])
+    else:
+        raise ValueError(f"Unknown type of tokenizer: {tokenizer_type}")
 
+    tknz.save(tokenizer, hyper_settings['tokenizer']['location'])
+
+    dumpjson(hyper_settings, f_hyper)
     os.remove(f_corpus_tmp)
 
 
@@ -513,8 +548,7 @@ def hyperParamSearch(
         return decode_settings['alpha'], decode_settings['beta']
     if dev_set is None:
         assert 'input_scp' in dev_set and 'gt' in er_settings, \
-            fmt.format(
-                "hyperParamSearch: dev set is required for hyper-param searching.")
+            "hyperParamSearch: dev set is required for hyper-param searching."
     else:
         decode_settings['input_scp'] = expandPath('s', dev_set)[0]
         er_settings['gt'] = expandPath('t', dev_set)[0]
@@ -522,7 +556,6 @@ def hyperParamSearch(
     try:
         import cat
     except ModuleNotFoundError:
-        import sys
         sys.path.append(cwd)
     from wer import WERParser
     from wer import main as WERMain
@@ -561,7 +594,7 @@ def hyperParamSearch(
         'nbestlist': nbestlist,
         'config': lm_config,
         'resume': lm_check,
-        'spmodel': decode_settings['spmodel'],
+        'tokenizer': decode_settings['tokenizer'],
         'nj': decode_settings['nj'] if 'nj' in decode_settings else 16,
         'cpu': decode_settings['cpu'] if 'cpu' in decode_settings else True
     }
@@ -701,45 +734,51 @@ if __name__ == "__main__":
     checkExist('d', args.expdir)
     f_hyper_settings = os.path.join(args.expdir, 'hyper-p.json')
     checkExist('f', f_hyper_settings)
-    with open(f_hyper_settings, 'r') as fi:
-        hyper_settings = json.load(fi)
 
     ############ Stage 1  Tokenizer training ############
     if s_beg <= 1 and s_end >= 1:
         if not args.silient:
             print("{0} {1} {0}".format("="*20, "Stage 1 Tokenizer training"))
         fmt = "# Tokenizer trainin # {}\n" if not args.silient else ""
-        if 'sp' not in hyper_settings:
-            sys.stdout.write(fmt.format(
-                f"missing 'sp' in hyper-setting, skip tokenizer training."))
+        hyper_settings = readfromjson(f_hyper_settings)
+        if 'tokenizer' not in hyper_settings:
+            sys.stderr.write(
+                "warning: missing 'tokenizer' in hyper-setting, skip tokenizer training.")
         else:
-            SentencePieceTrain(hyper_settings, f_hyper_settings, fmt)
+            TrainTokenizer(f_hyper_settings)
 
     ############ Stage 2  Pickle data ############
     if s_beg <= 2 and s_end >= 2:
         if not args.silient:
             print("{0} {1} {0}".format("="*20, "Stage 2 Pickle data"))
-        import sentencepiece as spm
         fmt = "# Pickle data # {}\n" if not args.silient else ""
 
-        assert 'data' in hyper_settings, fmt.format(
-            f"missing 'data' in hyper-setting file {f_hyper_settings}")
+        hyper_settings = readfromjson(f_hyper_settings)
+        assert 'data' in hyper_settings, f"missing property 'data': {f_hyper_settings}"
         if 'lang' in hyper_settings['data']:
             # check if it's chinese-like languages
             iszh = ('zh' == hyper_settings['data']['lang'].split('-')[0])
         else:
             iszh = False
 
-        if 'sp' not in hyper_settings:
-            sys.stdout.write(fmt.format(
-                f"missing 'sp' in hyper-setting file, assume the ground truth text files as tokenized ones."))
+        try:
+            import cat
+        except ModuleNotFoundError:
+            sys.path.append(os.getcwd())
+        from cat.shared import tokenizer as tknz
+        if 'tokenizer' not in hyper_settings:
+            sys.stderr.write(
+                f"warning: missing property 'tokenizer', assume the ground truth text files as tokenized ones.")
             istokenized = True
-            spmodel = None
+            tokenizer = None
         else:
-            # use sentence piece to do tokenization
-            _, (f_spm, _) = resolve_sp_path(hyper_settings['sp'])
-            checkExist('f', f_spm)
-            spmodel = spm.SentencePieceProcessor(model_file=f_spm)
+            # load tokenizer from file
+            assert 'location' in hyper_settings[
+                'tokenizer'], f"missing property 'location' in ['tokenizer']: {f_hyper_settings}"
+
+            f_tokenizer = hyper_settings['tokenizer']['location']
+            checkExist('f', f_tokenizer)
+            tokenizer = tknz.load(f_tokenizer)
             istokenized = False
 
         data_settings = hyper_settings['data']
@@ -749,8 +788,10 @@ if __name__ == "__main__":
         d_pkl = os.path.join(args.expdir, 'pkl')
         os.makedirs(d_pkl, exist_ok=True)
         for dataset in ['train', 'dev', 'test']:
-            assert dataset in data_settings, fmt.format(
-                f"missing '{dataset}' in hyper-p['data']")
+            if dataset not in data_settings:
+                sys.stderr.write(
+                    f"warning: missing '{dataset}' in ['data'], skip.")
+                continue
             sys.stdout.write(fmt.format(f"parsing {dataset} data..."))
             f_texts = expandPath('t', data_settings[dataset], cwd)
             f_scps = expandPath('s', data_settings[dataset], cwd)
@@ -759,9 +800,9 @@ if __name__ == "__main__":
             else:
                 filter = None
 
-            parsingData(f_scps, f_texts, f_out=os.path.join(
-                d_pkl, dataset+'.pkl'),
-                filter=filter, spm=spmodel, iszh=iszh)
+            parsingData(f_scps, f_texts,
+                        f_out=os.path.join(d_pkl, dataset+'.pkl'),
+                        filter=filter, tokenizer=tokenizer, iszh=iszh)
 
         if not istokenized:
             # generate word prefix tree from train set
@@ -769,13 +810,11 @@ if __name__ == "__main__":
             from word_prefix_tree import main as WPTMain
             f_text = expandPath('t', data_settings['train'], cwd)[0]
             wpt_settings = {
-                'intext': f_text,
-                'spmodel': f_spm,
                 'stripid': True,
                 'output': os.path.join(d_pkl, 'wpt.pkl')}
 
             mp_spawn(WPTMain, updateNamespaceFromDict(wpt_settings, WordPrefixParser(), [
-                wpt_settings['intext'], wpt_settings['spmodel']]))
+                f_text, hyper_settings['tokenizer']['location']]))
 
     ############ Stage 3  NN training ############
     if s_beg <= 3 and s_end >= 3:
@@ -785,9 +824,9 @@ if __name__ == "__main__":
         try:
             import cat
         except ModuleNotFoundError:
-            import sys
             sys.path.append(cwd)
 
+        hyper_settings = readfromjson(f_hyper_settings)
         if 'topo' not in hyper_settings:
             hyper_settings['topo'] = 'rnnt'
             sys.stdout.write(fmt.format(f"set 'topo' to 'rnnt'"))
@@ -796,12 +835,12 @@ if __name__ == "__main__":
             from cat.rnnt.train import RNNTParser
             from cat.rnnt.train import main as RNNTMain
 
-            NNTrain(args, hyper_settings, f_hyper_settings, os.path.join(
+            TrainNNModel(args, hyper_settings, f_hyper_settings, os.path.join(
                 args.expdir, 'pkl/{}.pkl'), RNNTParser(), RNNTMain, fmt)
         elif hyper_settings['topo'] == 'ctc':
             from cat.ctc.train import CTCParser
             from cat.ctc.train import main as CTCMain
-            NNTrain(args, hyper_settings, f_hyper_settings, os.path.join(
+            TrainNNModel(args, hyper_settings, f_hyper_settings, os.path.join(
                 args.expdir, 'pkl/{}.pkl'), CTCParser(), CTCMain, fmt)
         else:
             raise ValueError(fmt.format(
@@ -817,22 +856,20 @@ if __name__ == "__main__":
         try:
             import cat
         except ModuleNotFoundError:
-            import sys
             sys.path.append(cwd)
 
-        assert 'inference' in hyper_settings, fmt.format(
-            f"missing 'inference' in hyper-setting file {f_hyper_settings}")
-        assert 'data' in hyper_settings, fmt.format(
-            f"missing 'data' in hyper-setting file {f_hyper_settings}")
-        assert 'test' in hyper_settings['data'], fmt.format(
-            "missing 'test' in hyper-p['data']")
+        hyper_settings = readfromjson(f_hyper_settings)
+        assert 'inference' in hyper_settings, f"missing property 'inference': {f_hyper_settings}"
+        assert 'data' in hyper_settings, f"missing property 'data': {f_hyper_settings}"
+        assert 'test' in hyper_settings[
+            'data'], "missing property 'test' in ['data']: {f_hyper_settings}"
         if 'topo' not in hyper_settings:
             hyper_settings['topo'] = 'rnnt'
             sys.stdout.write(fmt.format(f"set 'topo' to 'rnnt'"))
 
         if hyper_settings['topo'] not in ['rnnt', 'ctc']:
-            raise ValueError(fmt.format(
-                f"Unknown topology: {hyper_settings['topo']}, expect one of ['rnnt', 'ctc']"))
+            raise ValueError(
+                f"Unknown topology: {hyper_settings['topo']}, expect one of ['rnnt', 'ctc']")
 
         inference_settings = hyper_settings['inference']
         checkdir = os.path.join(args.expdir, 'checks')
@@ -840,13 +877,11 @@ if __name__ == "__main__":
 
         if_search_hyper = False
         if 'search-hyper' in inference_settings and inference_settings['search-hyper']:
-            sys.stdout.write(fmt.format(
-                "enable hyper-param searching, this would set dummy alpha/beta first."))
+            sys.stdout.write(fmt.format("enable hyper-param searching."))
             if_search_hyper = True
 
         # decode
-        assert 'decode' in inference_settings, fmt.format(
-            "missing 'decode' in hyper-p['inference']")
+        assert 'decode' in inference_settings, "missing 'decode' in hyper-p['inference']"
         decode_settings = inference_settings['decode']
 
         if 'resume' in decode_settings:
@@ -867,14 +902,11 @@ if __name__ == "__main__":
                 suffix_avgmodel = 'best-1'
                 checkpoint = os.path.join(checkdir, 'bestckpt.pt')
             else:
-                assert 'avgmodel' in inference_settings, fmt.format(
-                    "missing 'avgmodel' in hyper-p['inference']")
+                assert 'avgmodel' in inference_settings, "missing 'avgmodel' in hyper-p['inference']"
 
                 avgmodel_settings = inference_settings['avgmodel']
-                assert 'mode' in avgmodel_settings, fmt.format(
-                    "missing 'mode' in hyper-p['inference']['avgmodel']")
-                assert 'num' in avgmodel_settings, fmt.format(
-                    "missing 'num' in hyper-p['inference']['avgmodel']")
+                assert 'mode' in avgmodel_settings, "missing 'mode' in hyper-p['inference']['avgmodel']"
+                assert 'num' in avgmodel_settings, "missing 'num' in hyper-p['inference']['avgmodel']"
                 avg_mode, avg_num = avgmodel_settings['mode'], avgmodel_settings['num']
 
                 from avgmodel import find_n_best, average_checkpoints
@@ -886,30 +918,20 @@ if __name__ == "__main__":
                     f_check_all = [os.path.join(checkdir, _f) for _f in os.listdir(
                         checkdir) if pattern.search(_f) is not None]
                     if len(f_check_all) < avg_num:
-                        raise RuntimeError(fmt.format(
-                            f"trying to do model averaging {avg_num} over {len(f_check_all)} checkpoint."))
+                        raise RuntimeError(
+                            f"trying to do model averaging {avg_num} over {len(f_check_all)} checkpoint.")
                     f_check_list = sorted(f_check_all, reverse=True)[:avg_num]
                     del f_check_all
                 else:
-                    raise NotImplementedError(fmt.format(
-                        f"Unknown model averaging mode {avg_mode}"))
+                    raise NotImplementedError(
+                        f"Unknown model averaging mode {avg_mode}")
                 checkpoint = os.path.join(checkdir, suffix_avgmodel+'.pt')
-                try:
-                    params = average_checkpoints(f_check_list)
-                    torch.save(params, checkpoint)
-                except Exception as e:
-                    if os.path.isfile(checkpoint):
-                        sys.stdout.write(fmt.format(e))
-                        sys.stdout.write(fmt.format(
-                            f"Not found raw checkpoint files, use existing {checkpoint} instead."))
-                    else:
-                        raise RuntimeError(e)
+                params = average_checkpoints(f_check_list)
+                torch.save(params, checkpoint)
 
-            with open(f_hyper_settings, 'r') as fi:
-                _hyper = json.load(fi)
+            _hyper = readfromjson(f_hyper_settings)
             _hyper['inference']['decode']['resume'] = checkpoint
-            with open(f_hyper_settings, 'w') as fo:
-                json.dump(_hyper, fo, indent=4)
+            dumpjson(_hyper, f_hyper_settings)
 
         checkExist('f', checkpoint)
         decode_settings['resume'] = checkpoint
@@ -932,13 +954,12 @@ if __name__ == "__main__":
             sys.stdout.write(fmt.format(
                 f"set 'config' to {decode_settings['config']}"))
             checkExist('f', decode_settings['config'])
-        if 'spmodel' not in decode_settings:
-            assert 'sp' in hyper_settings, fmt.format(
-                f"you should set at least one of 'sp' in hyper-p or 'spmodel' in hyper-p['inference']['decode']")
-            _, (spmodel, _) = resolve_sp_path(hyper_settings['sp'])
-            decode_settings['spmodel'] = spmodel
-            sys.stdout.write(fmt.format(
-                f"set 'spmodel' to {decode_settings['spmodel']}"))
+        if 'tokenizer' not in decode_settings:
+            assert 'tokenizer' in hyper_settings, (
+                "\nyou should set at least one of:\n"
+                f"1. set 'tokenizer' and ['tokenizer']['location'] in {f_hyper_settings}\n"
+                f"2. set 'tokenizer' in ['inference']['decode'] in {f_hyper_settings}\n")
+            decode_settings['tokenizer'] = hyper_settings['tokenizer']['location']
         if 'nj' not in decode_settings:
             decode_settings['nj'] = os.cpu_count()
             sys.stdout.write(fmt.format(
@@ -1030,8 +1051,7 @@ if __name__ == "__main__":
                 # since we using conformer, there's a 1/4 subsapling, if it's not, modify that
                 if "subsample" in inference_settings:
                     sub_factor = inference_settings['subsample']
-                    assert sub_factor > 1, fmt.format(
-                        f"Can't deal with 'subsample'={sub_factor} in hyper-p['inference']")
+                    assert sub_factor > 1, f"can't deal with 'subsample'={sub_factor} in hyper-p['inference']"
                     sys.stdout.write(fmt.format(
                         f"resolving portion data from train set, might takes a while."))
                     dataset = ModifiedSpeechDataset(f_pkl)
@@ -1049,16 +1069,14 @@ if __name__ == "__main__":
                     del ly
                     del normal_ly
                     decode_settings['umax-portion'] = portion
-                    with open(f_hyper_settings, 'r') as fi:
-                        orin_hyper_setting = json.load(fi)
+                    orin_hyper_setting = readfromjson(f_hyper_settings)
                     orin_hyper_setting['inference']['decode']['umax-portion'] = portion
-                    with open(f_hyper_settings, 'w') as fo:
-                        json.dump(orin_hyper_setting, fo, indent=4)
+                    dumpjson(orin_hyper_setting, f_hyper_settings)
                     sys.stdout.write(fmt.format(
                         f"set 'umax-portion' to {portion}"))
             else:
-                sys.stderr.write(fmt.format(
-                    f"WARNING: no training set found in {args.expdir}. Skip counting 'umax-portion'"))
+                sys.stderr.write(
+                    f"warning: no training set found in {args.expdir}. Skip counting 'umax-portion'")
         testsets = hyper_settings['data']['test']
         if isinstance(testsets, str):
             testsets = [testsets]
@@ -1095,11 +1113,9 @@ if __name__ == "__main__":
         # compute wer/cer
         from wer import WERParser
         from wer import main as WERMain
-        assert 'er' in inference_settings, fmt.format(
-            "missing 'er' in hyper-p['inference']")
+        assert 'er' in inference_settings, "missing 'er' in hyper-p['inference']"
         err_settings = inference_settings['er']
-        assert 'mode' in err_settings, fmt.format(
-            "missing 'mode' in hyper-p['inference']['er']")
+        assert 'mode' in err_settings, "missing 'mode' in hyper-p['inference']['er']"
 
         f_texts = expandPath('t', testsets, cwd)
         checkExist('f', f_texts)
@@ -1142,13 +1158,12 @@ if __name__ == "__main__":
 
             sys.stdout.write(fmt.format(
                 f"write back setting to {f_hyper_settings}"))
-            with open(f_hyper_settings, 'r') as fi:
-                _tmp_setting = json.load(fi)
+            
+            _tmp_setting = readfromjson(f_hyper_settings)
             _tmp_setting['inference']['search-hyper'] = False
             _tmp_setting['inference']['decode']['alpha'] = _alpha
             _tmp_setting['inference']['decode']['beta'] = _beta
-            with open(f_hyper_settings, 'w') as fo:
-                json.dump(_tmp_setting, fo, indent=4)
+            dumpjson(_tmp_setting, f_hyper_settings)
             sys.stdout.write(fmt.format(
                 "settings have been updated, re-run this script."))
             exit(0)

@@ -18,6 +18,15 @@ test_meeting    %SER 91.77 | %CER 20.97 [46214 / 220385, 1224 ins, 22925 del, 22
 test_net        %SER 65.49 | %CER 12.76 [53035 / 415746, 1943 ins, 12961 del, 38131 sub ]
 aishell-test    %SER 49.99 | %CER 7.22 [7560 / 104765, 249 ins, 201 del, 7110 sub ] 
 
++lm-aishell
+%SER 41.23 | %CER 5.83 [ 6104 / 104765, 200 ins, 218 del, 5686 sub ]    alpha = 0.5 | beta = 1.5
+
++lm-aishell-word
+%SER 40.48 | %CER 5.70 [ 5976 / 104765, 165 ins, 306 del, 5505 sub ]    alpha = 0.53125 | beta = 1.0
+
++lm-trans-word
+%SER 43.21 | %CER 6.15 [ 6443 / 104765, 169 ins, 381 del, 5893 sub ]    alpha = 0.5 | beta = 0.0
+
 +lm-trans
 %SER 67.12 | %CER 9.81 [ 32416 / 330498, 2392 ins, 11206 del, 18818 sub ]       alpha = 0.28125 | beta = 3.5
 %SER 63.08 | %CER 12.12 [ 50404 / 415746, 3290 ins, 9963 del, 37151 sub ]       alpha = 0.28125 | beta = 2.5

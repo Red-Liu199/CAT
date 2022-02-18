@@ -6,6 +6,7 @@
 
 import os
 import heapq
+import uuid
 import argparse
 import numpy as np
 from collections import OrderedDict
@@ -440,3 +441,7 @@ def load_checkpoint(model: Union[torch.nn.Module, torch.nn.parallel.DistributedD
         state_dict = new_state_dict
     model.load_state_dict(state_dict)
     return model
+
+
+def gen_random_string():
+    return str(uuid.uuid4())

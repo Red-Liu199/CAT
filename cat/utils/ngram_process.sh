@@ -29,21 +29,19 @@ export PATH=$PATH:../../src/bin/
 # and kenlm not support <unk> in corpus,
 # ...so in the `utils/readtextbin.py` script we convert 0(<bos>, <eos>) and 1 (<unk>) to white space
 # ...if your tokenizer set different bos/eos/unk id, you should make that mapping too.
-export vocab_size=$(cat $dir/hyper-p.json |
-    python -c "import sys,json;print(json.load(sys.stdin)['sp']['vocab_size'])")
+export tokenizer="$(cat $dir/hyper-p.json |
+    python -c "import sys,json;print(json.load(sys.stdin)['tokenizer']['location'])")"
 if [ $large_corpus == "True" ]; then
-    spmodel="$(cat $dir/hyper-p.json |
-        python -c "import sys,json;print(json.load(sys.stdin)['sp']['model_prefix'])").model"
     f_text=$(cat $dir/hyper-p.json |
         python -c "import sys,json;print(json.load(sys.stdin)['data']['train'])" |
         sed "s/\[//g" | sed "s/\]//g" | sed "s/'//g" | sed "s/,/ /g")
 
-    [ ! -f $spmodel ] && echo "No SentencePiece model: '$spmodel'" && exit 1
+    [ ! -f $tokenizer ] && echo "No tokenizer model: '$tokenizer'" && exit 1
     for x in $f_text; do
         [ ! -f $x ] && echo "No such training corpus: '$x'" && exit 1
     done
 
-    processing="cat $f_text | python utils/readtextbin.py . -t --spm $spmodel --map 0: 1:"
+    processing="cat $f_text | python utils/readtextbin.py . -t --tokenizer $tokenizer --map 0: 1:"
 else
     textbin=$dir/lmbin/train.pkl
     if [ ! -f $textbin ]; then
@@ -75,7 +73,9 @@ import sys, json
 configure = json.load(sys.stdin)
 configure['decoder']['kwargs']['f_binlm'] = '$output'
 configure['decoder']['kwargs']['gram_order'] = $order
-configure['decoder']['kwargs']['num_classes'] = $vocab_size
+from cat.shared import tokenizer as tknz
+tokenizer = tknz.load('$tokenizer')
+configure['decoder']['kwargs']['num_classes'] = tokenizer.vocab_size
 json.dump(configure, sys.stdout, indent=4)" >$dir/config.json.tmp
     mv $dir/config.json.tmp $dir/config.json
 fi

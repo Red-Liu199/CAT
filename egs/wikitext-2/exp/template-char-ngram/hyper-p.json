@@ -4,10 +4,13 @@
         "dev": "data/valid",
         "test": "data/test"
     },
-    "sp": {
-        "model_type": "char",
-        "vocab_size": 232,
-        "use_all_vocab": true,
-        "model_prefix": "sentencepiece/char/spm"
+    "tokenizer": {
+        "type": "SentencePieceTokenizer",
+        "property": {
+            "model_type": "char",
+            "vocab_size": 232,
+            "use_all_vocab": true,
+            "model_prefix": "sentencepiece/wikitext2-char/spm"
+        }
     }
 }

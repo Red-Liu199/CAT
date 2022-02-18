@@ -7,10 +7,14 @@
             "truncate": 35
         }
     },
-    "sp": {
-        "model_type": "word",
-        "vocab_size": 28779,
-        "use_all_vocab": true
+    "tokenizer": {
+        "type": "SentencePieceTokenizer",
+        "property": {
+            "model_type": "word",
+            "vocab_size": 28779,
+            "use_all_vocab": true,
+            "model_prefix": "sentencepiece/wikitext2-word/spm"
+        }
     },
     "train": {
         "batch_size": 20,

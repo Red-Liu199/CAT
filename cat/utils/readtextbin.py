@@ -8,9 +8,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("input", type=str, help="Input tokenized text file.")
     parser.add_argument("-t", action="store_true", dest="istext",
-                        help="Identify the input to be text instead of binary file. Used with --spm")
-    parser.add_argument("--spm", type=str,
-                        help="SentencePiece model to tokenize text.")
+                        help="Identify the input to be text instead of binary file. Used with --tokenizer")
+    parser.add_argument("--tokenizer", type=str,
+                        help="Tokenizer model location. See cat/shared/tokenizer.py for details.")
     parser.add_argument("--map", nargs='*', type=str,
                         help="Map index to str, split by ':'. "
                         "e.g. map 0 to whitespace '--map 0:'; "
@@ -34,24 +34,24 @@ if __name__ == "__main__":
         else:
             return str(x)
 
+    try:
+        import cat
+    except ModuleNotFoundError:
+        import os
+        sys.path.append(os.getcwd())
     if args.istext:
-        import sentencepiece as spm
-        assert args.spm is not None
-        sp = spm.SentencePieceProcessor(model_file=args.spm)
+        from cat.shared import tokenizer as tknz
+        assert args.tokenizer is not None
+        tokenizer = tknz.load(args.tokenizer)
         try:
             for l in sys.stdin:
-                idx_l = sp.encode(l)
+                idx_l = tokenizer.encode(l)
                 sys.stdout.write(' '.join([
-                    int2str(x) for x in sp.encode(l)
+                    int2str(x) for x in tokenizer.encode(l)
                 ]) + '\n')
         except IOError:
             exit(0)
     else:
-        try:
-            import cat
-        except ModuleNotFoundError:
-            import os
-            sys.path.append(os.getcwd())
         from cat.shared.data import CorpusDataset
         corpus = CorpusDataset(args.input)
         try:
