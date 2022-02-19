@@ -83,4 +83,4 @@ fi
 # test
 # You may need to set the 'num_classes' in
 # ... $dir/config.json to the number of vocab of your TOKENIZER
-python utils/ppl_compute_ngram.py $dir
+python utils/ppl_compute_ngram.py $dir -e $dir/lmbin/test-*.pkl

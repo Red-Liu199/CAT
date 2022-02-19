@@ -52,7 +52,7 @@ if __name__ == "__main__":
         hyper_settings = readfromjson(f_hyper_settings)
         if 'tokenizer' not in hyper_settings:
             sys.stderr.write(
-                f"warning: missing 'tokenizer' in hyper-setting, skip tokenizer training.")
+                f"warning: missing 'tokenizer' in hyper-setting, skip tokenizer training.\n")
         else:
             TrainTokenizer(f_hyper_settings)
 
@@ -73,7 +73,7 @@ if __name__ == "__main__":
         else:
             processing_settings = data_settings['text_processing']
         if 'nj' not in processing_settings:
-            processing_settings['nj'] = os.cpu_count()
+            processing_settings['nj'] = max(1, os.cpu_count() // 2)
             sys.stdout.write(fmt.format(
                 f"set 'nj' to {processing_settings['nj']}"))
 
@@ -87,8 +87,8 @@ if __name__ == "__main__":
                 "2. specify 'tokenizer' in ['data']['text_processing'];\n"
                 f"3. setup 'tokenizer' and ['tokenizer']['location'] in {f_hyper_settings}\n")
             processing_settings['tokenizer'] = hyper_settings['tokenizer']['location']
-            sys.stdout.write(
-                f"set ['text_processing']['tokenizer']='{processing_settings['tokenizer']}'")
+            sys.stdout.write(fmt.format(
+                f"set ['text_processing']['tokenizer']='{processing_settings['tokenizer']}'"))
 
         if 'lang' in hyper_settings['data']:
             # check if it's chinese-like languages
@@ -99,7 +99,19 @@ if __name__ == "__main__":
 
         pkldir = os.path.join(args.expdir, 'lmbin')
         os.makedirs(pkldir, exist_ok=True)
-        for part in ['train', 'dev', 'test']:
+        # 'train' and 'dev' datasets would be merged into ones, but we
+        # want to test 'test' dataset individually
+        if 'test' not in data_settings:
+            sys.stderr.write(
+                f"warining: missing 'test' in hyper-p['data'], skip\n")
+            testsets = []
+        else:
+            testsets = [
+                f"test-{x.translate(str.maketrans({'/':'_', '.':'_'}))}" for x in data_settings['test']]
+            data_settings.update(
+                {k: x for k, x in zip(testsets, data_settings['test'])})
+
+        for part in ['train', 'dev'] + testsets:
             if part not in data_settings:
                 sys.stderr.write(
                     f"warining: missing '{part}' in hyper-p['data'], skip\n")
@@ -117,6 +129,7 @@ if __name__ == "__main__":
             f_pkl = os.path.join(pkldir, part+'.pkl')
             mp_spawn(ProcessingMain, updateNamespaceFromDict(
                 setting, TextProcessingParser(), [part_text, f_pkl]))
+            os.remove(part_text)
 
     ############ Stage 3  NN training ############
     if s_beg <= 3 and s_end >= 3:
@@ -145,18 +158,32 @@ if __name__ == "__main__":
         except ModuleNotFoundError:
             import sys
             sys.path.append(cwd)
+        import glob
         from cat.lm.train import LMParser
         from cat.lm.train import main as LMMain
         hyper_settings = readfromjson(f_hyper_settings)
         if 'resume' not in hyper_settings['train']:
             hyper_settings['train']['resume'] = os.path.join(
                 args.expdir, 'checks/bestckpt.pt')
-        sys.stdout.write(fmt.format(
-            f"set 'resume' to {hyper_settings['train']['resume']}"))
-        if 'eval' not in hyper_settings['train']:
-            hyper_settings['train']['eval'] = os.path.join(
-                args.expdir, 'lmbin/test.pkl')
             sys.stdout.write(fmt.format(
-                f"set 'eval' to {hyper_settings['train']['eval']}"))
-        TrainNNModel(args, hyper_settings, f_hyper_settings, os.path.join(
-            args.expdir, 'lmbin/{}.pkl'), LMParser(), LMMain, fmt)
+                f"set 'resume' to {hyper_settings['train']['resume']}"))
+        else:
+            sys.stderr.write(f"You set ['train']['resume'] to {hyper_settings['train']['resume']}\n"
+                             "... if that's not for evaluation, modify that and re-run the script.\n")
+        if 'eval' in hyper_settings['train']:
+            eval_sets = [hyper_settings['train']['eval']]
+        else:
+            eval_sets = glob.glob(os.path.join(
+                args.expdir, "lmbin/test-*.pkl"))
+
+        if eval_sets == []:
+            sys.stderr.write(
+                f"warning: no 'lmbin/test-*.pkl' match found in {args.expdir}\n"
+            )
+        for sub_set in eval_sets:
+            hyper_settings['train']['eval'] = sub_set
+            sys.stdout.write(fmt.format(
+                f"evaluate testset: {sub_set}"
+            ))
+            TrainNNModel(args, hyper_settings, f_hyper_settings, os.path.join(
+                args.expdir, 'lmbin/{}.pkl'), LMParser(), LMMain, "")
