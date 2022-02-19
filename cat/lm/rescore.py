@@ -94,9 +94,9 @@ def dataserver(args, q: mp.Queue):
     testset = NbestListDataset(args.nbestlist)
     tokenizer = tknz.load(args.tokenizer)
     testloader = DataLoader(
-        testset, batch_size=1,
+        testset, batch_size=4,
         shuffle=False,
-        num_workers=1,
+        num_workers=(args.world_size // 8),
         collate_fn=NbestListCollate(tokenizer))
 
     t_beg = time.time()

@@ -375,7 +375,7 @@ def TrainNNModel(
     else:
         process = subprocess.run(
             "git log -n 1 --pretty=format:\"%H\"", shell=True, check=True, stdout=subprocess.PIPE)
-        
+
         orin_settings = readfromjson(f_hyper_p)
         orin_settings['commit'] = process.stdout.decode('utf-8')
         dumpjson(orin_settings, f_hyper_p)
@@ -954,6 +954,11 @@ if __name__ == "__main__":
             sys.stdout.write(fmt.format(
                 f"set 'config' to {decode_settings['config']}"))
             checkExist('f', decode_settings['config'])
+        sys.stdout.write(fmt.format(
+            "\n"
+            "Ensure that the tokenizer you specify is correct.\n"
+            "If you're doing rescoring, the tokenizer should be set as the LM one."
+        ))
         if 'tokenizer' not in decode_settings:
             assert 'tokenizer' in hyper_settings, (
                 "\nyou should set at least one of:\n"
@@ -1158,7 +1163,7 @@ if __name__ == "__main__":
 
             sys.stdout.write(fmt.format(
                 f"write back setting to {f_hyper_settings}"))
-            
+
             _tmp_setting = readfromjson(f_hyper_settings)
             _tmp_setting['inference']['search-hyper'] = False
             _tmp_setting['inference']['decode']['alpha'] = _alpha

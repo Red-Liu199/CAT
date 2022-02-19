@@ -127,7 +127,7 @@ class JiebaTokenizer(AbsTokenizer):
         assert bos_id < len(self._vocabulary) + 2
 
         self._vocabulary = OrderedDict(
-            [('<bos>', bos_id), ('<unk>', unk_id)] + self._vocabulary)
+            [('<s>', bos_id), ('<unk>', unk_id)] + self._vocabulary)
         self._reverse_vocab = tuple(self._vocabulary.keys())    # type: tuple
         for idx, w in enumerate(self._vocabulary):
             self._vocabulary[w] = idx
@@ -200,9 +200,10 @@ class JiebaTokenizer(AbsTokenizer):
         self._vocabulary = state_dict['vocab']
         self._reverse_vocab = state_dict['reverse-vocab']
         self.byte_dict = state_dict['dict-data']
+        self._tokenizer = jieba.Tokenizer()
         if self.byte_dict is not None:
             cachefile = bin2file(self.byte_dict)
-            self._tokenizer = jieba.Tokenizer(cachefile)
+            self._tokenizer.set_dictionary(cachefile)
             self._tokenizer.initialize()
             os.remove(cachefile)
         else:

@@ -373,10 +373,8 @@ class NGram(AbsDecoder):
             10.).log_(), persistent=False)
 
     def score(self, input_ids: torch.LongTensor, targets: torch.LongTensor, input_lengths: Optional[torch.LongTensor] = None):
-        if not torch.equal(input_ids[:, 1:], targets[:, :-1]):
-            raise RuntimeError(
-                "N-gram model requires that there's no exposure mismatch between input and target.")
-
+        input_ids = input_ids.cpu()
+        targets = targets.cpu()
         if input_lengths is None:
             in_lens = [input_ids.size(1)]*input_ids.size(0)
         else:
@@ -385,16 +383,19 @@ class NGram(AbsDecoder):
         # [N, ]
         log_prob = input_ids.new_full(
             input_ids.size()[:1], 0.0, dtype=torch.float)
-        for b, (seq, l) in enumerate(zip(input_ids.cpu().tolist(), in_lens)):
-            seq = [self.vocab[i] for i in seq[:l]]
-            if seq[0] == '</s>':
-                seq[0] = '<s>'
-            seq.append(self.vocab[targets[b][-1].item()])
-
-            for t, pb in enumerate(self.ngram.full_scores(' '.join(seq), bos=False, eos=False)):
-                if t == 0:
-                    continue
-                log_prob[b] += pb[0]
+        for b in range(input_ids.size(0)):
+            """
+            NOTE (huahuan): For n-gram model, we assume the input_ids[:, 1:] == targets[:, :-1]
+            """
+            seq_str = [self.vocab[i]
+                       for i in input_ids[b, :in_lens[b]].tolist()]
+            # replace </s> in the first place to <s>
+            if seq_str[0] == '</s>':
+                seq_str[0] = '<s>'
+            # add last token, usually </s>
+            seq_str.append(self.vocab[targets[b][-1].item()])
+            log_prob[b] = self.ngram.score(
+                ' '.join(seq_str), bos=False, eos=False)
 
         log_prob *= self.scale
 
