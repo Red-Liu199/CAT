@@ -27,13 +27,14 @@ from ..shared.data import (
 import os
 import json
 import time
+import pickle
 import argparse
 from tqdm import tqdm
+from typing import Dict, Union, List, Tuple
 
 
 from torch.cuda.amp import autocast
 from torch.utils.data import DataLoader
-import torch.distributed as dist
 import torch.multiprocessing as mp
 import torch
 
@@ -89,6 +90,16 @@ def main(args):
                 fo.write(fi.read())
             os.remove(path)
 
+    if args.save_lm_nbest is not None:
+        lm_nbest = {}
+        with open(args.save_lm_nbest, 'wb') as fo:
+            for worker in range(world_size):
+                path = fmt.format(worker) + '.lm'
+                with open(path, 'rb') as fi:
+                    lm_nbest.update(pickle.load(fi))
+                os.remove(path)
+            pickle.dump(lm_nbest, fo)
+
 
 def dataserver(args, q: mp.Queue):
     testset = NbestListDataset(args.nbestlist)
@@ -96,7 +107,9 @@ def dataserver(args, q: mp.Queue):
     testloader = DataLoader(
         testset, batch_size=4,
         shuffle=False,
-        num_workers=(args.world_size // 8),
+        # FIXME (huahuan): num_workers cannot be set >= 1,
+        # possibly pytorch-related bug, see https://github.com/pytorch/pytorch/issues/72782
+        num_workers=0,  # (args.world_size // 8),
         collate_fn=NbestListCollate(tokenizer))
 
     t_beg = time.time()
@@ -132,6 +145,7 @@ def main_worker(pid: int, args: argparse.Namespace, q: mp.Queue, fmt: str = "res
         model = build_lm(args.config, args.resume, device)
 
     writer = fmt.format(pid)
+    lm_nbest = {}   # type: Dict[str, Dict[int, Tuple[float, str]]]
     # rescoring
     with torch.no_grad(), \
             autocast(enabled=(True if device != 'cpu' else False)), open(writer, 'w') as fo:
@@ -147,6 +161,13 @@ def main_worker(pid: int, args: argparse.Namespace, q: mp.Queue, fmt: str = "res
             in_lens = in_toks.size(1) - mask.sum(dim=1)
             log_lm_probs = model.score(in_toks, dummy_targets, in_lens)
 
+            if args.save_lm_nbest is not None:
+                for _key, _trans, _score in zip(keys, texts, log_lm_probs):
+                    nid, okey = _key.split('-', maxsplit=1)
+                    if okey not in lm_nbest:
+                        lm_nbest[okey] = {}
+                    lm_nbest[okey][int(nid)] = (_score, _trans)
+
             final_score = scores + args.alpha * log_lm_probs.cpu() + args.beta * in_lens
             indiv = {}
             for k, t, s in zip(keys, texts, final_score):
@@ -158,6 +179,9 @@ def main_worker(pid: int, args: argparse.Namespace, q: mp.Queue, fmt: str = "res
                 fo.write(f"{k} {t}\n")
             del batch
 
+    if args.save_lm_nbest is not None:
+        with open(writer+'.lm', 'wb') as fo:
+            pickle.dump(lm_nbest, fo)
     q.get()
 
 
@@ -189,6 +213,8 @@ def RescoreParser():
                         help="The 'beta' value for LM integration, a.k.a. the penalty of tokens.")
     parser.add_argument("--tokenizer", type=str,
                         help="Tokenizer model location. See cat/shared/tokenizer.py for details.")
+    parser.add_argument("--save-lm-nbest", type=str,
+                        help="Path to save the LM N-best scores.")
 
     parser.add_argument("--nj", type=int, default=-1)
     parser.add_argument("--cpu", action='store_true', default=False)

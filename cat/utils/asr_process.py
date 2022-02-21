@@ -1038,9 +1038,9 @@ if __name__ == "__main__":
             decodedir = os.path.join(args.expdir, 'decode')
             os.makedirs(decodedir, exist_ok=True)
             if hyper_settings['topo'] == 'rnnt':
-                f_text = f"rnnt-{decode_settings['beam_size']}_algo-{decode_settings['algo']}_{suffix_lm}_{suffix_avgmodel}"
+                f_text = f"rnnt-{decode_settings['beam-size']}_algo-{decode_settings['algo']}_{suffix_lm}_{suffix_avgmodel}"
             else:
-                f_text = f"ctc-{decode_settings['beam_size']}_{suffix_lm}_{suffix_avgmodel}"
+                f_text = f"ctc-{decode_settings['beam-size']}_{suffix_lm}_{suffix_avgmodel}"
             decode_out_prefix = os.path.join(decodedir, f_text)
             sys.stdout.write(fmt.format(
                 f"set 'output_prefix' to {decode_out_prefix}"))

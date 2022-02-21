@@ -21,6 +21,7 @@ import time
 import pickle
 import argparse
 from tqdm import tqdm
+from typing import Dict, Union, List, Tuple
 
 import torch
 import torch.multiprocessing as mp
@@ -119,7 +120,8 @@ def worker(pid: int, args: argparse.Namespace, q: mp.Queue, fmt: str, model: Abs
             beam_width=args.beam_size, num_processes=1, is_token_based=True)
 
     local_writer = fmt.format(pid)
-    nbest = {}
+    # {'uid': {0: (-10.0, 'a b c'), 1: (-12.5, 'a b c d')}}
+    nbest = {}  # type: Dict[str, Dict[int, Tuple[float, str]]]
     with torch.no_grad(), open(local_writer, 'w') as fi:
         while True:
             batch = q.get(block=True)
@@ -135,11 +137,11 @@ def worker(pid: int, args: argparse.Namespace, q: mp.Queue, fmt: str, model: Abs
             # -log(p) -> log(p)
             beam_scores = -beam_scores
 
-            nbest[key] = [(score.item(), tokenizer.decode(hypo[:lh].tolist()))
-                          for score, hypo, lh in zip(beam_scores[0], beam_results[0], out_lens[0])]
-            best_seq = tokenizer.decode(
-                beam_results[0][0][:out_lens[0][0]].tolist())
-            fi.write("{} {}\n".format(key, best_seq))
+            nbest[key] = {
+                bid: (score, tokenizer.decode(hypo[:_len].tolist()))
+                for bid, (score, hypo, _len) in enumerate(zip(beam_scores[0], beam_results[0], out_lens[0]))
+            }
+            fi.write("{} {}\n".format(key, nbest[key][0][1]))
             del batch
 
     with open(f"{local_writer}.nbest", 'wb') as fo:
@@ -171,7 +173,7 @@ def DecoderParser():
                         help="The 'alpha' value for LM integration, a.k.a. the LM weight")
     parser.add_argument("--beta", type=float, default=0.6,
                         help="The 'beta' value for LM integration, a.k.a. the penalty of tokens.")
-    parser.add_argument("--beam_size", type=int, default=3)
+    parser.add_argument("--beam-size", type=int, default=3)
     parser.add_argument("--tokenizer", type=str,
                         help="Tokenizer model location. See cat/shared/tokenizer.py for details.")
     parser.add_argument("--nj", type=int, default=-1)

@@ -115,9 +115,9 @@ def main(args: argparse.Namespace):
         # force to maintain ids
         args.stripid = False
         with open(hypothesis, 'rb') as f_hy:
-            # type: Dict[str, List[Tuple[float, str]]]
+            # type: Dict[str, Dict[int, Tuple[float, str]]]
             l_hy = pickle.load(f_hy)
-        l_hy = [(key, nbest) for key, nbest in l_hy.items()]
+        l_hy = [(key, list(nbest.values())) for key, nbest in l_hy.items()]
     else:
         with open(hypothesis, 'r') as f_hy:
             l_hy = f_hy.readlines()

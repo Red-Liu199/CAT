@@ -8,6 +8,7 @@
 """
 
 from . import coreutils as utils
+from .tokenizer import AbsTokenizer
 
 import io
 import os
@@ -16,7 +17,8 @@ import pickle
 import math
 import hashlib
 import numpy as np
-from typing import Tuple, Sequence, List, Optional, Union
+from collections import OrderedDict
+from typing import Tuple, Sequence, List, Optional, Union, Dict
 
 import torch
 from torch.utils.data import Dataset
@@ -190,9 +192,8 @@ class NbestListDataset(AbsDataset):
     def __init__(self, path: str) -> None:
         super().__init__(path)
         with open(self.f_path, 'rb') as fi:
-            # type: Dict[str, List[Tuple[float, str]]]
-            self._dataset = pickle.load(fi)
-        self._dataset = [(key, hypo) for key, hypo in self._dataset.items()]
+            # type: Dict[str, Dict[int, Tuple[float, str]]]
+            self._dataset = list(pickle.load(fi).items())
 
     def impl_get_len(self):
         return [sum([len(hyp) for _, hyp in hypos]) for _, hypos in self._dataset]
@@ -200,10 +201,16 @@ class NbestListDataset(AbsDataset):
     def __len__(self):
         return len(self._dataset)
 
-    def __getitem__(self, index: int) -> Tuple[str, List[float], List[str]]:
-        key, hypos = self._dataset[index]
-        scores, texts = list(zip(*hypos))
-        return [key]*len(scores), list(scores), list(texts)
+    def __getitem__(self, index: int) -> Tuple[List[str], List[float], List[str]]:
+        # create new key = nbest id + '-' + original key,
+        # so that we can get it back via new_key.split('-', maxsplit=1)
+        keys, scores, trans = [], [], []
+        okey = self._dataset[index][0]
+        for nid, (_score, _trans) in self._dataset[index][1].items():
+            keys.append(f"{nid}-{okey}")
+            scores.append(_score)
+            trans.append(_trans)
+        return keys, scores, trans
 
 
 class NbestListCollate():
@@ -211,13 +218,13 @@ class NbestListCollate():
     The passing tokenizer should have method `encode` to convert text to indices.
     """
 
-    def __init__(self, tokenizer, bos_id: int = 0) -> None:
+    def __init__(self, tokenizer: AbsTokenizer, bos_id: int = 0) -> None:
         self._tokenizer = tokenizer
         assert isinstance(
             bos_id, int) and bos_id >= 0, f"ValueError: bos_id={bos_id}"
         self.bos_id = bos_id
 
-    def __call__(self, batches: List[Tuple[str, List[float], List[str]]]):
+    def __call__(self, batches: List[Tuple[List[str], List[float], List[str]]]):
         """
         Args:
             batches : [([key, key, ...], [score1, score2, ...], ["hypo1", "hypo2",...]), ...], length B
@@ -233,15 +240,14 @@ class NbestListCollate():
                 'attention_mask' (torch.LongTensor, torch.BoolTensor): (B * N-best, L_max)
             }
         """
-
-        keys, scores, texts = batches[0]
-        for k, s, t in batches[1:]:
-            keys += k
-            scores += s
-            texts += t
+        keys, scores, trans = [], [], []
+        for lk, ls, lt in batches:
+            keys += lk
+            scores += ls
+            trans += lt
 
         ids = [[self.bos_id] +
-               self._tokenizer.encode(seqs) for seqs in texts]
+               self._tokenizer.encode(seqs) for seqs in trans]
         token_ids = utils.pad_list(
             [torch.LongTensor(i) for i in ids])
         lens = torch.LongTensor([len(x) for x in ids])
@@ -249,7 +255,7 @@ class NbestListCollate():
             lens.max())[None, :] >= lens[:, None]
 
         scores = torch.FloatTensor(scores)
-        return keys, texts, scores, token_ids, token_mask
+        return keys, trans, scores, token_ids, token_mask
 
 
 class sortedPadCollate():
