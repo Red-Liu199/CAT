@@ -44,6 +44,9 @@ def main(args: argparse):
         tuned_list = args.nbestlist
 
     def evaluate(tuned_metric, _searchout):
+        mapkey = ':'.join([str(x) for x in tuned_metric])
+        if mapkey in _searchout:
+            return _searchout[mapkey]['wer']
         cache_file = os.path.join('/tmp', str(uuid.uuid4())+'.nbest')
         interpolate_main(updateNamespaceFromDict(
             {
@@ -61,7 +64,7 @@ def main(args: argparse):
             }, WERParser(), [args.ground_truth, cache_file]
         ))
         os.remove(cache_file)
-        _searchout[':'.join([str(x) for x in tuned_metric])] = wer
+        _searchout[mapkey] = wer
         return wer['wer']
 
     def update_tuned_metric(_searchout: dict):
