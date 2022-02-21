@@ -171,10 +171,11 @@ def main_worker(pid: int, args: argparse.Namespace, q: mp.Queue, fmt: str = "res
             final_score = scores + args.alpha * log_lm_probs.cpu() + args.beta * in_lens
             indiv = {}
             for k, t, s in zip(keys, texts, final_score):
-                if k not in indiv:
-                    indiv[k] = (s, t)
-                elif indiv[k][0] < s:
-                    indiv[k] = (s, t)
+                _, okey = k.split('-', maxsplit=1)
+                if okey not in indiv:
+                    indiv[okey] = (s, t)
+                elif indiv[okey][0] < s:
+                    indiv[okey] = (s, t)
             for k, (s, t) in indiv.items():
                 fo.write(f"{k} {t}\n")
             del batch
@@ -207,9 +208,9 @@ def RescoreParser():
                         help="Path to N-best list files.")
     parser.add_argument("output", type=str, help="The output text file. ")
 
-    parser.add_argument("--alpha", type=float, default=0.3,
+    parser.add_argument("--alpha", type=float, default=0.0,
                         help="The 'alpha' value for LM integration, a.k.a. the LM weight")
-    parser.add_argument("--beta", type=float, default=0.6,
+    parser.add_argument("--beta", type=float, default=0.0,
                         help="The 'beta' value for LM integration, a.k.a. the penalty of tokens.")
     parser.add_argument("--tokenizer", type=str,
                         help="Tokenizer model location. See cat/shared/tokenizer.py for details.")

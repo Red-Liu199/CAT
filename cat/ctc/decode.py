@@ -169,9 +169,9 @@ def DecoderParser():
     parser.add_argument("--input_scp", type=str, default=None)
     parser.add_argument("--output_prefix", type=str, default='./decode')
     parser.add_argument("--lm-path", type=str, help="Path to KenLM model.")
-    parser.add_argument("--alpha", type=float, default=0.3,
+    parser.add_argument("--alpha", type=float, default=0.0,
                         help="The 'alpha' value for LM integration, a.k.a. the LM weight")
-    parser.add_argument("--beta", type=float, default=0.6,
+    parser.add_argument("--beta", type=float, default=0.0,
                         help="The 'beta' value for LM integration, a.k.a. the penalty of tokens.")
     parser.add_argument("--beam-size", type=int, default=3)
     parser.add_argument("--tokenizer", type=str,

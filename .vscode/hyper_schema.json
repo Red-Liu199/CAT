@@ -318,12 +318,6 @@
                 "lmdir": {
                     "type": "string"
                 },
-                "search-hyper": {
-                    "type": "boolean"
-                },
-                "nbestlist": {
-                    "type": "string"
-                },
                 "decode": {
                     "description": "Configuration of decoding. Run 'python -m cat.[topo].decode -h' for support options",
                     "type": "object"

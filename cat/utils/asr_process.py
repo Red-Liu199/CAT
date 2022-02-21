@@ -310,7 +310,7 @@ def recursive_rpl(src_dict: dict, target_key: str, rpl_val):
             recursive_rpl(v, target_key, rpl_val)
 
 
-def updateNamespaceFromDict(src_dict: dict, parser: argparse.ArgumentParser, positionals: List[str] = []):
+def updateNamespaceFromDict(src_dict: dict, parser: argparse.ArgumentParser, positionals: List = []):
     args = argparse.Namespace()
     processed_dict = {}
     for k, v in src_dict.items():
@@ -523,191 +523,6 @@ def TrainTokenizer(f_hyper: str):
     os.remove(f_corpus_tmp)
 
 
-def hyperParamSearch(
-        decode_settings: dict,
-        er_settings: dict,
-        lm_config: str,
-        lm_check: Union[str, None],
-        dev_set: Optional[str] = None,
-        topo: Literal['ctc', 'rnnt'] = 'rnnt',
-        fmt: str = '{}',
-        f_nbestlist: Optional[str] = None):
-    """Search for hyper params alpha/beta for LM integration
-
-    decode_settings : decode settings
-    er_settings : wer/cer evaluation settings
-    lm_config : language model configuration
-    lm_check : checkpoint of model, can be none for ngram model.
-    dev_set : dev set to evaluate the perf.
-    topo : 'ctc' or 'rnnt'
-    fmt : format string for hints
-    f_nbestlist : existing n-best list file, optional.
-    """
-
-    if 'alpha' in decode_settings and 'beta' in decode_settings:
-        return decode_settings['alpha'], decode_settings['beta']
-    if dev_set is None:
-        assert 'input_scp' in dev_set and 'gt' in er_settings, \
-            "hyperParamSearch: dev set is required for hyper-param searching."
-    else:
-        decode_settings['input_scp'] = expandPath('s', dev_set)[0]
-        er_settings['gt'] = expandPath('t', dev_set)[0]
-
-    try:
-        import cat
-    except ModuleNotFoundError:
-        sys.path.append(cwd)
-    from wer import WERParser
-    from wer import main as WERMain
-
-    from cat.lm.rescore import (
-        RescoreParser,
-        main as RescoreMain
-    )
-
-    if topo == 'rnnt':
-        from cat.rnnt.decode import DecoderParser
-        from cat.rnnt.decode import main as DecoderMain
-    elif topo == 'ctc':
-        from cat.ctc.decode import DecoderParser
-        from cat.ctc.decode import main as DecoderMain
-    else:
-        raise RuntimeError(f"Unknown topology: {topo}")
-
-    cache_dir = '/tmp'
-    if f_nbestlist is None:
-        decode_settings['output_prefix'] = os.path.join(
-            cache_dir, str(uuid.uuid4()))
-        nbestlist = decode_settings['output_prefix']+'.nbest'
-        decode_settings['alpha'] = None
-        decode_settings['beta'] = None
-        # generate nbest-list file
-        sys.stdout.write(fmt.format(
-            f"generate n-best list w/o LM at {nbestlist}"))
-        DecoderMain(updateNamespaceFromDict(
-            decode_settings, DecoderParser()))
-        os.remove(decode_settings['output_prefix'])
-    else:
-        nbestlist = f_nbestlist
-
-    rescore_setting = {
-        'nbestlist': nbestlist,
-        'config': lm_config,
-        'resume': lm_check,
-        'tokenizer': decode_settings['tokenizer'],
-        'nj': decode_settings['nj'] if 'nj' in decode_settings else 16,
-        'cpu': decode_settings['cpu'] if 'cpu' in decode_settings else True
-    }
-
-    def _evaluate():
-        mapkey = f"{tuning_val[0]}:{tuning_val[1]}"
-        if mapkey in searchout:
-            return searchout[mapkey]
-
-        rescore_setting.update({
-            'alpha': tuning_val[0],
-            'beta': tuning_val[1]
-        })
-        rescore_setting['output'] = os.path.join(
-            cache_dir, str(uuid.uuid4()))
-        print(f"Rescored output: {rescore_setting['output']}")
-        print(
-            f"Setting: alpha = {tuning_val[0]:.2f} | beta = {tuning_val[1]:.2f}")
-
-        RescoreMain(updateNamespaceFromDict(
-            rescore_setting, RescoreParser(), [rescore_setting['nbestlist'], rescore_setting['output']]))
-
-        er_settings['hy'] = rescore_setting['output']
-        # ignore 'oracle' setting
-        if 'oracle' in er_settings:
-            del er_settings['oracle']
-
-        wer = WERMain(updateNamespaceFromDict(er_settings, WERParser(), [
-                      er_settings['gt'], er_settings['hy']]))
-
-        os.remove(rescore_setting['output'])
-        searchout[mapkey] = wer
-        return wer
-
-    def _search(
-            s_range: Tuple[int, int],
-            _interval: float,
-            _val: str,
-            metric: Literal[0, 1],  # 0 for alpha, 1 for beta
-            result: List[Union[float, None]] = [None, None]
-    ) -> Tuple[float, Union[None, float]]:
-        result = list(result)
-        lower, upper = s_range
-        best_m = (0., None)
-        while upper - lower >= _interval:
-            if result[0] is None:
-                tuning_val[metric] = lower
-                result[0] = _evaluate()[_val]
-
-            if result[1] is None:
-                tuning_val[metric] = upper
-                result[1] = _evaluate()[_val]
-
-            if result[0] > result[1]:
-                result[0] = None
-                lower = (lower+upper)/2
-                best_m = (upper, result[1])
-            else:
-                result[1] = None
-                upper = (lower+upper)/2
-                best_m = (lower, result[0])
-
-        tuning_val[metric] = best_m[0]
-        return best_m[1]
-
-    val = 'wer'
-    alpha_range = [0.0, 1.0]
-    alpha_interval = 0.02
-    beta_range = [-1.0, 1.0]
-    beta_interval = 0.2
-    tuning_val = [0, sum(beta_range)/2]
-    searchout = {}  # type: Dict[str, Dict[str, Union[float, int]]]
-
-    def update_tunning_val():
-        # e.g. tunning_val = 0.5:-0.3
-        tuning_val = min(searchout.keys(),
-                         key=lambda k: searchout[k][val])  # type: str
-        return [float(x) for x in tuning_val.split(':')]
-
-    n_iter = 1
-    last_val = [None, None]
-    while last_val != tuning_val:
-        print(
-            f"\nSearching iter: {n_iter} | alpha {alpha_range} | beta {beta_range}")
-        last_val = tuning_val.copy()
-        # stage 1: fix beta, search alpha in range
-        _search(alpha_range, alpha_interval, val, 0)
-        tuning_val = update_tunning_val()
-        # stage 2: fix alpha, search beta in range
-        _search(beta_range, beta_interval, val, 1)
-        tuning_val = update_tunning_val()
-
-        cur_alpha, cur_beta = tuning_val
-
-        if cur_alpha in alpha_range:
-            da = (alpha_range[1] - alpha_range[0])/2
-            alpha_range = [cur_alpha-da, cur_alpha+da]
-
-        if cur_beta in beta_range:
-            db = (beta_range[1] - beta_range[0]) / 2
-            beta_range = [cur_beta-db, cur_beta+db]
-        n_iter += 1
-
-    if f_nbestlist is None:
-        os.remove(nbestlist)
-
-    del _evaluate
-    del _search
-    del update_tunning_val
-
-    return tuple(tuning_val), searchout[f"{tuning_val[0]}:{tuning_val[1]}"]
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
@@ -875,11 +690,6 @@ if __name__ == "__main__":
         checkdir = os.path.join(args.expdir, 'checks')
         checkExist('d', checkdir)
 
-        if_search_hyper = False
-        if 'search-hyper' in inference_settings and inference_settings['search-hyper']:
-            sys.stdout.write(fmt.format("enable hyper-param searching."))
-            if_search_hyper = True
-
         # decode
         assert 'decode' in inference_settings, "missing 'decode' in hyper-p['inference']"
         decode_settings = inference_settings['decode']
@@ -938,16 +748,6 @@ if __name__ == "__main__":
         sys.stdout.write(fmt.format(
             f"set 'resume' to {checkpoint}"))
 
-        if if_search_hyper:
-            if 'alpha' not in decode_settings:
-                decode_settings['alpha'] = None
-            if 'beta' not in decode_settings:
-                decode_settings['beta'] = None
-
-            sys.stdout.write(fmt.format(
-                "in case you didn't backup the setting:\n"
-                f"current setting: alpha = {decode_settings['alpha']} | beta = {decode_settings['beta']}"))
-
         if 'config' not in decode_settings:
             decode_settings['config'] = os.path.join(
                 args.expdir, 'config.json')
@@ -970,8 +770,7 @@ if __name__ == "__main__":
             sys.stdout.write(fmt.format(
                 f"set 'nj' to {decode_settings['nj']}"))
         if hyper_settings['topo'] == 'rnnt' and (
-            if_search_hyper or (
-                'alpha' in decode_settings and decode_settings['alpha'] is not None)):
+                'alpha' in decode_settings and decode_settings['alpha'] is not None):
 
             if 'lmdir' not in inference_settings and \
                     ('lm-config' not in decode_settings or 'lm-check' not in decode_settings):
@@ -1003,12 +802,8 @@ if __name__ == "__main__":
                 suffix_lm = f"lm-rescore-{decode_settings['alpha']}{beta_suffix}"
             else:
                 suffix_lm = f"lm-fusion-{decode_settings['alpha']}{beta_suffix}"
-            if if_search_hyper:
-                lm_info = {
-                    'config': decode_settings['lm-config'],
-                    'check': decode_settings['lm-check']}
-        elif hyper_settings['topo'] == 'ctc' and (
-                if_search_hyper or 'lm-path' in decode_settings):
+
+        elif hyper_settings['topo'] == 'ctc' and 'lm-path' in decode_settings:
             checkExist('f', decode_settings['lm-path'])
             if 'alpha' in decode_settings:
                 alpha = str(decode_settings['alpha'])
@@ -1019,18 +814,6 @@ if __name__ == "__main__":
             else:
                 beta = 'default'
             suffix_lm = f"lm-fusion-{alpha}-{beta}"
-            if if_search_hyper:
-                dir_lm = os.path.dirname(decode_settings['lm-path'])
-                lm_conf = os.path.join(dir_lm, 'config.json')
-                checkExist('f', lm_conf)
-                lm_info = {
-                    'config': lm_conf,
-                    'check': None}
-                del dir_lm
-                del lm_conf
-        elif if_search_hyper:
-            raise RuntimeError(
-                "'search-hyper' = true but not configure LM.")
         else:
             suffix_lm = "nolm"
 
@@ -1088,32 +871,31 @@ if __name__ == "__main__":
         f_scps = expandPath('s', testsets, cwd)
         checkExist('f', f_scps)
 
-        if not if_search_hyper:
-            if hyper_settings['topo'] == 'rnnt':
-                from cat.rnnt.decode import DecoderParser
-                from cat.rnnt.decode import main as DecoderMain
-            elif hyper_settings['topo'] == 'ctc':
-                from cat.ctc.decode import DecoderParser
-                from cat.ctc.decode import main as DecoderMain
-            else:
-                raise RuntimeError(
-                    f"Unknown topology: {hyper_settings['topo']}")
+        if hyper_settings['topo'] == 'rnnt':
+            from cat.rnnt.decode import DecoderParser
+            from cat.rnnt.decode import main as DecoderMain
+        elif hyper_settings['topo'] == 'ctc':
+            from cat.ctc.decode import DecoderParser
+            from cat.ctc.decode import main as DecoderMain
+        else:
+            raise RuntimeError(
+                f"Unknown topology: {hyper_settings['topo']}")
 
-            for _set, scp in zip(testsets, f_scps):
-                decode_settings['output_prefix'] = decode_out_prefix+f'_{_set}'
-                decode_settings['input_scp'] = scp
+        for _set, scp in zip(testsets, f_scps):
+            decode_settings['output_prefix'] = decode_out_prefix+f'_{_set}'
+            decode_settings['input_scp'] = scp
+            sys.stdout.write(fmt.format(
+                f"{scp} -> {decode_settings['output_prefix']}"))
+
+            # FIXME: this canonot be spawned via mp_spawn, otherwise error would be raised
+            #        possibly due to the usage of mp.Queue
+            if os.path.isfile(decode_settings['output_prefix']):
                 sys.stdout.write(fmt.format(
-                    f"{scp} -> {decode_settings['output_prefix']}"))
+                    f"{decode_settings['output_prefix']} exists, skip this one."))
+                continue
 
-                # FIXME: this canonot be spawned via mp_spawn, otherwise error would be raised
-                #        possibly due to the usage of mp.Queue
-                if os.path.isfile(decode_settings['output_prefix']):
-                    sys.stdout.write(fmt.format(
-                        f"{decode_settings['output_prefix']} exists, skip this one."))
-                    continue
-
-                DecoderMain(updateNamespaceFromDict(
-                    decode_settings, DecoderParser()))
+            DecoderMain(updateNamespaceFromDict(
+                decode_settings, DecoderParser()))
 
         # compute wer/cer
         from wer import WERParser
@@ -1137,41 +919,6 @@ if __name__ == "__main__":
             'cer': True if err_settings['mode'] == 'cer' else False
         })
         del err_settings['mode']
-
-        if if_search_hyper:
-            if len(testsets) > 1:
-                sys.stdout.write(fmt.format(
-                    "found more than 1 evalute sets, take the first to do searching."))
-                sys.stdout.write(fmt.format(f"{testsets} -> {testsets[0]}"))
-            eval_set = testsets[0]
-            del decode_settings['alpha']
-            del decode_settings['beta']
-            if 'nbestlist' in inference_settings:
-                checkExist('f', inference_settings['nbestlist'])
-                sys.stdout.write(fmt.format(
-                    f"you specify 'nbestlist'={inference_settings['nbestlist']}, ensure the first test set match this file."))
-            else:
-                inference_settings['nbestlist'] = None
-
-            (_alpha, _beta), werr = hyperParamSearch(
-                decode_settings, err_settings,
-                lm_info['config'], lm_info['check'],
-                eval_set, hyper_settings['topo'], fmt, inference_settings['nbestlist'])
-            sys.stdout.write(fmt.format(
-                f"found best setting: \n"
-                f"{werr['string']}\talpha = {_alpha} | beta = {_beta}"))
-
-            sys.stdout.write(fmt.format(
-                f"write back setting to {f_hyper_settings}"))
-
-            _tmp_setting = readfromjson(f_hyper_settings)
-            _tmp_setting['inference']['search-hyper'] = False
-            _tmp_setting['inference']['decode']['alpha'] = _alpha
-            _tmp_setting['inference']['decode']['beta'] = _beta
-            dumpjson(_tmp_setting, f_hyper_settings)
-            sys.stdout.write(fmt.format(
-                "settings have been updated, re-run this script."))
-            exit(0)
 
         for _set, _text in zip(testsets, f_texts):
             err_settings.update({

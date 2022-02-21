@@ -8,7 +8,7 @@
 
 ### Appendix
 
-* derived from `rnnt-v27`, trained with CTC-CRF
+* derived from `rnnt-v27`, trained with CTC-CRF phone-based
 
 ### Result
 ```
