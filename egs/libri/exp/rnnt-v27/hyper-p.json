@@ -9,14 +9,20 @@
             "dev_clean",
             "dev_other",
             "test_clean",
-            "test_other"
+            "test_other",
+            "tlv2-dev",
+            "tlv2-test"
         ],
         "filter": ":2000"
     },
-    "sp": {
-        "model_type": "unigram",
-        "vocab_size": 1024,
-        "model_prefix": "sentencepiece/libri_unigram_1024/spm"
+    "tokenizer": {
+        "type": "SentencePieceTokenizer",
+        "property": {
+            "model_type": "unigram",
+            "vocab_size": 1024,
+            "model_prefix": "sentencepiece/libri_unigram_1024/spm"
+        },
+        "location": "exp/lm-v13-v10-continue/tokenizer.tknz"
     },
     "train": {
         "batch_size": 128,
@@ -32,9 +38,9 @@
         },
         "decode": {
             "algo": "rna",
-            "beam_size": 16,
+            "beam-size": 128,
             "cpu": true,
-            "nj": 80,
+            "nj": 60,
             "resume": "best_10.pt"
         },
         "er": {

@@ -166,7 +166,7 @@ def main_worker(pid: int, args: argparse.Namespace, q: mp.Queue, fmt: str = "res
                     nid, okey = _key.split('-', maxsplit=1)
                     if okey not in lm_nbest:
                         lm_nbest[okey] = {}
-                    lm_nbest[okey][int(nid)] = (_score, _trans)
+                    lm_nbest[okey][int(nid)] = (_score.item(), _trans)
 
             final_score = scores + args.alpha * log_lm_probs.cpu() + args.beta * in_lens
             indiv = {}

@@ -19,7 +19,10 @@ from wer import main as WERMain
 
 def main(args: argparse):
     assert args.ground_truth is not None and os.path.isfile(args.ground_truth)
-    assert len(args.nbestlist) == len(args.search)
+    assert len(args.nbestlist) == len(args.search), (
+        "\n"
+        f"--nbestlist {args.nbestlist}\n"
+        f"--search    {args.search}")
     assert all([(x == 0) or (x == 1) for x in args.search])
     num_param_search = sum(args.search)
     assert num_param_search <= 2 and num_param_search >= 1
@@ -55,7 +58,8 @@ def main(args: argparse):
                 'one-best': True
             }, InterpolateParser(), [cache_file]
         ))
-        print(' | '.join([f"{x:4.2f}" for x in tuned_metric]) + '  ', end='')
+        print('tunning: ' +
+              ' | '.join([f"{x:4.2f}" for x in tuned_metric]) + '  ', end='')
         wer = WERMain(updateNamespaceFromDict(
             {
                 'stripid': True,
@@ -106,6 +110,13 @@ def main(args: argparse):
                     boundary_perf[1] = None
                     upper = (lower+upper)/2
             tuned_metric = update_tuned_metric(searchout)
+
+            # if hits the boundary, extend range
+            if tuned_metric[idx_param] in params['range'][idx_param]:
+                _radius = (params['range'][idx_param][1] -
+                           params['range'][idx_param][0]) / 2
+                params['range'][idx_param] = [tuned_metric[idx_param] -
+                                              _radius, tuned_metric[idx_param]+_radius]
 
         n_iter += 1
 

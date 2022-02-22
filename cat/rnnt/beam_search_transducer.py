@@ -51,9 +51,9 @@ class Hypothesis():
     def score(self):
         score = self.log_prob + self.lm_score
         if self.len_norm:
-            return score/len(self)
+            return torch.as_tensor(score/len(self))
         else:
-            return score
+            return torch.as_tensor(score)
 
     def clone(self):
         new_hypo = Hypothesis(

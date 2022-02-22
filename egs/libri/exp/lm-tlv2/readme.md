@@ -12,13 +12,9 @@ PPL over TLv2 test set is: 27.58
 * CRF: `crf-v1`
 
 ```
-RNNT baseline
-tlv2-dev	%SER 86.39 | %WER 11.67 [2075 / 17783, 521 ins, 297 del, 1257 sub ]
-tlv2-test	%SER 77.06 | %WER 11.40 [3135 / 27500, 548 ins, 581 del, 2006 sub ]
-
-RNNT+lm-v11 libri trans
-tlv2-dev	%SER 86.39 | %WER 11.48 [2041 / 17783, 515 ins, 288 del, 1238 sub ]
-tlv2-test	%SER 76.97 | %WER 11.16 [3069 / 27500, 544 ins, 566 del, 1959 sub ]
+PPL
+Test set: exp/lm-tlv2//lmbin/test-data_tlv2_dev_txt.pkl -> ppl: 27.67
+Test set: exp/lm-tlv2//lmbin/test-data_tlv2_test_txt.pkl -> ppl: 27.58
 
 RNNT+lm-tlv2 tlv2 trans tuned
 tlv2-dev	%SER 84.62 | %WER 10.82 [ 1925 / 17783, 463 ins, 318 del, 1144 sub ]    0.5     1.0

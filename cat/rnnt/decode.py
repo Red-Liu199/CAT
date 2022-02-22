@@ -164,7 +164,7 @@ def main_worker(pid: int, args: argparse.Namespace, q: mp.Queue, fmt: str, model
             x = x.to(device)
             nbest_list, scores_nbest = searcher(model.encoder(x, x_lens)[0])
             nbest[key] = {
-                bid: (score, tokenizer.decode(hypo.cpu().tolist()))
+                bid: (score.item(), tokenizer.decode(hypo.cpu().tolist()))
                 for bid, (score, hypo) in enumerate(zip(scores_nbest, nbest_list))
             }
             fi.write("{} {}\n".format(key, nbest[key][0][1]))
@@ -222,7 +222,7 @@ def DecoderParser():
     parser.add_argument("--input_scp", type=str, default=None)
     parser.add_argument("--output_prefix", type=str, default='./decode')
     parser.add_argument("--algo", type=str,
-                        choices=['default', 'lc'], default='default')
+                        choices=['default', 'lc', 'alsd', 'rna'], default='default')
     parser.add_argument("--beam_size", type=int, default=3)
     parser.add_argument("--tokenizer", type=str,
                         help="Tokenizer model location. See cat/shared/tokenizer.py for details.")

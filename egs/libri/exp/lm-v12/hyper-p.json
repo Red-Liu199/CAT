@@ -13,10 +13,14 @@
             "test_other"
         ]
     },
-    "sp": {
-        "model_type": "unigram",
-        "vocab_size": 1024,
-        "model_prefix": "sentencepiece/libri_unigram_1024/spm"
+    "tokenizer": {
+        "type": "SentencePieceTokenizer",
+        "property": {
+            "model_type": "unigram",
+            "vocab_size": 1024,
+            "model_prefix": "sentencepiece/libri_unigram_1024/spm"
+        },
+        "location": "exp/lm-v13-v10-continue/tokenizer.tknz"
     },
     "commit": "bb42e467fca4fbd08e5c0b9745da8583f56c15ad"
 }

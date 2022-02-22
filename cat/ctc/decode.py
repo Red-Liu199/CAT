@@ -138,7 +138,7 @@ def worker(pid: int, args: argparse.Namespace, q: mp.Queue, fmt: str, model: Abs
             beam_scores = -beam_scores
 
             nbest[key] = {
-                bid: (score, tokenizer.decode(hypo[:_len].tolist()))
+                bid: (score.item(), tokenizer.decode(hypo[:_len].tolist()))
                 for bid, (score, hypo, _len) in enumerate(zip(beam_scores[0], beam_results[0], out_lens[0]))
             }
             fi.write("{} {}\n".format(key, nbest[key][0][1]))

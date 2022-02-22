@@ -1,0 +1,38 @@
+{
+    "data": {
+        "train": [
+            "train_960"
+        ],
+        "dev": [
+            "dev_clean",
+            "dev_other"
+        ],
+        "test": [
+            "dev_clean",
+            "dev_other",
+            "test_clean",
+            "test_other"
+        ],
+        "text_processing": {
+            "truncate": 128
+        }
+    },
+    "tokenizer": {
+        "type": "SentencePieceTokenizer",
+        "property": {
+            "model_type": "unigram",
+            "vocab_size": 1024,
+            "model_prefix": "sentencepiece/libri_unigram_1024/spm"
+        },
+        "location": "exp/lm-v13-v10-continue/tokenizer.tknz"
+    },
+    "train": {
+        "batch_size": 512,
+        "grad-norm": 5.0,
+        "databalance": true,
+        "checkall": true,
+        "amp": true,
+        "resume": "exp/lm-v14/checks/avg_best_10.pt"
+    },
+    "commit": "355ca5f3b6ff718131ee2822a2fd617b7526ae69"
+}
