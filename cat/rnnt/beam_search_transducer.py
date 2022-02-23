@@ -229,11 +229,14 @@ def beam_append(ongoing_beams: List[Hypothesis], new_beam: Hypothesis, prefix_me
 
 def recombine_hypo(redundant_hypos: List[Hypothesis]) -> List[Hypothesis]:
     """Recombine the hypos to merge duplicate path"""
-    out_hypos = []
+    out_hypos = {}  # type: Dict[str, Hypothesis]
     for hypo in redundant_hypos:
-        out_hypos = beam_append(out_hypos, hypo, True)
+        if hypo.pred in out_hypos:
+            out_hypos[hypo.pred].add_(hypo)
+        else:
+            out_hypos[hypo.pred] = hypo
 
-    return out_hypos
+    return list(out_hypos.values())
 
 
 class MaxBeamBuffer():
@@ -1027,13 +1030,13 @@ def group_to_batch(hypos: List[Hypothesis], dummy_tensor: torch.Tensor = None, p
     batched_out = []
     for _hypos_with_index in groupby(hypos_with_index, key=lambda item: len(item[1])):
         _index, _hypos = list(zip(*_hypos_with_index))
-        _batched_tokens = torch.stack(
-            [hyp.pop_last() for hyp in _hypos]).view(-1, 1)
-        _batched_states = {_key:
-                           _state.batching([_hyp.cache[_key]
-                                           for _hyp in _hypos])
-                           for _key, _state in _hypos[0].cache.items()
-                           if isinstance(_state, AbsStates)}     # type: Dict[str, AbsStates]
+        _batched_tokens = torch.cat(
+            [hyp.pop_last() for hyp in _hypos], dim=0).view(-1, 1)
+        _batched_states = {
+            _key: _state.batching(
+                [_hyp.cache[_key]for _hyp in _hypos]
+            ) for _key, _state in _hypos[0].cache.items()
+            if isinstance(_state, AbsStates)}     # type: Dict[str, AbsStates]
 
         batched_out.append((list(_index), _batched_tokens, _batched_states))
 

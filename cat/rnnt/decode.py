@@ -67,35 +67,39 @@ def main(args):
         mp.set_start_method('spawn')
     except RuntimeError as re:
         print(re)
-    q = mp.Queue(maxsize=world_size)
+
+    q_data_producer = mp.Queue(maxsize=world_size)
+    q_nbest_saver = mp.Queue(maxsize=world_size)
     if args.cpu:
         model, ext_lm = build_model(args, 'cpu')
         model.share_memory()
         if ext_lm is not None:
             ext_lm.share_memory()
 
-        mp.spawn(main_worker, nprocs=world_size+1,
-                 args=(args, q, fmt, (model, ext_lm)))
+        mp.spawn(main_worker, nprocs=world_size+2,
+                 args=(args, q_data_producer, q_nbest_saver, fmt, (model, ext_lm)))
     else:
-        mp.spawn(main_worker, nprocs=world_size+1, args=(args, q, fmt))
+        mp.spawn(main_worker, nprocs=world_size+2,
+                 args=(args, q_data_producer, q_nbest_saver, fmt))
 
-    del q
-    with open(args.output_prefix, 'w') as fo:
-        for i in range(world_size):
-            with open(fmt.format(i), 'r') as fi:
-                fo.write(fi.read())
-            os.remove(fmt.format(i))
+    del q_nbest_saver
+    del q_data_producer
+    # with open(args.output_prefix, 'w') as fo:
+    #     for i in range(world_size):
+    #         with open(fmt.format(i), 'r') as fi:
+    #             fo.write(fi.read())
+    #         os.remove(fmt.format(i))
 
-    with open(args.output_prefix+'.nbest', 'wb') as fo:
-        all_nbest = {}
-        for i in range(world_size):
-            partial_bin = fmt.format(i) + '.nbest'
-            with open(partial_bin, 'rb') as fi:
-                partial_nbest = pickle.load(fi)  # type: dict
+    # with open(args.output_prefix+'.nbest', 'wb') as fo:
+    #     all_nbest = {}
+    #     for i in range(world_size):
+    #         partial_bin = fmt.format(i) + '.nbest'
+    #         with open(partial_bin, 'rb') as fi:
+    #             partial_nbest = pickle.load(fi)  # type: dict
 
-            all_nbest.update(partial_nbest)
-            os.remove(partial_bin)
-        pickle.dump(all_nbest, fo)
+    #         all_nbest.update(partial_nbest)
+    #         os.remove(partial_bin)
+    #     pickle.dump(all_nbest, fo)
 
 
 def dataserver(args, q: mp.Queue):
@@ -109,9 +113,18 @@ def dataserver(args, q: mp.Queue):
         num_workers=0,
         collate_fn=TestPadCollate())
 
+    f_nbest = args.output_prefix+'.nbest'
+    if os.path.isfile(f_nbest):
+        with open(f_nbest, 'rb') as fi:
+            nbest = pickle.load(fi)
+    else:
+        nbest = {}
+
     t_beg = time.time()
     for batch in tqdm(testloader, total=len(testloader), disable=(args.silience)):
-        q.put(batch, block=True)
+        key = batch[0][0]
+        if key not in nbest:
+            q.put(batch, block=True)
 
     for i in range(args.world_size*2):
         q.put(None, block=True)
@@ -123,9 +136,45 @@ def dataserver(args, q: mp.Queue):
     time.sleep(2)
 
 
-def main_worker(pid: int, args: argparse.Namespace, q: mp.Queue, fmt: str, models=None):
+def consumer_output(args, q: mp.Queue):
+    """Get data from queue and save to file."""
+    def load_and_save(_nbest: dict):
+        if os.path.isfile(f_nbest):
+            with open(f_nbest, 'rb') as fi:
+                _nbest.update(pickle.load(fi))
+        with open(f_nbest, 'wb') as fo:
+            pickle.dump(_nbest, fo)
+
+    f_nbest = args.output_prefix+'.nbest'
+    interval_check = 1000   # save nbestlist to file every 1000 steps
+    cnt_done = 0
+    nbest = {}
+    while True:
+        nbestlist = q.get(block=True)
+        if nbestlist is None:
+            cnt_done += 1
+            if cnt_done == args.world_size:
+                break
+            continue
+        nbest.update(nbestlist)
+        del nbestlist
+        if len(nbest) % interval_check == 0:
+            load_and_save(nbest)
+            nbest = {}
+
+    load_and_save(nbest)
+    with open(args.output_prefix, 'w') as fo:
+        for k, hypo_items in nbest.items():
+            best_hypo = max(hypo_items.values(), key=lambda item: item[0])[1]
+            fo.write(f"{k} {best_hypo}\n")
+
+
+def main_worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_nbest: mp.Queue, fmt: str, models=None):
     if pid == args.world_size:
-        return dataserver(args, q)
+        return dataserver(args, q_data)
+    elif pid == args.world_size + 1:
+        return consumer_output(args, q_nbest)
+
     args.gpu = pid
     # only support one node
     args.rank = pid
@@ -145,7 +194,6 @@ def main_worker(pid: int, args: argparse.Namespace, q: mp.Queue, fmt: str, model
         blank_id=0, bos_id=model.bos_id, beam_size=args.beam_size,
         nbest=args.beam_size, algo=args.algo, umax_portion=args.umax_portion,
         prefix_merge=True, lm_module=ext_lm, alpha=args.alpha, beta=args.beta,
-        state_beam=2.3, expand_beam=2.3, temperature=1.0,
         word_prefix_tree=args.word_tree, rescore=args.rescore, verbose=(pid == 0))
 
     local_writer = fmt.format(pid)
@@ -153,7 +201,7 @@ def main_worker(pid: int, args: argparse.Namespace, q: mp.Queue, fmt: str, model
     nbest = {}
     with torch.no_grad(), autocast(enabled=(True if device != 'cpu' else False)), open(local_writer, 'w') as fi:
         while True:
-            batch = q.get(block=True)
+            batch = q_data.get(block=True)
             if batch is None:
                 break
             key, x, x_lens = batch
@@ -164,12 +212,15 @@ def main_worker(pid: int, args: argparse.Namespace, q: mp.Queue, fmt: str, model
                 bid: (score.item(), tokenizer.decode(hypo.cpu().tolist()))
                 for bid, (score, hypo) in enumerate(zip(scores_nbest, nbest_list))
             }
-            fi.write("{} {}\n".format(key, nbest[key][0][1]))
+            q_nbest.put(nbest, block=True)
+            nbest = {}
+            # fi.write("{} {}\n".format(key, nbest[key][0][1]))
             del batch
 
-    with open(f"{local_writer}.nbest", 'wb') as fi:
-        pickle.dump(nbest, fi)
-    q.get()
+    q_nbest.put(None)
+    # with open(f"{local_writer}.nbest", 'wb') as fi:
+    #     pickle.dump(nbest, fi)
+    q_data.get()
 
 
 def build_model(args, device) -> Tuple[torch.nn.Module, Union[torch.nn.Module, None]]:
