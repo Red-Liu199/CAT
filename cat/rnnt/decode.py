@@ -37,7 +37,8 @@ def main(args):
         raise FileNotFoundError(
             "Invalid tokenizer model location: {}".format(args.tokenizer))
     if not torch.cuda.is_available() or args.cpu:
-        print("> Using CPU")
+        if not args.silience:
+            print("> Using CPU")
         args.cpu = True
 
     if args.cpu:
@@ -50,9 +51,10 @@ def main(args):
     args.world_size = world_size
 
     if args.rescore and args.alpha is None:
-        print("WARNING: "
-              f"trying to rescore with alpha not specified.\n"
-              "set rescore=False")
+        if not args.silience:
+            print("WARNING: "
+                  f"trying to rescore with alpha not specified.\n"
+                  "set rescore=False")
         args.rescore = False
 
     cachedir = '/tmp'
@@ -100,29 +102,24 @@ def dataserver(args, q: mp.Queue):
     testset = ScpDataset(args.input_scp)
     # sort the dataset in desencding order
     testset_ls = testset.get_seq_len()
-    len_match = sorted(list(zip(testset_ls, testset._dataset)),
-                       key=lambda item: item[0])
-    testset._dataset = [data for _, data in len_match]
     n_frames = sum(testset_ls)
-    del len_match, testset_ls
+    del testset_ls
     testloader = DataLoader(
         testset, batch_size=1, shuffle=False,
-        num_workers=args.world_size//8,
+        num_workers=0,
         collate_fn=TestPadCollate())
 
     t_beg = time.time()
-    for batch in tqdm(testloader, total=len(testloader)):
-        for k in batch:
-            if isinstance(k, torch.Tensor):
-                k.share_memory_()
+    for batch in tqdm(testloader, total=len(testloader), disable=(args.silience)):
         q.put(batch, block=True)
 
     for i in range(args.world_size*2):
         q.put(None, block=True)
     t_dur = time.time() - t_beg
 
-    print("\nTime = {:.2f} s | RTF = {:.2f} ".format(
-        t_dur, t_dur*args.world_size / n_frames * 100))
+    if not args.silience:
+        print("\nTime = {:.2f} s | RTF = {:.2f} ".format(
+            t_dur, t_dur*args.world_size / n_frames * 100))
     time.sleep(2)
 
 
@@ -234,6 +231,7 @@ def DecoderParser():
                         help="Path to word prefix tree file.")
     parser.add_argument("--cpu", action='store_true', default=False)
     parser.add_argument("--rescore", action='store_true', default=False)
+    parser.add_argument("--silience", action='store_true', default=False)
     return parser
 
 

@@ -32,6 +32,10 @@ def fclone(fp: Union[float, torch.FloatTensor]):
         raise NotImplementedError(f"Invalid type of float point {fp}")
 
 
+def tensor2key(t: torch.LongTensor) -> str:
+    return ':'.join(str(x) for x in t.cpu().tolist())
+
+
 class Hypothesis():
     def __init__(self,
                  pred: torch.LongTensor,
@@ -40,12 +44,15 @@ class Hypothesis():
                  lm_score: Union[torch.Tensor, float] = 0.0,
                  len_norm: bool = False) -> None:
 
-        self.pred = pred
+        self._last_token = pred[-1:]
+        self.pred = tensor2key(pred)
         self.log_prob = log_prob
         self.cache = cache
-        self._res_word = []
         self.lm_score = lm_score
         self.len_norm = len_norm
+
+    def pop_last(self) -> torch.LongTensor:
+        return self._last_token
 
     @property
     def score(self):
@@ -55,15 +62,18 @@ class Hypothesis():
         else:
             return torch.as_tensor(score)
 
+    def get_pred_token(self):
+        return self._last_token.new_tensor([int(x) for x in self.pred.split(':')])
+
     def clone(self):
         new_hypo = Hypothesis(
-            self.pred.clone(),
+            self._last_token.clone(),
             fclone(self.log_prob),
             self.cache.copy(),
             fclone(self.lm_score),
             self.len_norm
         )
-        new_hypo._res_word = self._res_word[:]
+        new_hypo.pred = self.pred
         return new_hypo
 
     def __add__(self, rhypo):
@@ -77,17 +87,14 @@ class Hypothesis():
         return self
 
     def add_token(self, tok: torch.LongTensor):
-        self.pred = torch.cat([self.pred, tok.view(1)])
-        self._res_word.append(tok.item())
+        self._last_token = tok.view(1)
+        self.pred += f":{tok.item()}"
 
     def __len__(self) -> int:
-        return len(self.pred)
-
-    def __str__(self) -> str:
-        return "Hypothesis({}, {:.2e})".format(self.pred[1:], (self.score if isinstance(self.score, float) else self.score.item()))
+        return len(self.pred.split(':'))
 
     def __repr__(self) -> str:
-        return f"Hypothesis(pred={self.pred}, score={self.score:.2f})"
+        return f"Hypothesis({self.pred.replace(':', ' ')}, score={self.score:.2f})"
 
 
 class PrefixTree():
@@ -165,15 +172,18 @@ class PrefixCacheDict():
     """
 
     def __init__(self) -> None:
-        self._cache = {}    # type: Dict[torch.LongTensor, Dict]
+        self._cache = {}    # type: Dict[str, Dict]
 
-    def update(self, pref: torch.LongTensor, new_cache: dict):
+    def __contains__(self, pref: str) -> bool:
+        return pref in self._cache
+
+    def update(self, pref: str, new_cache: dict):
         if pref in self._cache:
             self._cache[pref].update(new_cache.copy())
         else:
             self._cache[pref] = new_cache.copy()
 
-    def getCache(self, pref: torch.LongTensor) -> Union[None, dict]:
+    def getCache(self, pref: str) -> Union[None, dict]:
         '''Get cache. If there isn't such prefix, return None.
         '''
         if pref in self._cache:
@@ -181,32 +191,35 @@ class PrefixCacheDict():
         else:
             return None
 
-    def pruneAllBut(self, legal_prefs: List[torch.LongTensor]):
-        new_cache = {pref: self._cache[pref]
-                     for pref in legal_prefs if pref in self._cache}
+    def pruneAllBut(self, legal_prefs: List[str]):
+        new_cache = {}
+        for pref in legal_prefs:
+            if pref in self._cache:
+                new_cache[pref] = self._cache[pref]
         del self._cache
         self._cache = new_cache
 
     def pruneShorterThan(self, L: int):
-        torm = [key for key in self._cache if key.size(0) < L]
+        torm = [key for key in self._cache if len(key.split(':')) < L]
         for k in torm:
             del self._cache[k]
 
     def __str__(self) -> str:
         cache = {}
         for k in self._cache.keys():
-            cache[k] = {}
+            map_k = k.replace(':', ' ')
+            cache[map_k] = {}
             for _k in self._cache[k].keys():
-                cache[k][_k] = 'cache'
+                cache[map_k][_k] = '...'
 
-        return yaml.dump(cache, default_flow_style=False)
+        return str(cache)
 
 
 def beam_append(ongoing_beams: List[Hypothesis], new_beam: Hypothesis, prefix_merge: bool = False) -> List[Hypothesis]:
     """Append the new hypothesis into ongoing_beams w/ or w/o prefix merging"""
     if prefix_merge:
         for _beam in ongoing_beams:
-            if torch.equal(_beam.pred, new_beam.pred):
+            if _beam.pred == new_beam.pred:
                 _beam.add_(new_beam)
                 return ongoing_beams
 
@@ -343,9 +356,9 @@ class TransducerBeamSearcher():
             self.searcher = self.default_beam_search
         elif algo == 'alsd':
             if word_prefix_tree is not None:
-                self.word_prefix_tree = PrefixTree(word_prefix_tree)
-            else:
-                self.word_prefix_tree = None
+                raise NotImplementedError(
+                    f"Decode with word prefix tree is deprecated.")
+
             self.is_prefix = True
             self.u_portion = umax_portion
             assert umax_portion > 0.0 and umax_portion < 1.0
@@ -366,7 +379,7 @@ class TransducerBeamSearcher():
             rescored_index = self.call_rescore(hyps)
             hyps = [hyps[i] for i in rescored_index]
 
-        pred_list, score_list = ([hypo.pred[1:] for hypo in hyps], [
+        pred_list, score_list = ([hypo.get_pred_token()[1:] for hypo in hyps], [
             hypo.score for hypo in hyps])
         return pred_list, score_list
 
@@ -376,10 +389,11 @@ class TransducerBeamSearcher():
             f"Expect enable rescore=True with alpha specified, alpha={self.rescore_weight}"
 
         # [B, U]
-        dummy_tensor = decoded_hypos[0].pred.new_empty(1)
+        dummy_tensor = next(iter(self.lm.parameters())).new_empty(1)
         lens_in = dummy_tensor.new_tensor(
             [len(hypo) for hypo in decoded_hypos])
-        in_seqs = utils.pad_list([hypo.pred for hypo in decoded_hypos], 0)
+        in_seqs = utils.pad_list([hypo.get_pred_token()
+                                 for hypo in decoded_hypos], 0)
 
         # suppose </s> = <s>
         dummy_targets = torch.roll(in_seqs, -1, dims=1)
@@ -455,11 +469,13 @@ class TransducerBeamSearcher():
 
                 # remove best hyp from process_hyps
                 process_hyps.remove(a_best_hyp)
-                t_best_pref = a_best_hyp.pred
-
-                hypo_cache = prefix_cache.getCache(t_best_pref)
-                if hypo_cache is None:
-                    input_PN[0, 0] = t_best_pref[-1]
+                if a_best_hyp.pred in prefix_cache:
+                    hypo_cache = prefix_cache.getCache(a_best_hyp.pred)
+                    pn_out, hidden = hypo_cache['pn_out']
+                    if use_lm:
+                        log_probs_lm, hidden_lm = hypo_cache['lm_out']
+                else:
+                    input_PN[0, 0] = a_best_hyp.pop_last()
                     pn_out, hidden = self._pn_step(
                         input_PN, a_best_hyp.cache["pn_state"])
                     t_cache['pn_out'] = (pn_out, hidden)
@@ -467,11 +483,7 @@ class TransducerBeamSearcher():
                         log_probs_lm, hidden_lm = self._lm_step(
                             input_PN, a_best_hyp.cache["lm_state"])
                         t_cache['lm_out'] = (log_probs_lm, hidden_lm)
-                    prefix_cache.update(t_best_pref, t_cache)
-                else:
-                    pn_out, hidden = hypo_cache['pn_out']
-                    if use_lm:
-                        log_probs_lm, hidden_lm = hypo_cache['lm_out']
+                    prefix_cache.update(a_best_hyp.pred, t_cache)
 
                 # forward jointnet
                 log_probs = self._joint_step(tn_i_t, pn_out)
@@ -522,7 +534,6 @@ class TransducerBeamSearcher():
         """
 
         use_lm = self.alpha_ is not None
-        use_wpt = self.word_prefix_tree is not None
 
         tn_out = tn_out[0]
         dummy_tensor = tn_out.new_empty(1, dtype=torch.long)
@@ -647,24 +658,7 @@ class TransducerBeamSearcher():
                 idx_g, idx_b_part = map_relidx2gid[gbid], map_relidx2bid[gbid]
                 cur_hypo = sliced_B[index_of_beams[gbid]].clone()
                 cur_hypo.add_token(tok)
-                if use_wpt:
-                    # if use word prefix tree, skip those not in the tree
-                    if not self.word_prefix_tree.havePref(cur_hypo._res_word):
-                        # emit the previous word
-                        '''
-                        NOTE (huahuan): because sentencepiece take space as token (or prefix of token), 
-                        it's hard to tell whether there is a new word completed, unless introducing 
-                        the sentencepiece model. e.g. (in pratical, words are token index, replaced to text for better understanding)
-                            _res_word = ['_add', 'li'] -> '_addli' is not the prefix of any word ->
-                                emit '_add' -> '_add' in prefix tree, so won't skip this hypo (unexpected)
 
-                            _res_word = ['_add', '_li'] -> '_add_li' is not the prefix of any word ->
-                                emit '_add' -> '_add' in prefix tree, so won't skip this hypo (as expected)
-                        '''
-                        complete_word = cur_hypo._res_word[:-1]
-                        cur_hypo._res_word = cur_hypo._res_word[-1:]
-                        if complete_word not in self.word_prefix_tree:
-                            continue
                 cur_hypo.log_prob += log_prob[gbid, tok]
                 cur_hypo.cache['pn_state'] = self.decoder.get_state_from_batch(
                     group_pn_state[idx_g], idx_b_part)
@@ -857,7 +851,7 @@ class TransducerBeamSearcher():
 
     def rna_decode(self, tn_out: torch.Tensor) -> List[Hypothesis]:
         """
-        One-step constrained decode for RNN-T or RNA decode
+        RNA decode
 
         tn_output: [1, T, D]        
         """
@@ -880,15 +874,18 @@ class TransducerBeamSearcher():
                 B, dummy_tensor, prefix_cache)
             group_beams = group_uncached + group_cached
 
-            index_of_beams = []   # len: len(sliced_B)
-            group_pn_out = []       # len: len(group_B)
-            if use_lm:
-                group_lm_out = []
+            idxbeam2srcidx = []   # len: nB
+            group_pn_out = []       # len: len(group_beams)
+            group_lm_out = []
 
-            i_sep = len(group_uncached)
+            num_uncached_group = len(group_uncached)
+            # idxbeam2idxgroup = []   # [0, 0, 1, 2, 2, 2, ...]
+            # idxbeam2relidx = []
             for i, (g_index, g_tokens, g_states) in enumerate(group_beams):
-                if i < i_sep:
-                    index_of_beams += g_index
+                idxbeam2srcidx += g_index
+                # idxbeam2idxgroup += [i]*len(g_index)
+                # idxbeam2relidx += list(range(len(g_index)))
+                if i < num_uncached_group:
                     pn_out, pn_state = self.decoder(
                         g_tokens, g_states['pn_state']())
                     if use_lm:
@@ -935,7 +932,7 @@ class TransducerBeamSearcher():
                 combine_score = log_prob.clone()
 
             V = combine_score.size(-1)
-            combine_score += collect_scores([B[i] for i in index_of_beams],
+            combine_score += collect_scores([B[i] for i in idxbeam2srcidx],
                                             dummy_tensor).unsqueeze(1)
             # [K, ]
             _, flatten_positions = torch.topk(
@@ -946,7 +943,7 @@ class TransducerBeamSearcher():
             # [K, ]
             A = []
             for i, b in enumerate(idx_beam):
-                orin_hypo = B[index_of_beams[b]]
+                orin_hypo = B[idxbeam2srcidx[b]]
                 cur_hypo = orin_hypo.clone()
                 cur_hypo.log_prob += log_prob[b, tokens[i]]
                 if tokens[i] == self.blank_id:
@@ -1021,19 +1018,17 @@ def group_to_batch(hypos: List[Hypothesis], dummy_tensor: torch.Tensor = None, p
     if prefix_cache is not None:
         in_cache = []
         for id, hypo in hypos_with_index:
-            trycache = prefix_cache.getCache(hypo.pred)
-            if trycache is None:
-                continue
-            in_cache.append((id, hypo))
+            if hypo.pred in prefix_cache:
+                in_cache.append((id, hypo))
         for id, _ in in_cache[::-1]:
             hypos_with_index.pop(id)
 
     # group that cache doesn't hit
     batched_out = []
-    for _hypos_with_index in groupby(hypos_with_index, key=lambda item: item[1].pred.size(0)):
+    for _hypos_with_index in groupby(hypos_with_index, key=lambda item: len(item[1])):
         _index, _hypos = list(zip(*_hypos_with_index))
         _batched_tokens = torch.stack(
-            [hyp.pred[-1] for hyp in _hypos]).view(-1, 1)
+            [hyp.pop_last() for hyp in _hypos]).view(-1, 1)
         _batched_states = {_key:
                            _state.batching([_hyp.cache[_key]
                                            for _hyp in _hypos])
@@ -1048,7 +1043,7 @@ def group_to_batch(hypos: List[Hypothesis], dummy_tensor: torch.Tensor = None, p
         return batched_out, []
     else:
         cached_out = []
-        for _hypos_with_index in groupby(in_cache, key=lambda item: item[1].pred.size(0)):
+        for _hypos_with_index in groupby(in_cache, key=lambda item: len(item[1])):
             _index, _hypos = list(zip(*_hypos_with_index))
             # type: List[Dict[str, Union[torch.Tensor, AbsStates]]]
             caches = [prefix_cache.getCache(_hyp.pred) for _hyp in _hypos]
