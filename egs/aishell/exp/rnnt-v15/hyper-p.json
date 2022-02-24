@@ -6,12 +6,16 @@
         "filter": ":2000",
         "lang": "zh-cn"
     },
-    "sp": {
-        "model_type": "char",
-        "vocab_size": 4232,
-        "add_dummy_prefix": false,
-        "use_all_vocab": true,
-        "model_prefix": "sentencepiece/aishell_char/spm"
+    "tokenizer": {
+        "type": "SentencePieceTokenizer",
+        "property": {
+            "model_type": "char",
+            "vocab_size": 4232,
+            "add_dummy_prefix": false,
+            "use_all_vocab": true,
+            "model_prefix": "sentencepiece/aishell_char/spm"
+        },
+        "location": "exp/rnnt-v15/tokenizer.tknz"
     },
     "train": {
         "batch_size": 512,
@@ -25,19 +29,16 @@
             "mode": "best",
             "num": 10
         },
-        "subsample": 8,
-        "lmdir": "exp/lm-v4",
         "decode": {
-            "algo": "alsd",
-            "beam_size": 16,
+            "algo": "rna",
+            "beam-size": 128,
             "cpu": true,
-            "nj": 80,
-            "umax-portion": 0.47696874273078027,
-            "lm-weight": 0.5
+            "nj": 40,
+            "resume": "best-10.pt"
         },
         "er": {
             "mode": "cer",
-            "oracle": true
+            "oracle": false
         }
     },
     "commit": "70fe4c19b10ee562fbcf86956bcc150fb71b1060"

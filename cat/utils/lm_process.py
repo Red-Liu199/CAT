@@ -106,6 +106,9 @@ if __name__ == "__main__":
                 f"warining: missing 'test' in hyper-p['data'], skip\n")
             testsets = []
         else:
+            if isinstance(data_settings['test'], str):
+                data_settings['test'] = [data_settings['test']]
+
             testsets = [
                 f"test-{x.translate(str.maketrans({'/':'_', '.':'_'}))}" for x in data_settings['test']]
             data_settings.update(

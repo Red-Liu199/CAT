@@ -7,5 +7,6 @@
 ## Result
 
 ```
-ppl on test set 77.22
+Test set: exp/lm-v5/lmbin/test-dev.pkl -> ppl: 59.06
+Test set: exp/lm-v5/lmbin/test-test.pkl -> ppl: 58.44
 ```

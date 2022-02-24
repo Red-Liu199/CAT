@@ -59,7 +59,7 @@ if [ "$prune" ]; then
 fi
 
 if [ $arpa == "True" ]; then
-    eval "$processing | 
+    eval "$processing |
         lmplz -o $order $prune -S 80% --discount_fallback >$output"
 else
     eval "$processing |

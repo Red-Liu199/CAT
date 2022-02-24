@@ -12,43 +12,65 @@
 
 ### Result
 ```
-no lm
-dev             %SER 71.07 | %CER 11.16 [36887 / 330498, 1279 ins, 16227 del, 19381 sub ]
-test_meeting    %SER 91.77 | %CER 20.97 [46214 / 220385, 1224 ins, 22925 del, 22065 sub ]
-test_net        %SER 65.49 | %CER 12.76 [53035 / 415746, 1943 ins, 12961 del, 38131 sub ]
-aishell-test    %SER 49.99 | %CER 7.22 [7560 / 104765, 249 ins, 201 del, 7110 sub ] 
+16 beam
+dev             %SER 71.07 | %CER 11.16 [ 36887 / 330498, 1279 ins, 16227 del, 19381 sub ]
+test_net        %SER 65.49 | %CER 12.76 [ 53035 / 415746, 1943 ins, 12961 del, 38131 sub ]
+test_meeting    %SER 91.77 | %CER 20.97 [ 46214 / 220385, 1224 ins, 22925 del, 22065 sub ]
+aishell-test    %SER 49.99 | %CER 7.22 [ 7560 / 104765, 249 ins, 201 del, 7110 sub ]
+ 
+128 beam
+dev             %SER 71.10 | %CER 11.14 [ 36833 / 330498, 1284 ins, 16210 del, 19339 sub ]
+test_net        %SER 65.51 | %CER 12.75 [ 52991 / 415746, 1942 ins, 12914 del, 38135 sub ]
+test_meeting    %SER 91.74 | %CER 20.88 [ 46025 / 220385, 1236 ins, 22703 del, 22086 sub ]
+aishell-dev     %SER 45.05 | %CER 6.32 [ 12985 / 205341, 420 ins, 248 del, 12317 sub ]
+aishell-test    %SER 49.97 | %CER 7.22 [ 7562 / 104765, 253 ins, 204 del, 7105 sub ]
 
 +lm-aishell
-%SER 41.23 | %CER 5.83 [ 6104 / 104765, 200 ins, 218 del, 5686 sub ]    alpha = 0.5 | beta = 1.5
+aishell-test    %SER 41.23 | %CER 5.83 [ 6104 / 104765, 200 ins, 218 del, 5686 sub ]    alpha = 0.5 | beta = 1.5
++lm-aishell + beam 128
+aishell-dev     %SER 37.35 | %CER 5.11 [ 10497 / 205341, 401 ins, 347 del, 9749 sub ]   [0.5, 1.75]
+aishell-test    %SER 39.53 | %CER 5.57 [ 5831 / 104765, 189 ins, 279 del, 5363 sub ]    [0.5, 1.5]
 
 +lm-aishell-word
-%SER 40.48 | %CER 5.70 [ 5976 / 104765, 165 ins, 306 del, 5505 sub ]    alpha = 0.53125 | beta = 1.0
+aishell-test    %SER 40.48 | %CER 5.70 [ 5976 / 104765, 165 ins, 306 del, 5505 sub ]    alpha = 0.53125 | beta = 1.0
++lm-aishell-word + beam 128
+aishell-dev     %SER 41.10 | %CER 5.70 [ 11698 / 205341, 280 ins, 471 del, 10947 sub ]  [0.0, -2.0]
+aishell-test    %SER 38.29 | %CER 5.37 [ 5625 / 104765, 141 ins, 450 del, 5034 sub ]    [0.53125, 0.75]
 
 +lm-trans-word
-%SER 43.21 | %CER 6.15 [ 6443 / 104765, 169 ins, 381 del, 5893 sub ]    alpha = 0.5 | beta = 0.0
+aishell-test    %SER 43.21 | %CER 6.15 [ 6443 / 104765, 169 ins, 381 del, 5893 sub ]    alpha = 0.5 | beta = 0.0
++lm-trans-word + beam 128
+dev             %SER 65.92 | %CER 9.38 [ 31004 / 330498, 2981 ins, 9406 del, 18617 sub ]        [0.25, 3.25]
+test_net        %SER 62.44 | %CER 11.89 [ 49448 / 415746, 3341 ins, 9743 del, 36364 sub ]       [0.25, 2.0]
+test_meeting    %SER 90.41 | %CER 18.58 [ 40937 / 220385, 2587 ins, 15868 del, 22482 sub ]      [0.1875, 2.0]
+aishell-dev     
+aishell-test    %SER 42.21 | %CER 5.99 [ 6273 / 104765, 185 ins, 398 del, 5690 sub ]    [0.5, 0.75]
 
 +lm-trans
-%SER 67.12 | %CER 9.81 [ 32416 / 330498, 2392 ins, 11206 del, 18818 sub ]       alpha = 0.28125 | beta = 3.5
-%SER 63.08 | %CER 12.12 [ 50404 / 415746, 3290 ins, 9963 del, 37151 sub ]       alpha = 0.28125 | beta = 2.5
-%SER 90.76 | %CER 19.39 [ 42731 / 220385, 2139 ins, 18343 del, 22249 sub ]      alpha = 0.21875 | beta = 2.25
-%SER 44.09 | %CER 6.22 [ 6516 / 104765, 222 ins, 250 del, 6044 sub ]            alpha = 0.50 | beta = 1.50
+dev             %SER 67.12 | %CER 9.81 [ 32416 / 330498, 2392 ins, 11206 del, 18818 sub ]       alpha = 0.28125 | beta = 3.5
+test_net        %SER 63.08 | %CER 12.12 [ 50404 / 415746, 3290 ins, 9963 del, 37151 sub ]       alpha = 0.28125 | beta = 2.5
+test_meeting    %SER 90.76 | %CER 19.39 [ 42731 / 220385, 2139 ins, 18343 del, 22249 sub ]      alpha = 0.21875 | beta = 2.25 
+aishell-test    %SER 44.09 | %CER 6.22 [ 6516 / 104765, 222 ins, 250 del, 6044 sub ]            alpha = 0.50 | beta = 1.50
++lm-trans + beam 128
+dev             %SER 66.66 | %CER 9.47 [ 31302 / 330498, 2967 ins, 9483 del, 18852 sub ]        [0.21875, 3.0]
+test_net        %SER 63.22 | %CER 12.04 [ 50037 / 415746, 3080 ins, 9962 del, 36995 sub ]       [0.15625, 1.5]
+test_meeting    %SER 90.61 | %CER 18.59 [ 40972 / 220385, 2592 ins, 15902 del, 22478 sub ]      [0.1875, 2.0]
+aishell-dev     
+aishell-test    %SER 43.67 | %CER 6.09 [ 6383 / 104765, 227 ins, 237 del, 5919 sub ]    [0.3125, 1.0]
 
-+lm-ext-5mil
-%SER 66.24 | %CER 9.66 [ 31918 / 330498, 2540 ins, 11140 del, 18238 sub ]       alpha = 0.375 | beta = 4.25
-%SER 62.23 | %CER 11.90 [ 49493 / 415746, 3042 ins, 10297 del, 36154 sub ]      alpha = 0.28125 | beta = 2.25
-%SER 90.50 | %CER 19.23 [ 42376 / 220385, 2246 ins, 18196 del, 21934 sub ]      alpha = 0.28125 | beta = 2.75
-
-+lm-ext-10mil
-%SER 66.13 | %CER 9.63 [ 31841 / 330498, 2453 ins, 11065 del, 18323 sub ]       alpha = 0.28125 | beta = 3.75
-%SER 61.88 | %CER 11.83 [ 49177 / 415746, 3022 ins, 10316 del, 35839 sub ]      alpha = 0.28125 | beta = 2.25
-%SER 90.30 | %CER 19.23 [ 42390 / 220385, 2040 ins, 18470 del, 21880 sub ]      alpha = 0.1875 | beta = 2.0
-
-+lm-ext-15mil
-%SER 66.08 | %CER 9.62 [ 31797 / 330498, 2367 ins, 11243 del, 18187 sub ]       alpha = 0.28125 | beta = 3.5
-%SER 61.80 | %CER 11.82 [ 49148 / 415746, 2906 ins, 10459 del, 35783 sub ]      alpha = 0.25 | beta = 2.0
-%SER 90.31 | %CER 19.18 [ 42259 / 220385, 2205 ins, 18239 del, 21815 sub ]      alpha = 0.28125 | beta = 2.75
++lm-nn-trans + beam 128
+dev             %SER 67.59 | %CER 9.64 [ 31848 / 330498, 2849 ins, 9527 del, 19472 sub ]        [0.1875, 2.75]
+test_net        %SER 63.62 | %CER 12.18 [ 50636 / 415746, 3349 ins, 9582 del, 37705 sub ]       [0.1875, 1.75]
+test_meeting    %SER 90.74 | %CER 18.66 [ 41121 / 220385, 2643 ins, 15774 del, 22704 sub ]      [0.1875, 2.0]
+aishell-dev     
+aishell-test    %SER 46.89 | %CER 6.67 [ 6988 / 104765, 213 ins, 259 del, 6516 sub ]    [0.25, 0.5]
 ```
 
+```
+beam 128
+density ratio lm-trans lm-aishell beta=0
+%SER 40.09 | %CER 5.70 [ 5971 / 104765, 126 ins, 503 del, 5342 sub ]    [-0.03125, 0.5]
+```
 
 ### Monitor figure
 ![monitor](./monitor.png)

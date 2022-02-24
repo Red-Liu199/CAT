@@ -605,7 +605,7 @@ if __name__ == "__main__":
         for dataset in ['train', 'dev', 'test']:
             if dataset not in data_settings:
                 sys.stderr.write(
-                    f"warning: missing '{dataset}' in ['data'], skip.")
+                    f"warning: missing '{dataset}' in ['data'], skip.\n")
                 continue
             sys.stdout.write(fmt.format(f"parsing {dataset} data..."))
             f_texts = expandPath('t', data_settings[dataset], cwd)
@@ -619,11 +619,11 @@ if __name__ == "__main__":
                         f_out=os.path.join(d_pkl, dataset+'.pkl'),
                         filter=filter, tokenizer=tokenizer, iszh=iszh)
 
-        if not istokenized:
+        if not istokenized and 'train' in data_settings:
+            f_text = expandPath('t', data_settings['train'], cwd)[0]
             # generate word prefix tree from train set
             from word_prefix_tree import WordPrefixParser
             from word_prefix_tree import main as WPTMain
-            f_text = expandPath('t', data_settings['train'], cwd)[0]
             wpt_settings = {
                 'stripid': True,
                 'output': os.path.join(d_pkl, 'wpt.pkl')}

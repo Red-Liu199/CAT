@@ -1,9 +1,9 @@
 ### Result
 
 ```
-PPL over libri test set is: 74.99
-
-PPL over TLv2 test set is: 27.58
+PPL
+Test set: exp/lm-tlv2//lmbin/test-data_tlv2_dev_txt.pkl -> ppl: 27.67
+Test set: exp/lm-tlv2//lmbin/test-data_tlv2_test_txt.pkl -> ppl: 27.58
 ```
 
 ### LM adaptation
@@ -12,9 +12,6 @@ PPL over TLv2 test set is: 27.58
 * CRF: `crf-v1`
 
 ```
-PPL
-Test set: exp/lm-tlv2//lmbin/test-data_tlv2_dev_txt.pkl -> ppl: 27.67
-Test set: exp/lm-tlv2//lmbin/test-data_tlv2_test_txt.pkl -> ppl: 27.58
 
 RNNT+lm-tlv2 tlv2 trans tuned
 tlv2-dev	%SER 84.62 | %WER 10.82 [ 1925 / 17783, 463 ins, 318 del, 1144 sub ]    0.5     1.0

@@ -6,9 +6,10 @@ import argparse
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("input", type=str, help="Input tokenized text file.")
+    parser.add_argument("input", type=str,
+                        help="Input corpus dataset file. Ignored if use -t")
     parser.add_argument("-t", action="store_true", dest="istext",
-                        help="Identify the input to be text instead of binary file. Used with --tokenizer")
+                        help="Identify the input to be text instead of binary file. Read from stdin, used with --tokenizer")
     parser.add_argument("--tokenizer", type=str,
                         help="Tokenizer model location. See cat/shared/tokenizer.py for details.")
     parser.add_argument("--map", nargs='*', type=str,

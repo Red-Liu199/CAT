@@ -12,20 +12,17 @@
 
 ### Result
 ```
-baseline
-test    %CER 4.82 [5051 / 104765, 157 ins, 131 del, 4763 sub ]
-test    %CER 1.63 [1705 / 104765, 58 ins, 69 del, 1578 sub ]
-rna topo
-test    %CER 4.79 [5023 / 104765, 134 ins, 131 del, 4758 sub ]
-test    %CER 2.27 [2378 / 104765, 69 ins, 88 del, 2221 sub ]
+rna 128
+dev     %SER 34.23 | %CER 4.44 [ 9107 / 205341, 238 ins, 183 del, 8686 sub ]
+test    %SER 35.97 | %CER 4.80 [ 5032 / 104765, 135 ins, 131 del, 4766 sub ]
 
-fusion with 0.5 lm-v4
-test    %CER 3.67
++lm-v5 (5gram char)
+%SER 33.30 | %CER 4.34 [ 8916 / 205341, 217 ins, 197 del, 8502 sub ]    [0.15625, 0.5]
+%SER 34.98 | %CER 4.68 [ 4905 / 104765, 110 ins, 165 del, 4630 sub ]    [0.15625, 0.25]
 
-fusion with 0.15 lm-v5 
-test    %CER 4.69
-rna topo decode
-test    %CER 4.68 [4908 / 104765, 124 ins, 146 del, 4638 sub ]
++lm-v6 (3gram word)
+%SER 31.48 | %CER 4.10 [ 8417 / 205341, 166 ins, 271 del, 7980 sub ]    [0.15625, -1.0]
+%SER 32.50 | %CER 4.42 [ 4627 / 104765, 77 ins, 222 del, 4328 sub ]     [0.28125, -0.5]
 ```
 
 ### Monitor figure
