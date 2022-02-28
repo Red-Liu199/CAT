@@ -121,9 +121,8 @@ def dataserver(args, q: mp.Queue):
 
     for i in range(args.world_size*2):
         q.put(None, block=True)
-    t_end = time.time()
     if args.verbose:
-        print("\nTime of rescoring: {:.2f}s".format(t_end-t_beg))
+        print("\nTime = {:.2f} s".format(time.time() - t_beg))
     time.sleep(2)
 
 

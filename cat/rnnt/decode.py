@@ -84,22 +84,6 @@ def main(args):
 
     del q_nbest_saver
     del q_data_producer
-    # with open(args.output_prefix, 'w') as fo:
-    #     for i in range(world_size):
-    #         with open(fmt.format(i), 'r') as fi:
-    #             fo.write(fi.read())
-    #         os.remove(fmt.format(i))
-
-    # with open(args.output_prefix+'.nbest', 'wb') as fo:
-    #     all_nbest = {}
-    #     for i in range(world_size):
-    #         partial_bin = fmt.format(i) + '.nbest'
-    #         with open(partial_bin, 'rb') as fi:
-    #             partial_nbest = pickle.load(fi)  # type: dict
-
-    #         all_nbest.update(partial_nbest)
-    #         os.remove(partial_bin)
-    #     pickle.dump(all_nbest, fo)
 
 
 def dataserver(args, q: mp.Queue):
@@ -178,7 +162,6 @@ def main_worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_nbest: m
     args.gpu = pid
     # only support one node
     args.rank = pid
-    world_size = args.world_size
 
     if args.cpu:
         device = 'cpu'

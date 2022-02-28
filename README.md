@@ -10,6 +10,9 @@
 0. Clone the repo
 
     ```bash
+    # clone main repo only, for LM training
+    git clone git@github.com:maxwellzh/Transducer-dev.git
+    # for all functions
     git clone --recurse-submodules git@github.com:maxwellzh/Transducer-dev.git
     ```
 
@@ -18,8 +21,8 @@
    - CUDA compatible machine, NVIDIA driver installed and NVIDIA toolkit available.
    - PyTorch: `>=1.9.0` is recommended
    - Third-party tools:
-      - KenLM: refer to the installation [guide](tools/README.md)
-      - [CAT](https://github.com/thu-spmi/CAT): **This is optional if you just do language model training.** 
+      - KenLM: refer to the installation [guide](tools/README.md#kenlm)
+      - [CAT](https://github.com/thu-spmi/CAT): **\[optional for LM task\]** 
          After installing the CAT, please read the [tools/README.md](tools/README.md)
         and link directory.
        
@@ -37,11 +40,11 @@
 
 3. Building packages from source:
 
-   **LM only:**
+   **LM task only:**
    
    ```bash
-   git submodule init && git submodule update
    cd src/
+   git submodule init & git submodule update torch-gather/
    
    # gather >= 0.2.1
    cd torch-gather/

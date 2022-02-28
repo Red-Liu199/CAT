@@ -196,7 +196,7 @@ class NbestListDataset(AbsDataset):
             self._dataset = list(pickle.load(fi).items())
 
     def impl_get_len(self):
-        return [sum([len(hyp) for _, hyp in hypos]) for _, hypos in self._dataset]
+        return [len(hypos) for _, hypos in self._dataset]
 
     def __len__(self):
         return len(self._dataset)
