@@ -1,8 +1,11 @@
 {
     "data": {
-        "train": "train",
-        "dev": "dev",
-        "test": "test",
+        "dtrain": "train",
+        "ddev": "dev",
+        "test": [
+            "dev",
+            "test"
+        ],
         "lang": "zh-cn"
     },
     "tokenizer": {

@@ -8,7 +8,7 @@
 
 ### Appendix
 
-* `v5` + rm spaces in transcript
+* rm spaces in transcript
 
 ### WER
 ```
