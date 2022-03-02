@@ -24,6 +24,18 @@ export PATH=$PATH:../../src/bin/
 
 # train sentence piece tokenizer
 [ $start_stage -le 1 ] && python utils/lm_process.py $dir --sta 1 --sto 1
+[ ! -f $dir/hyper-p.json ] && echo "No hyper-setting file: $dir/hyper-p.json" && exit 1
+[ ! -f $dir/config.json ] && echo "No model config file: $dir/config.json" && exit 1
+
+if [ "$prune" ]; then
+    prune="--prune $prune"
+fi
+
+if [ $arpa == "False" ]; then
+    export write_command='build_binary /dev/stdin $output'
+else
+    export write_command='tee >$output'
+fi
 
 # we need to manually rm the bos/eos/unk since lmplz tool would add them
 # and kenlm not support <unk> in corpus,
@@ -41,7 +53,10 @@ if [ $large_corpus == "True" ]; then
         [ ! -f $x ] && echo "No such training corpus: '$x'" && exit 1
     done
 
-    processing="cat $f_text | python utils/readtextbin.py . -t --tokenizer $tokenizer --map 0: 1:"
+    for subtext in $f_text; do
+        cat $subtext | python utils/readtextbin.py . -t --tokenizer $tokenizer --map 0: 1: &
+    done | lmplz -o $order $prune -S 30% --discount_fallback |
+        eval $write_command
 else
     textbin=$dir/lmbin/train.pkl
     if [ ! -f $textbin ]; then
@@ -49,24 +64,15 @@ else
     else
         echo "$textbin found, skip generating."
     fi
+
     [ ! -f $textbin ] && echo "No binary text file: '$textbin'" && exit 1
-    processing="python utils/readtextbin.py $textbin --map 0: 1:"
-    unset textbin
+    python utils/readtextbin.py $textbin --map 0: 1: |
+        lmplz -o $order $prune -S 30% --discount_fallback |
+        eval $write_command
 fi
 
-if [ "$prune" ]; then
-    prune="--prune $prune"
-fi
-
-if [ $arpa == "True" ]; then
-    eval "$processing |
-        lmplz -o $order $prune -S 80% --discount_fallback >$output"
-else
-    eval "$processing |
-        lmplz -o $order $prune -S 80% --discount_fallback |
-        build_binary /dev/stdin $output"
-fi
 echo "LM saved at $output"
+
 if [ -f $dir/config.json ]; then
     cat $dir/config.json | python -c "
 import sys, json
@@ -83,4 +89,8 @@ fi
 # test
 # You may need to set the 'num_classes' in
 # ... $dir/config.json to the number of vocab of your TOKENIZER
-python utils/ppl_compute_ngram.py $dir -e $dir/lmbin/test-*.pkl
+if [ -d $dir/lmbin ] && [ $(find $dir/lmbin -name test-*.pkl) ]; then
+    python utils/ppl_compute_ngram.py $dir -e $dir/lmbin/test-*.pkl
+else
+    echo "No test data found, training done."
+fi

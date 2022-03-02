@@ -482,6 +482,14 @@ def TrainTokenizer(f_hyper: str):
         sys.stderr.write(f"set ['tokenizer']='tokenizer.tknz'\n")
         hyper_settings['tokenizer']['location'] = os.path.join(
             os.path.dirname(f_hyper), 'tokenizer.tknz')
+    else:
+        if os.path.isfile(hyper_settings['tokenizer']['location']):
+            sys.stderr.write(
+                f"['tokenizer']['location'] exists: {hyper_settings['tokenizer']['location']}\n"
+                "...skip tokenizer training. If you want to do tokenizer training anyway,\n"
+                "...remove the ['tokenizer']['location'] in setting\n"
+                f"...or remove the file:{hyper_settings['tokenizer']['location']} then re-run the script.\n")
+            return
     assert os.access(os.path.dirname(hyper_settings['tokenizer']['location']),
                      os.W_OK), f"['tokenizer']['location'] is not writable: '{hyper_settings['tokenizer']['location']}'"
 
