@@ -51,9 +51,8 @@ if [ $large_corpus == "True" ]; then
         [ ! -f $x ] && echo "No such training corpus: '$x'" && exit 1
     done
 
-    for subtext in $f_text; do
-        cat $subtext | python utils/readtextbin.py . -t --tokenizer $tokenizer --map 0: 1: &
-    done | lmplz -o $order $prune -S 20% --discount_fallback >$arpa_out
+    python utils/readtextbin.py $f_text -o $output.corpus.tmp \
+        -t --tokenizer $tokenizer --map 0: 1:
 else
     textbin=$dir/lmbin/train.pkl
     if [ ! -f $textbin ]; then
@@ -63,9 +62,11 @@ else
     fi
 
     [ ! -f $textbin ] && echo "No binary text file: '$textbin'" && exit 1
-    python utils/readtextbin.py $textbin --map 0: 1: |
-        lmplz -o $order $prune -S 30% --discount_fallback >$arpa_out
+    python utils/readtextbin.py $textbin \
+        -o $output.corpus.tmp --map 0: 1:
 fi
+lmplz <$output.corpus.tmp -o $order $prune -S 20% --discount_fallback >$arpa_out
+rm $output.corpus.tmp
 
 if [ $arpa == "True" ]; then
     mv $arpa_out $output
@@ -92,7 +93,7 @@ fi
 # test
 # You may need to set the 'num_classes' in
 # ... $dir/config.json to the number of vocab of your TOKENIZER
-if [ -d $dir/lmbin ] && [ $(find $dir/lmbin -name test-*.pkl) ]; then
+if [[ -d $dir/lmbin ]] && [[ $(find $dir/lmbin -name test-*.pkl) ]]; then
     python utils/ppl_compute_ngram.py $dir -e $dir/lmbin/test-*.pkl
 else
     echo "No test data found, training done."
