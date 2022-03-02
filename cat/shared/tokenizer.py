@@ -142,6 +142,11 @@ class JiebaTokenizer(AbsTokenizer):
         return rt_indices
 
     def encode(self, strings: Union[str, Iterable[str]]) -> Union[List[int], List[List[int]]]:
+        """Encode string to indices
+
+        NOTE: since chinese language requires segmentation, so 
+            tokenizer.decode(tokenizer.encode(string)) == string may not be satisfied.
+        """
         if isinstance(strings, str):
             return self._enc(strings)
         try:

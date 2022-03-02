@@ -14,6 +14,8 @@ set -e
 ("--large-corpus", action="store_true", help="Use on-the-fly encoding for large corpus.")
 ("--prune", type=str, default="", nargs='*',
     help="Prune options passed to KenLM lmplz executable. default: ")
+("--type", type=str, default="trie", choices=['trie', 'probing'],
+    help="Binary file structure. default: trie")
 PARSER
 opts=$(python utils/parseopt.py $0 $*) && eval $opts || exit 1
 
@@ -31,11 +33,7 @@ if [ "$prune" ]; then
     prune="--prune $prune"
 fi
 
-if [ $arpa == "False" ]; then
-    export write_command='build_binary /dev/stdin $output'
-else
-    export write_command='tee >$output'
-fi
+export arpa_out=${output}.arpa.tmp
 
 # we need to manually rm the bos/eos/unk since lmplz tool would add them
 # and kenlm not support <unk> in corpus,
@@ -55,8 +53,7 @@ if [ $large_corpus == "True" ]; then
 
     for subtext in $f_text; do
         cat $subtext | python utils/readtextbin.py . -t --tokenizer $tokenizer --map 0: 1: &
-    done | lmplz -o $order $prune -S 30% --discount_fallback |
-        eval $write_command
+    done | lmplz -o $order $prune -S 20% --discount_fallback >$arpa_out
 else
     textbin=$dir/lmbin/train.pkl
     if [ ! -f $textbin ]; then
@@ -67,8 +64,14 @@ else
 
     [ ! -f $textbin ] && echo "No binary text file: '$textbin'" && exit 1
     python utils/readtextbin.py $textbin --map 0: 1: |
-        lmplz -o $order $prune -S 30% --discount_fallback |
-        eval $write_command
+        lmplz -o $order $prune -S 30% --discount_fallback >$arpa_out
+fi
+
+if [ $arpa == "True" ]; then
+    mv $arpa_out $output
+else
+    build_binary $type $arpa_out $output
+    rm $arpa_out
 fi
 
 echo "LM saved at $output"

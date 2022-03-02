@@ -119,8 +119,15 @@ def main(args: argparse.Namespace):
             l_hy = pickle.load(f_hy)
         l_hy = [(key, list(nbest.values())) for key, nbest in l_hy.items()]
     else:
-        with open(hypothesis, 'r') as f_hy:
-            l_hy = f_hy.readlines()
+        try:
+            with open(hypothesis, 'r') as f_hy:
+                l_hy = f_hy.readlines()
+        except UnicodeDecodeError:
+            print(
+                "Error:\n"
+                f"seems the given hypothesis: '{hypothesis}' is not a text file.\n"
+                f"... add --oracle if you want to compute oracle error rate.")
+            sys.exit(1)
 
     num_lines = len(l_gt)
     assert num_lines == len(l_hy)

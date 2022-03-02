@@ -46,7 +46,6 @@ if __name__ == "__main__":
         tokenizer = tknz.load(args.tokenizer)
         try:
             for l in sys.stdin:
-                idx_l = tokenizer.encode(l)
                 sys.stdout.write(' '.join([
                     int2str(x) for x in tokenizer.encode(l)
                 ]) + '\n')
