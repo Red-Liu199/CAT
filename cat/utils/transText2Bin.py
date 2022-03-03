@@ -95,7 +95,9 @@ def text2bin(arguments: Tuple[argparse.Namespace, str, int, int]):
     with open(binfile, 'wb') as fo:
         pickle.dump(dataset, fo)
 
-    if args.truncate != -1:
+    if args.quiet:
+        return
+    elif args.truncate != -1:
         print("Truncate by {}, # {} -> {}".format(
             args.truncate, tot_line, cnt_process))
     elif args.concat != -1:
@@ -137,7 +139,8 @@ def main(args: argparse.Namespace):
     with Pool(processes=num_threads) as pool:
         pool.map(text2bin, pool_args)
 
-    print("> Sub-process done. Begin merging...")
+    if not args.quiet:
+        print("> Sub-process done. Begin merging...")
 
     f_data = '{}.bin'.format(args.output)
     _seeks = []
@@ -156,8 +159,11 @@ def main(args: argparse.Namespace):
         pickle.dump(os.path.basename(f_data), fo)
         # save the location information
         pickle.dump(_seeks, fo)
+        # dump a nonetype to ensure previous operation is done
+        pickle.dump(None, fo)
 
-    print("> Merged: Index {} --> binary {}".format(args.output, f_data))
+    if not args.quiet:
+        print("> Merged: Index {} --> binary {}".format(args.output, f_data))
 
 
 def TextProcessingParser():
@@ -180,6 +186,8 @@ def TextProcessingParser():
                         help="Begin of sequence index, used when concat > 1. Default: 0")
     parser.add_argument("--eos_id", type=int, default=-1,
                         help="End of sequence index, used when concat > 1. Default: -1 (same as --bos_id)")
+    parser.add_argument("--quiet", action="store_true",
+                        help="Supress hint messages")
     return parser
 
 

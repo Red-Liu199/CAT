@@ -6,6 +6,8 @@ TODO:
 import os
 import json
 import math
+import uuid
+import shutil
 import argparse
 from multiprocessing import Pool
 from typing import Tuple
@@ -39,7 +41,30 @@ def unpack_args(args):
     return evaluate(*args)
 
 
+def text2corpusbin(f_text: str, f_bin: str, tokenizer):
+    from asr_process import updateNamespaceFromDict
+    from transText2Bin import main as t2bmain
+    from transText2Bin import TextProcessingParser as t2bparser
+
+    t2bmain(
+        updateNamespaceFromDict(
+            {
+                'tokenizer': tokenizer,
+                'quiet': True
+            }, t2bparser(), [f_text, f_bin]))
+
+    return
+
+
 def main(args: argparse.Namespace):
+    if args.tokenizer is not None:
+        assert os.path.isfile(
+            args.tokenizer), f"no such tokenizer file: '{args.tokenizer}'"
+        cachedir = os.path.join('/tmp', str(uuid.uuid4()))
+        os.makedirs(cachedir)
+    else:
+        cachedir = None
+
     from cat.shared.data import CorpusDataset
     from cat.lm import lm_builder
 
@@ -52,12 +77,18 @@ def main(args: argparse.Namespace):
     num_threads = 40  # int(os.cpu_count())
 
     for testset in args.evaluate:
-        num_lines = len(CorpusDataset(testset))
+        if args.tokenizer is not None:
+            binfile = os.path.join(cachedir, f"{str(uuid.uuid4())}.pkl.tmp")
+            text2corpusbin(testset, binfile, args.tokenizer)
+        else:
+            binfile = testset
+
+        num_lines = len(CorpusDataset(binfile))
         interval = num_lines // num_threads
         indices = [interval * i for i in range(num_threads+1)]
         if indices[-1] != num_lines:
             indices[-1] = num_lines
-        pool_args = [(model, testset, indices[i], indices[i+1])
+        pool_args = [(model, binfile, indices[i], indices[i+1])
                      for i in range(num_threads)]
         with Pool(processes=num_threads) as pool:
             gather_output = pool.map(unpack_args, pool_args)
@@ -66,12 +97,17 @@ def main(args: argparse.Namespace):
         ppl = math.exp(-sum(log_probs)/sum(num_tokens))
         print("Test set: {} -> ppl: {:.2f}".format(testset, ppl))
 
+    if cachedir is not None:
+        shutil.rmtree(cachedir)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("dir", type=str, help="Location of directory.")
     parser.add_argument("-e", "--evaluate", type=str, nargs='*',
                         help="Evaluate test sets.")
+    parser.add_argument("--tokenizer", type=str,
+                        help="Use tokenizer to encode the evaluation sets. If passed, would take -e inputs as text files.")
     args = parser.parse_args()
 
     if not os.path.isdir(args.dir):
