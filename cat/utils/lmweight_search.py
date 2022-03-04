@@ -27,17 +27,28 @@ def main(args: argparse):
     num_param_search = sum(args.search)
     assert num_param_search <= 2 and num_param_search >= 1
 
-    if len(args.nbestlist) - num_param_search > 0:
+    num_param_fixed = len(args.nbestlist) - num_param_search
+    if num_param_fixed > 0:
         # generate temp nbest list for fixed-param files.
         cache_file = os.path.join('/tmp', str(uuid.uuid4())+'.nbest')
         f_nbest_fixed = [f_nbest for i, f_nbest in enumerate(
             args.nbestlist) if args.search[i] == 0]
+
+        if args.weight is None:
+            weight_fixed = [1.0]*num_param_fixed
+        else:
+            weight_fixed = args.weight
+            assert len(weight_fixed) == num_param_fixed, (
+                "\n"
+                f"--weight {weight_fixed}\n"
+                f"--search {args.search}")
+
         if len(f_nbest_fixed) == 1:
             shutil.copyfile(f_nbest_fixed[0], cache_file)
         else:
             interpolate_main(updateNamespaceFromDict(
                 {'nbestlist': f_nbest_fixed,
-                 'weights': [1.0] * len(f_nbest_fixed),
+                 'weights': weight_fixed,
                  }, InterpolateParser(), [cache_file]
             ))
         variable_list = [f_nbest for i, f_nbest in enumerate(
@@ -54,7 +65,7 @@ def main(args: argparse):
         interpolate_main(updateNamespaceFromDict(
             {
                 'nbestlist': tuned_list,
-                'weights': [1.0] * (len(tuned_list)-num_param_search) + tuned_metric,
+                'weights': tuned_metric if num_param_fixed == 0 else ([1.0] + tuned_metric),
                 'one-best': True
             }, InterpolateParser(), [cache_file]
         ))
@@ -120,7 +131,7 @@ def main(args: argparse):
 
         n_iter += 1
 
-    if len(args.nbestlist) - num_param_search > 0:
+    if num_param_fixed > 0:
         os.remove(tuned_list[0])
     del evaluate
     del update_tuned_metric
@@ -136,6 +147,8 @@ if __name__ == "__main__":
                         help="N-best list files")
     parser.add_argument(
         "--search", type=int, nargs='+', choices=[0, 1], help="Flag of whether search weight of the file or not. ")
+    parser.add_argument("--weight", type=float, nargs='*',
+                        help="Weights of fixed parts, # which should be the same as # '0' in --search. defaults are all 1.0.")
     parser.add_argument(
         "--a-range", type=float, nargs=2, default=[0.0, 1.0],
         help="Range of param-a."

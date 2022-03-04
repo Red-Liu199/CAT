@@ -2,7 +2,9 @@
 
 ## TODO
 
-- [ ] Internal language model estimation
+- [ ] Internal language model estimation (ongoing)
+    - [x] evaluate the ILME method on RNN-T RNA decode
+    - [ ] get RNN-T decode methods all ready for ILME
 - [ ] rename `*_process.*` -> `*_pipe.*`
 
 ## Installation

@@ -130,7 +130,8 @@ def main(args: argparse.Namespace):
             sys.exit(1)
 
     num_lines = len(l_gt)
-    assert num_lines == len(l_hy)
+    assert num_lines == len(
+        l_hy), f"# lines mismatch in ground truth and hypothesis files: {num_lines} != {len(l_hy)}"
 
     # Pre-processing
     processor = Processor()
