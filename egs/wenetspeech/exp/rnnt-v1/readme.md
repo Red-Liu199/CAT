@@ -61,5 +61,41 @@ density ratio lm-trans lm-aishell beta=0
 %SER 40.09 | %CER 5.70 [ 5971 / 104765, 126 ins, 503 del, 5342 sub ]    [-0.03125, 0.5]
 ```
 
+LM integration
+
+```
+oracle
+%SER 40.51 | %CER 5.50 [ 18163 / 330498, 501 ins, 8594 del, 9068 sub ]
+nolm
+%SER 71.10 | %CER 11.14 [ 36833 / 330498, 1284 ins, 16210 del, 19339 sub ]
+
++ trans
+%SER 66.66 | %CER 9.47 [ 31302 / 330498, 2967 ins, 9483 del, 18852 sub ]        [0.21875, 3.0]
+
++ trans-5m
+%SER 64.77 | %CER 9.14 [ 30221 / 330498, 2941 ins, 9782 del, 17498 sub ]        [0.25, 3.25]
+
++ trans-10m
+%SER 64.52 | %CER 9.11 [ 30104 / 330498, 3026 ins, 9851 del, 17227 sub ]        [0.28125, 3.5]
+
++ trans-15m
+%SER 64.51 | %CER 9.07 [ 29992 / 330498, 2903 ins, 9903 del, 17186 sub ]        [0.25, 3.25]
+
++ trans-20m
+%SER 64.77 | %CER 9.14 [ 30221 / 330498, 2941 ins, 9782 del, 17498 sub ]        [0.25, 3.25]
+
++ trans-25m
+%SER 64.77 | %CER 9.14 [ 30221 / 330498, 2941 ins, 9782 del, 17498 sub ]        [0.25, 3.25]
+
++ trans-30m
+%SER 64.14 | %CER 9.01 [ 29787 / 330498, 3176 ins, 9617 del, 16994 sub ]        [0.28125, 3.75]
+
++ trans-35m
+%SER 64.13 | %CER 9.02 [ 29803 / 330498, 3180 ins, 9622 del, 17001 sub ]        [0.28125, 3.75]
+
++trans-40m
+%SER 64.08 | %CER 9.01 [ 29786 / 330498, 2972 ins, 9926 del, 16888 sub ]        [0.28125, 3.5]
+```
+
 ### Monitor figure
 ![monitor](./monitor.png)

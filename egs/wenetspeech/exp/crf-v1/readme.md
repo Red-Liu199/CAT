@@ -49,5 +49,20 @@ char trans
 %WER 8.52 [ 8929 / 104765, 164 ins, 541 del, 8224 sub ] exp/crf-v1/phn-char-5gram/aishell-test/cer_13_1.0
 ```
 
+LM integration
+
+```
+oracle
+%SER 45.50 | %CER 6.12 [ 20222 / 330498, 789 ins, 9189 del, 10244 sub ]
+nolm
+-
+
++ trans
+%SER 72.32 | %CER 10.77 [ 35611 / 330498, 2954 ins, 9555 del, 23102 sub ]       [0.9375, 4.0]
++ trans word
+%SER 73.52 | %CER 11.78 [ 38945 / 330498, 1786 ins, 12993 del, 24166 sub ]      [0.71875, 0.75]
+```
+
+
 ### Monitor figure
 ![monitor](./monitor.png)

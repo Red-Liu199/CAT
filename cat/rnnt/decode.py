@@ -88,10 +88,7 @@ def main(args):
 
 def dataserver(args, q: mp.Queue):
     testset = ScpDataset(args.input_scp)
-    # sort the dataset in desencding order
-    testset_ls = testset.get_seq_len()
-    n_frames = sum(testset_ls)
-    del testset_ls
+    n_frames = sum(testset.get_seq_len())
     testloader = DataLoader(
         testset, batch_size=1, shuffle=False,
         num_workers=0,
@@ -107,6 +104,15 @@ def dataserver(args, q: mp.Queue):
     t_beg = time.time()
     for batch in tqdm(testloader, total=len(testloader), disable=(args.silience)):
         key = batch[0][0]
+        """
+        NOTE: 
+        In some cases (decoding with large beam size or large LMs like Transformer), 
+        ... the decoding consumes too much memory and would probably causes OOV error.
+        So I add checkpointing output in the nbest list. However, things would be
+        ... complicated when first decoding w/o --estimate-ILM, save the checkpoint to nbest list
+        ... then continue decoding w/ --estimate-ILM.
+        I just assume users won't do that.
+        """
         if key not in nbest:
             q.put(batch, block=True)
 
@@ -147,10 +153,15 @@ def consumer_output(args, q: mp.Queue):
             nbest = {}
 
     load_and_save(nbest)
+    # write the 1-best result to text file.
     with open(args.output_prefix, 'w') as fo:
         for k, hypo_items in nbest.items():
+            if args.estimate_ILM and k[-4:] == "-ilm":
+                continue
             best_hypo = max(hypo_items.values(), key=lambda item: item[0])[1]
             fo.write(f"{k} {best_hypo}\n")
+
+    del load_and_save
 
 
 def main_worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_nbest: mp.Queue, fmt: str, models=None):
@@ -172,12 +183,13 @@ def main_worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_nbest: m
         torch.cuda.set_device(device)
         model, ext_lm = build_model(args, device)
 
+    est_ilm = args.estimate_ILM
     searcher = TransducerBeamSearcher(
         decoder=model.decoder, joint=model.joint,
         blank_id=0, bos_id=model.bos_id, beam_size=args.beam_size,
         nbest=args.beam_size, algo=args.algo, umax_portion=args.umax_portion,
         prefix_merge=True, lm_module=ext_lm, alpha=args.alpha, beta=args.beta,
-        word_prefix_tree=args.word_tree, rescore=args.rescore, verbose=(pid == 0))
+        word_prefix_tree=args.word_tree, rescore=args.rescore, est_ilm=est_ilm, verbose=(pid == 0))
 
     local_writer = fmt.format(pid)
     tokenizer = tknz.load(args.tokenizer)
@@ -195,14 +207,15 @@ def main_worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_nbest: m
                 bid: (score.item(), tokenizer.decode(hypo.cpu().tolist()))
                 for bid, (score, hypo) in enumerate(zip(scores_nbest, nbest_list))
             }
+            if est_ilm:
+                nbest[key+'-ilm'] = {
+                    bid: (searcher.ilm_score[bid].item(), trans) for bid, (_, trans) in nbest[key].items()
+                }
             q_nbest.put(nbest, block=True)
             nbest = {}
-            # fi.write("{} {}\n".format(key, nbest[key][0][1]))
             del batch
 
     q_nbest.put(None)
-    # with open(f"{local_writer}.nbest", 'wb') as fi:
-    #     pickle.dump(nbest, fi)
     q_data.get()
 
 
@@ -261,6 +274,10 @@ def DecoderParser():
     parser.add_argument("--thread-per-woker", type=int, default=1)
     parser.add_argument("--umax-portion", type=float,
                         default=0.35, help="Umax/T for ALSD decoding.")
+    parser.add_argument("--estimate-ILM", action="store_true",
+                        help="Enable internal language model estimation. "
+                        "This would slightly slow down the decoding. "
+                        "With this option, the N-best list file would contains ILM scores too. See utils/dispatch_ilm.py")
     parser.add_argument("--word-tree", type=str, default=None,
                         help="Path to word prefix tree file.")
     parser.add_argument("--cpu", action='store_true', default=False)

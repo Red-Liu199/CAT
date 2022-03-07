@@ -50,6 +50,7 @@ class Hypothesis():
         self.cache = cache
         self.lm_score = lm_score
         self.len_norm = len_norm
+        self.ilm_log_prob = 0.0
 
     def pop_last(self) -> torch.LongTensor:
         return self._last_token
@@ -74,6 +75,7 @@ class Hypothesis():
             self.len_norm
         )
         new_hypo.pred = self.pred
+        new_hypo.ilm_log_prob = fclone(self.ilm_log_prob)
         return new_hypo
 
     def __add__(self, rhypo):
@@ -315,6 +317,7 @@ class TransducerBeamSearcher():
         temperature: float = 1.0,
         word_prefix_tree: Optional[str] = None,
         rescore: bool = False,
+        est_ilm: bool = False,
         verbose: bool = True
     ):
         super(TransducerBeamSearcher, self).__init__()
@@ -345,6 +348,10 @@ class TransducerBeamSearcher():
         self.is_prefix = prefix_merge
         self.rescore = rescore and (self.alpha_ is not None)
         self.beta_ = beta
+        if est_ilm and algo != 'rna':
+            raise NotImplementedError(
+                f"ILM estimation currently only support 'rna' decoding algorithm, instead '{algo}'")
+        self.est_ilm = est_ilm
         if self.rescore:
             # disable fusion
             self.alpha_ = None
@@ -381,10 +388,10 @@ class TransducerBeamSearcher():
         if self.rescore:
             rescored_index = self.call_rescore(hyps)
             hyps = [hyps[i] for i in rescored_index]
-
-        pred_list, score_list = ([hypo.get_pred_token()[1:] for hypo in hyps], [
+        if self.est_ilm:
+            self.ilm_score = [hypo.ilm_log_prob for hypo in hyps]
+        return ([hypo.get_pred_token()[1:] for hypo in hyps], [
             hypo.score for hypo in hyps])
-        return pred_list, score_list
 
     def call_rescore(self, decoded_hypos: List[Hypothesis]):
         """Do rescoring with LM"""
@@ -924,6 +931,16 @@ class TransducerBeamSearcher():
             log_prob = self.joint(
                 expand_tn_out, pn_out).squeeze(1).squeeze(1)
 
+            if self.est_ilm:
+                ilm_log_prob = self.joint.impl_forward(
+                    torch.zeros_like(expand_tn_out), pn_out).squeeze(1).squeeze(1)
+                if self.blank_id == 0:
+                    ilm_log_prob[:, 0] = 0.
+                    ilm_log_prob[:, 1:] = \
+                        ilm_log_prob[:, 1:].log_softmax(dim=1)
+                else:
+                    raise NotImplementedError
+
             if use_lm:
                 lm_out = torch.cat(group_lm_out, dim=0)
                 lm_score = self.alpha_ * \
@@ -949,6 +966,8 @@ class TransducerBeamSearcher():
                 orin_hypo = B[idxbeam2srcidx[b]]
                 cur_hypo = orin_hypo.clone()
                 cur_hypo.log_prob += log_prob[b, tokens[i]]
+                if self.est_ilm:
+                    cur_hypo.ilm_log_prob += ilm_log_prob[b, tokens[i]]
                 if tokens[i] == self.blank_id:
                     A.append(cur_hypo)
                     continue
