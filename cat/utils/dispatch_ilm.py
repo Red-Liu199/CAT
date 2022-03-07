@@ -35,5 +35,9 @@ if __name__ == "__main__":
     with open(dst_nbest, 'wb') as fo:
         pickle.dump(am_score, fo)
 
-    with open(dst_nbest+'.ilm', 'wb') as fo:
-        pickle.dump(ilm_score, fo)
+    if len(ilm_score) > 0:
+        # make this judge, such that
+        # 1. if no ILM score in input, no ILM nbest list will be stored
+        # 2. run the script multiple times won't make files changed.
+        with open(dst_nbest+'.ilm', 'wb') as fo:
+            pickle.dump(ilm_score, fo)
