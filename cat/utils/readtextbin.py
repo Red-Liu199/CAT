@@ -61,42 +61,43 @@ def process_line(args: argparse.Namespace, idx_beg: int, idx_end: int):
         sys.path.append(os.getcwd())
 
     cachefile = os.path.join('/tmp', str(uuid.uuid4())+'.tmp')
+    rm_empty = not args.keep_empty_line
     if args.istext:
         from cat.shared import tokenizer as tknz
         assert args.tokenizer is not None
         tokenizer = tknz.load(args.tokenizer)
-        offset = -1
-        for file in args.input:
-            if offset >= idx_end:
-                break
-            with open(file, 'r') as fi, open(cachefile, 'w') as fo:
-                for l in fi:
-                    offset += 1
-                    if offset < idx_beg:
-                        continue
-                    if offset >= idx_end:
-                        break
-                    fo.write(' '.join([
-                        int2str(x) for x in tokenizer.encode(l)
-                    ]) + '\n')
-
+        offset = 0
+        with open(cachefile, 'w') as fo:
+            for file in args.input:
+                with open(file, 'r') as fi:
+                    for i, line in enumerate(fi):
+                        if offset + i < idx_beg:
+                            continue
+                        if offset + i >= idx_end:
+                            break
+                        if line.strip() == '' and rm_empty:
+                            continue
+                        fo.write(' '.join([
+                            int2str(x) for x in tokenizer.encode(line)])+'\n')
+                offset += countlines(file)
+                if offset >= idx_end:
+                    break
     else:
         from cat.shared.data import CorpusDataset
-        offset = -1
-        for file in args.input:
-            if offset >= idx_end:
-                break
-            corpus = CorpusDataset(file)
-            with open(cachefile, 'w') as fo:
+        offset = 0
+        with open(cachefile, 'w') as fo:
+            for file in args.input:
+                corpus = CorpusDataset(file)
                 for i in range(len(corpus)):
-                    offset += 1
-                    if offset < idx_beg:
+                    if offset + i < idx_beg:
                         continue
-                    if offset >= idx_end:
+                    if offset + i >= idx_end:
                         break
                     fo.write(' '.join([
-                        int2str(x) for x in corpus[i][0].tolist()
-                    ])+'\n')
+                        int2str(x) for x in corpus[i][0].tolist()])+'\n')
+                offset += len(corpus)
+                if offset >= idx_end:
+                    break
 
     return cachefile
 
@@ -115,6 +116,8 @@ if __name__ == "__main__":
                         help="Identify the input to be text instead of binary file. Used with --tokenizer")
     parser.add_argument("--tokenizer", type=str,
                         help="Tokenizer model location. See cat/shared/tokenizer.py for details.")
+    parser.add_argument("--keep-empty-line", action="store_true",
+                        help="Keep empty lines instead removing them (default).")
     parser.add_argument("--map", nargs='*', type=str,
                         help="Map index to str, split by ':'. "
                         "e.g. map 0 to whitespace '--map 0:'; "
@@ -132,10 +135,10 @@ if __name__ == "__main__":
         total_lines = sum(len(CorpusDataset(dataset))
                           for dataset in args.input)
 
-    num_process = 40
-    with Pool(processes=num_process) as pool:
-        files_list = pool.map(
-            unpack, [(args,)+d_arg for d_arg in dispatch_jobs(total_lines, num_process)])
+    num_process = 48
+    allargs = dispatch_jobs(total_lines, num_process)
+    with Pool(processes=len(allargs)) as pool:
+        files_list = pool.map(unpack, [(args,)+d_arg for d_arg in allargs])
 
     with open(args.output, 'w') as fo:
         for tmpfile in files_list:

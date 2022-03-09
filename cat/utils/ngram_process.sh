@@ -70,7 +70,8 @@ fi
 # you should probably duplicate your text corpus or add the option --discount_fallback
 # Error msg sample:
 # "ERROR: 3-gram discount out of range for adjusted count 3: -5.2525253."
-lmplz <$output.corpus.tmp -o $order $prune -S 20% >$arpa_out
+(lmplz <$output.corpus.tmp -o $order $prune -S 20% >$arpa_out) ||
+    (lmplz <$output.corpus.tmp -o $order $prune -S 20% --discount_fallback >$arpa_out)
 rm $output.corpus.tmp
 
 if [ $arpa == "True" ]; then
