@@ -65,7 +65,12 @@ else
     python utils/readtextbin.py $textbin \
         -o $output.corpus.tmp --map 0: 1:
 fi
-lmplz <$output.corpus.tmp -o $order $prune -S 20% --discount_fallback >$arpa_out
+
+# NOTE: if lmplz raises error telling the counts of n-grams are not enough,
+# you should probably duplicate your text corpus or add the option --discount_fallback
+# Error msg sample:
+# "ERROR: 3-gram discount out of range for adjusted count 3: -5.2525253."
+lmplz <$output.corpus.tmp -o $order $prune -S 20% >$arpa_out
 rm $output.corpus.tmp
 
 if [ $arpa == "True" ]; then
