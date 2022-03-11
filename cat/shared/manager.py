@@ -12,9 +12,11 @@ from .monitor import MonitorWriter, BASE_METRIC
 
 import os
 import argparse
+import random
 import time
 import json
 import shutil
+import webdataset as wds
 from collections import OrderedDict
 from typing import Callable, Union, Iterable, Optional, List
 from datetime import datetime
@@ -48,30 +50,67 @@ class Manager(object):
                                   'logsdir', 'resume', 'init_model'])
 
         # setup dataloader
-        tr_set = Dataset(args.trset)
         val_set = Dataset(args.devset)
 
         setattr(args, 'n_steps', 0)
-        if args.databalance:
-            utils.distprint(
-                "> Enable data balanced loading\n"
-                "  this takes a while for large dataset.", args.gpu)
-            train_sampler = BalancedDistributedSampler(
-                tr_set, args.batch_size, args.len_norm, local_rank=args.gpu)
-            trainloader = DataLoader(
-                tr_set, batch_sampler=train_sampler,
-                num_workers=args.workers, collate_fn=collate_fn,
-                prefetch_factor=4, persistent_workers=True)
-            utils.distprint(
-                "> Seq length info for balanced loading generated.", args.gpu)
-            args.n_steps = train_sampler.total_size//args.batch_size//args.grad_accum_fold
+        if args.large_dataset:
+            # ref: https://github.com/tmbdev-archive/webdataset-examples/blob/master/main-wds.py
+            # NOTE (Huahuan):
+            # Explicitly setting 'RANK' and 'WORLD_SIZE' is useful for webdataset to
+            # recognize the DDP. Without the setting, data in all nodes are the same.
+            # I guess this is a bug of WebDataset.
+            os.environ['RANK'] = str(dist.get_rank())
+            os.environ['WORLD_SIZE'] = str(dist.get_world_size())
+            tr_set = (wds.WebDataset(
+                args.trset,
+                shardshuffle=True,
+                nodesplitter=wds.shardlists.split_by_node)
+                # buffer size of shuffling
+                .shuffle(2000)
+                .decode()
+                .to_tuple("mat.npy", "label.npy")
+                # set partial=False to avoid a partial batch, but would drop a few of data, see bellow disscussion.
+                .batched(args.batch_size//dist.get_world_size(), collation_fn=collate_fn, partial=False))
+            args.batch_size = (args.batch_size //
+                               dist.get_world_size()) * dist.get_world_size()
+            trainloader = wds.WebLoader(
+                tr_set, num_workers=1, shuffle=False,
+                # batching is done by webdataset
+                batch_size=None)
+            '''
+            In DDP, commonly, all nodes should get the same size of batches, however, 
+            the data size might not be divisible to the num_nodes as well as the batch size.
+            so we just drop a few of data every epoch. This won't affect much since we usually 
+            train lots of epochs. And if you're concerned about that, duplicating part of the dataset to 
+            allow it fitting the size is OK. But that would require knowing the size of dataset and is somewhat more complicated.
+            '''
+
+            # we don't know the size of dataset, just set a value large enough
+            args.n_steps = int(1e4)
+            train_sampler = None
         else:
-            train_sampler = DistributedSampler(tr_set)
-            trainloader = DataLoader(
-                tr_set, batch_size=args.batch_size//dist.get_world_size(), shuffle=False,
-                num_workers=args.workers, sampler=train_sampler, collate_fn=collate_fn,
-                prefetch_factor=4, persistent_workers=True)
-            args.n_steps = len(trainloader)//args.grad_accum_fold
+            tr_set = Dataset(args.trset)
+
+            if args.databalance:
+                utils.distprint(
+                    "> Enable data balanced loading\n"
+                    "  this takes a while for large dataset.", args.gpu)
+                train_sampler = BalancedDistributedSampler(
+                    tr_set, args.batch_size, args.len_norm, local_rank=args.gpu)
+                trainloader = DataLoader(
+                    tr_set, batch_sampler=train_sampler,
+                    num_workers=args.workers, collate_fn=collate_fn,
+                    prefetch_factor=4, persistent_workers=True)
+                utils.distprint(
+                    "> Seq length info for balanced loading generated.", args.gpu)
+                args.n_steps = train_sampler.total_size//args.batch_size//args.grad_accum_fold
+            else:
+                train_sampler = DistributedSampler(tr_set)
+                trainloader = DataLoader(
+                    tr_set, batch_size=args.batch_size//dist.get_world_size(), shuffle=False,
+                    num_workers=args.workers, sampler=train_sampler, collate_fn=collate_fn,
+                    prefetch_factor=4, persistent_workers=True)
+                args.n_steps = len(trainloader)//args.grad_accum_fold
 
         val_sampler = DistributedSampler(val_set, shuffle=False)
         valloader = DataLoader(
@@ -165,7 +204,10 @@ class Manager(object):
         self.model.train()
         while True:
             self.epoch += 1
-            self.train_sampler.set_epoch(self.epoch)
+            if self.train_sampler is None:
+                pass
+            else:
+                self.train_sampler.set_epoch(self.epoch)
 
             self.train(self.trainloader, args, self)
 
@@ -336,8 +378,13 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
     t_data = 0.
     t_last_step = time.time()
     t_last_batch = time.time()
+    quit_flag = torch.tensor(0, device=args.gpu)
     for i, minibatch in tqdm(enumerate(trainloader), desc=f'Epoch {manager.epoch} | train',
                              unit='batch', total=fold*args.n_steps, disable=(args.gpu != 0 or args.verbose), leave=False):
+
+        dist.all_reduce(quit_flag, op=dist.ReduceOp.MAX)
+        if quit_flag:
+            break
 
         features, input_lengths, labels, label_lengths = minibatch
         # since the gradient fold could be > 1, we need to accumulate the time
@@ -413,6 +460,12 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
         if args.verbose:
             t_last_batch = time.time()
 
+    if not quit_flag:
+        # set quit flag to True
+        quit_flag += 1
+        # wait until other processes quit
+        dist.all_reduce(quit_flag, op=dist.ReduceOp.MAX)
+
 
 @torch.no_grad()
 def evaluate(testloader, args: argparse.Namespace, manager: Manager) -> float:
@@ -420,8 +473,13 @@ def evaluate(testloader, args: argparse.Namespace, manager: Manager) -> float:
     model = manager.model
     cnt_seq = 0
     total_loss = 0.
+    if isinstance(testloader, wds.WebDataset):
+        total_size = 10000
+    else:
+        total_size = len(testloader)
+
     for i, minibatch in tqdm(enumerate(testloader), desc=f'Epoch {manager.epoch} | eval',
-                             unit='batch', total=len(testloader), disable=(args.gpu != 0), leave=False):
+                             unit='batch', total=total_size, disable=(args.gpu != 0), leave=False):
         if args.debug and i >= 20:
             dist.barrier()
             break

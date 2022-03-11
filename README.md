@@ -38,6 +38,9 @@
    ```bash
    cd Transducer-dev/
    pip install -r requirements.txt
+
+   # install webdataset from github source, DO NOT install from pypi, it's too old.
+   pip install git+ssh://git@github.com/webdataset/webdataset.git
    ```
 
 3. Building packages from source:

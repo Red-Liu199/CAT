@@ -291,6 +291,8 @@ def build_model(args, configuration: dict, dist: bool = True, verbose: bool = Tr
 
 def RNNTParser():
     parser = utils.BasicDDPParser("RNN-Transducer training")
+    parser.add_argument("--large-dataset", action="store_true",
+                        help="Use webdataset to load data in POSIX tar format. Be careful with this option, it would change many things than you might think.")
     return parser
 
 

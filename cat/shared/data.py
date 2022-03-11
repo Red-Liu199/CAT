@@ -17,7 +17,6 @@ import pickle
 import math
 import hashlib
 import numpy as np
-from collections import OrderedDict
 from typing import Tuple, Sequence, List, Optional, Union, Dict
 
 import torch
@@ -298,6 +297,9 @@ class sortedPadCollateTransducer():
     """
 
     def __call__(self, batch):
+        if isinstance(batch[0][0], np.ndarray):
+            batch = [(torch.as_tensor(mat), torch.as_tensor(label))
+                     for mat, label in batch]
         batches = [(mat, label, mat.size(0))
                    for mat, label in batch]
         batch_sorted = sorted(batches, key=lambda item: item[2], reverse=True)
