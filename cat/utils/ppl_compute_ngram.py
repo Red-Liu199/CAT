@@ -32,7 +32,8 @@ def evaluate(model, dataset: str, idx_beg: int, idx_end: int) -> Tuple[float, in
         inputs, targets = testdata[i]
         scores = model.score(inputs.unsqueeze(0), targets.unsqueeze(0))
         log_probs += scores
-        n_tokens += inputs.size(0)
+        # </s> is not included in inputs, so we need to add one for ppl calculation
+        n_tokens += inputs.size(0) + 1
 
     return (log_probs.item(), n_tokens)
 
@@ -105,7 +106,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("dir", type=str, help="Location of directory.")
     parser.add_argument("-e", "--evaluate", type=str, nargs='*',
-                        help="Evaluate test sets.")
+                        help="Evaluate test sets. w/o --tokenizer, -e inputs are assumed to be CorpusDataset format binary data.")
     parser.add_argument("--tokenizer", type=str,
                         help="Use tokenizer to encode the evaluation sets. If passed, would take -e inputs as text files.")
     args = parser.parse_args()
