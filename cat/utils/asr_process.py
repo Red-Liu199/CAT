@@ -320,9 +320,14 @@ def updateNamespaceFromDict(src_dict: dict, parser: argparse.ArgumentParser, pos
     return to_args
 
 
-def generate_visible_gpus(N: int) -> str:
+def set_visible_gpus(N: int) -> str:
     assert N >= 0
-    return ','.join([str(i) for i in range(N)])
+    if 'CUDA_VISIBLE_DEVICES' not in os.environ:
+        os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(str(i) for i in range(N))
+    else:
+        seen_gpus = os.environ['CUDA_VISIBLE_DEVICES'].split(',')
+        os.environ['CUDA_VISIBLE_DEVICES'] = ','.join(seen_gpus[:N])
+    return os.environ['CUDA_VISIBLE_DEVICES']
 
 
 def get_free_port():
@@ -344,8 +349,7 @@ def TrainNNModel(
     assert 'train' in settings, promt.format("missing 'train' in hyper-p")
 
     if args.ngpu > -1:
-        os.environ['CUDA_VISIBLE_DEVICES'] = \
-            generate_visible_gpus(args.ngpu)
+        set_visible_gpus(args.ngpu)
 
     if 'tokenizer' not in settings:
         sys.stderr.write(

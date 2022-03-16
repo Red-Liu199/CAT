@@ -25,7 +25,20 @@ def main(args: argparse):
         f"--search    {args.search}")
     assert all([(x == 0) or (x == 1) for x in args.search])
     num_param_search = sum(args.search)
-    assert num_param_search <= 2 and num_param_search >= 1
+    assert num_param_search >= 1, f"you should at least specify one parameter for searching, instead: {args.search}"
+
+    params = {}
+    if len(args.range) == 2:
+        params.update({'range': [args.range for _ in range(num_param_search)]})
+    elif len(args.range) / num_param_search == 2:
+        params.update({'range': [args.range[2*i:2*i+2]
+                      for i in range(num_param_search)]})
+    else:
+        raise ValueError(
+            "invalid --range, expected one of these:\n"
+            "1. '--range a b' setup range of all searching params to [a, b]\n"
+            "2. '--range a_0 b_0 a_1 b_1 ... a_N b_N', setup range [a_0, b_0] for param0, ... [a_N, b_N] for param N.\n"
+            f"However, given {num_param_search} params to search, your input is: '--range {' '.join(str(x) for x in args.range)}'")
 
     num_param_fixed = len(args.nbestlist) - num_param_search
     if num_param_fixed > 0:
@@ -88,10 +101,18 @@ def main(args: argparse):
                        key=lambda k: _searchout[k]['wer'])  # type: str
         return [float(x) for x in _metrics.split(':')]
 
-    params = {
-        'range': [args.a_range, args.b_range],
-        'interval': [args.a_interval, args.b_interval]
-    }
+    if isinstance(args.interval, float) or len(args.interval) == 1:
+        params.update(
+            {'interval': [args.interval for _ in range(num_param_search)]})
+    elif len(args.range) == num_param_search:
+        params.update({'interval': args.interval})
+    else:
+        raise ValueError(
+            "invalid --interval, expected one of these:\n"
+            "1. '--interval i' setup interval of all searching params to i\n"
+            "2. '--interval i_0 i_1 ... i_N', setup interval i_0 for param0, ... i_N for param N.\n"
+            f"However, given {num_param_search} params to search, your input is: '--interval {' '.join(str(x) for x in args.range)}'")
+
     n_iter = 1
     tuned_metric = [sum(params['range'][idx]) /
                     2 for idx in range(num_param_search)]
@@ -150,17 +171,11 @@ if __name__ == "__main__":
     parser.add_argument("--weight", type=float, nargs='*',
                         help="Weights of fixed parts, # which should be the same as # '0' in --search. defaults are all 1.0.")
     parser.add_argument(
-        "--a-range", type=float, nargs=2, default=[0.0, 1.0],
-        help="Range of param-a."
+        "--range", type=float, nargs='+', default=[0., 1.],
+        help="Range of parameter searching."
     )
-    parser.add_argument(
-        "--b-range", type=float, nargs=2, default=[-1.0, 1.0],
-        help="Range of param-b."
-    )
-    parser.add_argument("--a-interval", type=float,
-                        default=0.02, help="Minimal interval of param-a")
-    parser.add_argument("--b-interval", type=float,
-                        default=0.2, help="Minimal interval of param-b")
+    parser.add_argument("--interval", type=float, nargs='+', default=0.1,
+                        help="Minimal interval of parameter searching.")
     parser.add_argument("--ground-truth", type=str,
                         help="WER.py: Ground truth text file.")
     parser.add_argument("--cer", action="store_true", default=False,
