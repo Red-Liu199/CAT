@@ -33,7 +33,8 @@ if [ "$prune" ]; then
     prune="--prune $prune"
 fi
 
-export arpa_out=${output}.arpa.tmp
+export text_out="/tmp/$(tr -dc A-Za-z0-9 </dev/urandom | head -c 13 ; echo '').corpus.tmp"
+export arpa_out="/tmp/$(tr -dc A-Za-z0-9 </dev/urandom | head -c 13 ; echo '').arpa.tmp"
 
 # we need to manually rm the bos/eos/unk since lmplz tool would add them
 # and kenlm not support <unk> in corpus,
@@ -51,7 +52,7 @@ if [ $large_corpus == "True" ]; then
         [ ! -f $x ] && echo "No such training corpus: '$x'" && exit 1
     done
 
-    python utils/readtextbin.py $f_text -o $output.corpus.tmp \
+    python utils/readtextbin.py $f_text -o $text_out \
         -t --tokenizer $tokenizer --map 0: 1:
 else
     textbin=$dir/lmbin/train.pkl
@@ -63,16 +64,16 @@ else
 
     [ ! -f $textbin ] && echo "No binary text file: '$textbin'" && exit 1
     python utils/readtextbin.py $textbin \
-        -o $output.corpus.tmp --map 0: 1:
+        -o $text_out --map 0: 1:
 fi
 
 # NOTE: if lmplz raises error telling the counts of n-grams are not enough,
 # you should probably duplicate your text corpus or add the option --discount_fallback
 # Error msg sample:
 # "ERROR: 3-gram discount out of range for adjusted count 3: -5.2525253."
-(lmplz <$output.corpus.tmp -o $order $prune -S 20% >$arpa_out) ||
-    (lmplz <$output.corpus.tmp -o $order $prune -S 20% --discount_fallback >$arpa_out)
-rm $output.corpus.tmp
+(lmplz <$text_out -o $order $prune -S 20% >$arpa_out) ||
+    (lmplz <$text_out -o $order $prune -S 20% --discount_fallback >$arpa_out)
+rm $text_out
 
 if [ $arpa == "True" ]; then
     mv $arpa_out $output

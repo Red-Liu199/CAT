@@ -166,14 +166,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--nbestlist", type=str, nargs='+',
                         help="N-best list files")
-    parser.add_argument(
-        "--search", type=int, nargs='+', choices=[0, 1], help="Flag of whether search weight of the file or not. ")
+    parser.add_argument("--search", type=int, nargs='+', choices=[0, 1], default=[0],
+                        help="Flag of whether search weight of the file or not. ")
     parser.add_argument("--weight", type=float, nargs='*',
                         help="Weights of fixed parts, # which should be the same as # '0' in --search. defaults are all 1.0.")
-    parser.add_argument(
-        "--range", type=float, nargs='+', default=[0., 1.],
-        help="Range of parameter searching."
-    )
+    parser.add_argument("--range", type=float, nargs='+', default=[0., 1.],
+                        help="Range of parameter searching.")
     parser.add_argument("--interval", type=float, nargs='+', default=0.1,
                         help="Minimal interval of parameter searching.")
     parser.add_argument("--ground-truth", type=str,

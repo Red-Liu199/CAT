@@ -63,8 +63,8 @@ def main(args: argparse.Namespace):
             if add_tip:
                 dest_nbest = nbest_add_ins_penalty_(
                     dest_nbest, args.ins_penalty, tokenizer)
-            continue
-        dest_nbest = nbest_add_with_scale_(dest_nbest, part_nbest, weight)
+        elif weight != 0.0:
+            dest_nbest = nbest_add_with_scale_(dest_nbest, part_nbest, weight)
 
     if args.one_best:
         one_best = {}
@@ -82,7 +82,7 @@ def GetParser():
     parser.add_argument("output", type=str, help="Path to the output file.")
     parser.add_argument("--nbestlist", nargs='+', type=str,
                         help="N-best list files.")
-    parser.add_argument("--weights", nargs='+', type=float,
+    parser.add_argument("--weights", nargs='+', type=float, default=[1.0],
                         help="Weights for the n-best list files. Should be of equal number.")
     parser.add_argument("--one-best", action="store_true",
                         help="Output the 1-best path of the nbest list, instead the whole nbest list.")

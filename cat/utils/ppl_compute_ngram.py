@@ -33,7 +33,7 @@ def evaluate(model, dataset: str, idx_beg: int, idx_end: int) -> Tuple[float, in
         scores = model.score(inputs.unsqueeze(0), targets.unsqueeze(0))
         log_probs += scores
         # </s> is not included in inputs, so we need to add one for ppl calculation
-        n_tokens += inputs.size(0) + 1
+        n_tokens += inputs.size(0)
 
     return (log_probs.item(), n_tokens)
 
