@@ -402,6 +402,9 @@ class NGram(AbsDecoder):
         return log_prob
 
     def forward(self, src_ids: torch.Tensor, hidden: torch.Tensor = None, input_lengths: Optional[torch.Tensor] = None):
+        """This is non-standar interface, only designed for inference. The n-gram model will take input as context and 
+            predict the probability for next token, so the output is always (N, 1, V)
+        """
         if self.training:
             raise NotImplementedError(
                 "N-gram model doesn't support training like NN model.")
@@ -427,7 +430,7 @@ class NGram(AbsDecoder):
             for tok in self.vocab.values():
                 pred_logp[b].append(update_state(self.ngram, state, tok)[0])
 
-        return self.scale*self.scale.new_tensor(pred_logp), input_ids
+        return self.scale*self.scale.new_tensor(pred_logp).unsqueeze(1), input_ids
 
     @staticmethod
     def batching_states(states: List[AbsStates]) -> AbsStates:

@@ -13,12 +13,16 @@
         "filter": ":1000",
         "lang": "zh-cn"
     },
-    "sp": {
-        "model_type": "char",
-        "add_dummy_prefix": false,
-        "use_all_vocab": true,
-        "model_prefix": "sentencepiece/wenetspeech_char/spm",
-        "vocab_size": 5147
+    "tokenizer": {
+        "type": "SentencePieceTokenizer",
+        "property": {
+            "model_type": "char",
+            "add_dummy_prefix": false,
+            "use_all_vocab": true,
+            "model_prefix": "sentencepiece/wenetspeech_char/spm",
+            "vocab_size": 5147
+        },
+        "location": "exp/rnnt-v1/tokenizer.tknz"
     },
     "topo": "ctc",
     "train": {
@@ -34,14 +38,10 @@
             "mode": "best",
             "num": 10
         },
-        "search-hyper": true,
         "decode": {
-            "beam_size": 16,
-            "nj": 20,
-            "lm-path": "exp/lm-trans/5gram.klm",
-            "resume": "exp/ctc-v1/checks/best-10.pt",
-            "alpha": 0.125,
-            "beta": 2.90625
+            "beam-size": 128,
+            "nj": 80,
+            "resume": "exp/ctc-v1/checks/best-10.pt"
         },
         "er": {
             "mode": "cer",

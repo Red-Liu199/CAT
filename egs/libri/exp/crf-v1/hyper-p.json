@@ -18,8 +18,7 @@
         "grad-norm": 5.0,
         "databalance": true,
         "checkall": true,
-        "amp": true,
-        "resume": "exp/crf-v1/checks/checkpoint.193.pt"
+        "amp": true
     },
-    "commit": "94645a1e7f55803c787bc754dc1c7347bb3dd0f8"
+    "commit": "c2ed81fb61f91da1e68870b953fb89937846ebd4"
 }

@@ -56,7 +56,7 @@ def main(args: argparse):
                 f"--weight {weight_fixed}\n"
                 f"--search {args.search}")
 
-        if len(f_nbest_fixed) == 1:
+        if len(f_nbest_fixed) == 1 and weight_fixed[0] == 1.0:
             shutil.copyfile(f_nbest_fixed[0], cache_file)
         else:
             interpolate_main(updateNamespaceFromDict(
@@ -102,6 +102,8 @@ def main(args: argparse):
         return [float(x) for x in _metrics.split(':')]
 
     if isinstance(args.interval, float) or len(args.interval) == 1:
+        args.interval = args.interval if isinstance(
+            args.interval, float) else args.interval[0]
         params.update(
             {'interval': [args.interval for _ in range(num_param_search)]})
     elif len(args.range) == num_param_search:

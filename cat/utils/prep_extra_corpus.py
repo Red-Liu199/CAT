@@ -63,6 +63,6 @@ if __name__ == "__main__":
         except IOError:
             exit(0)
 
-    if cnt < num_lines:
+    if cnt < num_lines and args.num_lines is not None:
         raise RuntimeError(
             f"Source corpus text doesn't have enough unique lines to export: {cnt} in total, expect {num_lines}")
