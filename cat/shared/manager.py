@@ -86,7 +86,7 @@ class Manager(object):
             '''
 
             # we don't know the size of dataset, just set a value large enough
-            args.n_steps = int(1e4)
+            args.n_steps = int(35000)
             train_sampler = None
         else:
             tr_set = Dataset(args.trset)
@@ -473,13 +473,9 @@ def evaluate(testloader, args: argparse.Namespace, manager: Manager) -> float:
     model = manager.model
     cnt_seq = 0
     total_loss = 0.
-    if isinstance(testloader, wds.WebDataset):
-        total_size = 10000
-    else:
-        total_size = len(testloader)
 
     for i, minibatch in tqdm(enumerate(testloader), desc=f'Epoch {manager.epoch} | eval',
-                             unit='batch', total=total_size, disable=(args.gpu != 0), leave=False):
+                             unit='batch', total=len(testloader), disable=(args.gpu != 0), leave=False):
         if args.debug and i >= 20:
             dist.barrier()
             break
