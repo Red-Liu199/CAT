@@ -1,7 +1,7 @@
 """Process of LM training
 """
 
-from asr_process import (
+from pipeline_asr import (
     checkExist,
     combineText,
     updateNamespaceFromDict,
@@ -184,7 +184,11 @@ if __name__ == "__main__":
                 f"warning: no 'lmbin/test-*.pkl' match found in {args.expdir}\n"
             )
         for sub_set in eval_sets:
+            hyper_settings['train']['databalance'] = False
             hyper_settings['train']['eval'] = sub_set
+            # this is a hack avoid file checking fail
+            hyper_settings['train']['trset'] = sub_set
+            hyper_settings['train']['devset'] = sub_set
             sys.stdout.write(fmt.format(
                 f"evaluate testset: {sub_set}"
             ))

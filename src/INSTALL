@@ -1,18 +1,12 @@
 # Fetch modules
 git submodule update --init --recursive
 
-# warp-rnnt >= 0.7.1
+# warp-rnnt >= 0.7.2
 cd warp-rnnt/pytorch_binding/
-git checkout -t origin/dev
 python setup.py install
 cd ../../
 
-# warp-rna >= 0.3.0
-cd warp-rna/pytorch_binding/
-python setup.py install
-cd ../../
-
-# gather >= 0.2.1
+# gather >= 0.2.2
 cd torch-gather/
 python setup.py install
 cd ../

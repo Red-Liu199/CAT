@@ -1,0 +1,63 @@
+{
+    "specaug_config": {
+        "apply_freq_mask": true,
+        "apply_time_mask": true,
+        "apply_time_warp": false,
+        "freq_mask_width_range": [
+            0,
+            0.15
+        ],
+        "num_freq_mask": 2,
+        "time_mask_width_range": [
+            0,
+            0.1
+        ],
+        "num_time_mask": 5
+    },
+    "decoder": {
+        "type": "LSTMPredictNet",
+        "kwargs": {
+            "hdim": 512,
+            "num_classes": 4,
+            "with_head": false
+        }
+    },
+    "encoder": {
+        "type": "LSTM",
+        "kwargs": {
+            "bidirectional": true,
+            "dropout": 0.2,
+            "hdim": 512,
+            "idim": 80,
+            "n_layers": 2,
+            "num_classes": 4,
+            "with_head": false
+        }
+    },
+    "joint": {
+        "type": "JointNet",
+        "kwargs": {
+            "odim_decoder": 512,
+            "odim_encoder": 1024,
+            "num_classes": 4
+        }
+    },
+    "transducer": {
+        "compact": true,
+        "fused": true
+    },
+    "scheduler": {
+        "type": "SchedulerIterAnnealing",
+        "kwargs": {
+            "epoch_max": 15,
+            "decay_factor": 0.9
+        },
+        "optimizer": {
+            "use_zero": true,
+            "type": "Adam",
+            "kwargs": {
+                "lr": 0.001
+            }
+        }
+    }
+}

@@ -35,12 +35,9 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         world_size=args.world_size, rank=args.rank)
 
     if args.eval is not None:
-        if ngpus_per_node > 1:
-            utils.distprint(
-                "worlsize > 1 might lead to incorrect ppl calculation.", args.gpu)
+        args.databalance = False
         args.trset = args.eval
         args.devset = args.eval
-        args.batch_size = dist.get_world_size()
         if args.resume is None:
             utils.distprint(
                 "You're trying to evalute over the data with untrained model.", args.gpu)
@@ -83,7 +80,11 @@ class LMTrainer(nn.Module):
 
 @torch.no_grad()
 def evaluate(*args) -> float:
-    return math.exp(default_eval(*args))
+    celoss = default_eval(*args)
+    try:
+        return math.exp(celoss)
+    except OverflowError:
+        return float('inf')
 
 
 def build_model(args, configuration, dist=True, wrapper=True) -> Union[LMTrainer, AbsDecoder]:

@@ -38,10 +38,11 @@
         },
         "decode": {
             "algo": "rna",
-            "beam-size": 16,
+            "beam-size": 128,
             "cpu": true,
-            "nj": 40,
-            "resume": "exp/rnnt-v1/checks/best-10.pt"
+            "nj": 80,
+            "resume": "exp/rnnt-v1/checks/best-10.pt",
+            "estimate-ILM": true
         },
         "er": {
             "mode": "cer",

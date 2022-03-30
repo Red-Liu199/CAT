@@ -233,11 +233,9 @@ def build_model(args, device) -> Tuple[torch.nn.Module, Union[torch.nn.Module, N
     model = utils.load_checkpoint(model, args.resume)
     model.eval()
 
-    if args.alpha is None or args.lm_config is None or args.lm_check is None:
+    if args.lm_config is None:
         return model, None
     else:
-        assert args.lm_check is not None
-
         with open(args.lm_config, 'r') as fi:
             lm_configures = json.load(fi)
         ext_lm_model = lm_builder(args, lm_configures, dist=False)

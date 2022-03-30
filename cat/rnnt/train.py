@@ -20,19 +20,19 @@ from ..shared.data import (
 from . import joint as joint_zoo
 from .joint import (
     PackedSequence,
-    AbsJointNet,
-    DenormalJointNet
+    JointNet,
+    AbsJointNet
 )
 
 import os
+import gather
 import argparse
 from collections import OrderedDict
 from warp_rnnt import rnnt_loss as RNNTLoss
 import warp_rnnt
 if warp_rnnt.__version__ >= '0.7.1':
     from warp_rnnt import fused_rnnt_loss_ as RNNTFusedLoss
-from warp_rna import rna_loss as RNALoss
-from typing import Union
+from typing import Union, Optional
 
 import torch
 import torch.nn as nn
@@ -62,16 +62,20 @@ class TransducerTrainer(nn.Module):
                  encoder: nn.Module = None,
                  decoder: AbsDecoder = None,
                  jointnet: AbsJointNet = None,
+                 # enable compact layout, would consume less memory and fasten the computation of RNN-T loss.
                  compact: bool = False,
+                 # enable fused mode for RNN-T loss computation, which would consume less memory but take a little more time
                  fused: bool = False,
-                 isrna: bool = False,
+                 # weight of ILME loss to conduct joint-training
+                 ilme_loss: Optional[float] = None,
+                 # insert sub-sampling layer between encoder and joint net
                  time_reduction: int = 1,
+                 # add mask to decoder output, this specifies the range of mask
                  decoder_mask_range: float = 0.1,
+                 # add mask to decoder output, this specifies the # mask
                  num_decoder_mask: int = -1,
                  bos_id: int = 0):
         super().__init__()
-        if isrna:
-            assert not compact and not fused, f"RNA Loss currently doesn't support compact and fused mode yet."
 
         if fused and not jointnet.is_normalize_separated:
             raise RuntimeError(
@@ -81,9 +85,22 @@ class TransducerTrainer(nn.Module):
                 "TransducerTrainer: setting fused=True and compact=False is conflict. Force compact=True")
             compact = True
 
+        self.ilme_weight = 0.0
+        if ilme_loss is not None and ilme_loss != 0.0:
+            if not isinstance(jointnet, JointNet):
+                raise NotImplementedError(
+                    f"TransducerTrainer: \n"
+                    f"ILME loss joint training only support joint network 'JointNet', instead of {jointnet.__class__.__name__}")
+            assert jointnet.fc_dec is not None, "TransducerTrainer: are you using jointnet with \"joint_mode='cat'\"? This is not supported yet."
+            self.register_buffer(
+                "_dummy_h_enc_ilme_loss",
+                torch.zeros(1, 1, jointnet.fc_enc.in_features),
+                persistent=False)
+            self._ilme_criterion = nn.CrossEntropyLoss()
+            self.ilme_weight = ilme_loss
+
         self.isfused = fused
         self._compact = compact
-        self.isrna = isrna
 
         self.encoder = encoder
         self.decoder = decoder
@@ -136,33 +153,56 @@ class TransducerTrainer(nn.Module):
                     packed_enc, packed_dec)
             else:
                 joint_out = self.joint(packed_enc, packed_dec)
-            targets = PackedSequence(targets, target_lengths).data
+            # squeeze targets to 1-dim
+            targets = PackedSequence(targets, target_lengths).data.squeeze(1)
         else:
             joint_out = self.joint(output_encoder, output_decoder)
 
-        return joint_out, targets, o_lens, target_lengths
+        if self.ilme_weight != 0.0:
+            return joint_out, targets, o_lens, target_lengths, output_decoder
+        else:
+            return joint_out, targets, o_lens, target_lengths
 
     def forward(self, inputs: torch.FloatTensor, targets: torch.LongTensor, input_lengths: torch.LongTensor, target_lengths: torch.LongTensor) -> torch.FloatTensor:
 
-        joint_out, targets, o_lens, target_lengths = self.impl_forward(
+        tupled_jointout = self.impl_forward(
             inputs, targets, input_lengths, target_lengths)
 
-        if isinstance(joint_out, tuple):
-            joint_out = joint_out[0]
-
+        joint_out, targets, o_lens, target_lengths = tupled_jointout[:4]
+        
+        loss = 0.0
+        if self.ilme_weight != 0.0:
+            # calculate the ILME ILM loss
+            # h_decoder_out: (N, U+1, H)
+            h_decoder_out = tupled_jointout[4]
+            # ilm_log_probs: (N, 1, U, V) -> (N, U, V)
+            ilm_log_probs = self.joint(
+                self._dummy_h_enc_ilme_loss.expand(
+                    h_decoder_out.size(0), -1, -1),
+                h_decoder_out[:, :-1, :]).squeeze(1)
+            # ilm_log_probs: (N, U, V) -> (\sum(U_i), V)
+            ilm_log_probs = gather.cat(ilm_log_probs, target_lengths)
+            if targets.dim() == 2:
+                # normal layout -> compact layout
+                # ilm_targets: (\sum{U_i}, )
+                ilm_targets = torch.cat(
+                    [targets[n, :target_lengths[n]] for n in range(h_decoder_out.size(0))], dim=0)
+            elif targets.dim() == 1:
+                ilm_targets = targets
+            else:
+                raise ValueError(
+                    f"{self.__class__.__name__}: invalid dimension of targets '{targets.dim()}', expected 1 or 2.")
+            
+            loss += self.ilme_weight * self._ilme_criterion(ilm_log_probs, ilm_targets)
+        
         with autocast(enabled=False):
-            if self.isrna:
-                loss = RNALoss(joint_out.float(), targets.to(dtype=torch.int),
-                               o_lens.to(device=joint_out.device,
-                                         dtype=torch.int),
-                               target_lengths.to(device=joint_out.device, dtype=torch.int), reduction='mean')
-            elif self.isfused:
-                loss = RNNTFusedLoss(joint_out.float(), targets.to(dtype=torch.int32),
+            if self.isfused:
+                loss += RNNTFusedLoss(joint_out.float(), targets.to(dtype=torch.int32),
                                      o_lens.to(device=joint_out.device,
                                                dtype=torch.int32),
                                      target_lengths.to(device=joint_out.device, dtype=torch.int32), reduction='mean')
             else:
-                loss = RNNTLoss(joint_out.float(), targets.to(dtype=torch.int32),
+                loss += RNNTLoss(joint_out.float(), targets.to(dtype=torch.int32),
                                 o_lens.to(device=joint_out.device, dtype=torch.int32), target_lengths.to(
                                     device=joint_out.device, dtype=torch.int32),
                                 reduction='mean', gather=True, compact=self._compact)

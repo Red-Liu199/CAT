@@ -2,8 +2,8 @@
 
 ```
 PPL
-Test set: exp/lm-tlv2//lmbin/test-data_tlv2_dev_txt.pkl -> ppl: 27.67
-Test set: exp/lm-tlv2//lmbin/test-data_tlv2_test_txt.pkl -> ppl: 27.58
+Test set: exp/lm-tlv2//lmbin/test-data_tlv2_dev_txt.pkl -> ppl: 26.24
+Test set: exp/lm-tlv2//lmbin/test-data_tlv2_test_txt.pkl -> ppl: 25.49
 ```
 
 ### LM adaptation
@@ -12,7 +12,7 @@ Test set: exp/lm-tlv2//lmbin/test-data_tlv2_test_txt.pkl -> ppl: 27.58
 * CRF: `crf-v1`
 
 ```
-
+outdated
 RNNT+lm-tlv2 tlv2 trans tuned
 tlv2-dev	%SER 84.62 | %WER 10.82 [ 1925 / 17783, 463 ins, 318 del, 1144 sub ]    0.5     1.0
 tlv2-test	%SER 74.11 | %WER 10.23 [ 2813 / 27500, 453 ins, 624 del, 1736 sub ]    0.5625  1.5
