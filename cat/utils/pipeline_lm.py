@@ -1,7 +1,7 @@
 """Process of LM training
 """
 
-from asr_process import (
+from pipeline_asr import (
     checkExist,
     combineText,
     updateNamespaceFromDict,

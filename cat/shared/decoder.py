@@ -409,9 +409,9 @@ class NGram(AbsDecoder):
             raise NotImplementedError(
                 "N-gram model doesn't support training like NN model.")
 
-        if input_lengths is not None:
+        if input_lengths is not None and src_ids.size(0) > 1:
             raise NotImplementedError(
-                "N-gram model for long sequences likelihood calculation is of poor efficiency.")
+                "N-gram model for batched sequences likelihood calculation is of poor efficiency.")
 
         B = src_ids.size(0)
         if hidden is not None:
@@ -480,6 +480,41 @@ class ZeroDecoder(AbsDecoder):
 
     def init_states(self, N: int = 1) -> 'AbsStates':
         return AbsStates(None, ZeroDecoder)
+
+
+class ILM(AbsDecoder):
+    """
+    ILM estimation of RNN-T, referring to
+    "Internal Language Model Estimation for Domain-Adaptive End-to-End Speech Recognition"
+    https://arxiv.org/abs/2011.01991
+    """
+
+    def __init__(self, f_rnnt_config: str, f_check: str):
+        super().__init__(1, 1)
+        del self.embedding
+        del self.classifier
+        import json
+        from cat.rnnt import rnnt_builder
+        from cat.shared import coreutils
+        with open(f_rnnt_config, 'r') as fi:
+            configuration = json.load(fi)
+        rnntmodel = rnnt_builder(
+            None, configuration, dist=False, verbose=False)
+        coreutils.load_checkpoint(rnntmodel, f_check)
+        self._stem = rnntmodel.decoder
+        self._head = rnntmodel.joint
+        self._dim_enc_out = configuration['joint']['kwargs']['odim_encoder']
+        del rnntmodel
+
+    def forward(self, x, input_lengths):
+        # [N, U, H]
+        decoder_out, _ = self._stem(x, input_lengths=input_lengths)
+        # [N, U, H] + [N, 1, H] -> [N, 1, U, V] -> [N, U, V]
+        logits = self._head.impl_forward(
+            decoder_out.new_zeros((decoder_out.size(0), 1, self._dim_enc_out)),
+            decoder_out).squeeze(1)
+        logits[:, :, 0].fill_(logits.min() - 1e9)
+        return logits, None
 
 
 def init_state(model: kenlm.Model, pre_toks: List[str]):

@@ -1,7 +1,7 @@
 """Ported from run_rnnt.sh, rewrote with python
 
 Uage:
-    python utils/asr_process.py
+    python utils/pipeline_asr.py
 """
 
 

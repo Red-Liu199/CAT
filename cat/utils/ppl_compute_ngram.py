@@ -43,7 +43,7 @@ def unpack_args(args):
 
 
 def text2corpusbin(f_text: str, f_bin: str, tokenizer):
-    from asr_process import updateNamespaceFromDict
+    from pipeline_asr import updateNamespaceFromDict
     from transText2Bin import main as t2bmain
     from transText2Bin import TextProcessingParser as t2bparser
 

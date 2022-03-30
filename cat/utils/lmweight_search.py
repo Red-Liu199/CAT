@@ -11,7 +11,7 @@ from typing import Union, Dict
 
 from interpolate_nbests import GetParser as InterpolateParser
 from interpolate_nbests import main as interpolate_main
-from asr_process import updateNamespaceFromDict
+from pipeline_asr import updateNamespaceFromDict
 
 from wer import WERParser
 from wer import main as WERMain

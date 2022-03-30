@@ -25,7 +25,7 @@ export PATH=$PATH:../../src/bin/
 [ ! -d $dir ] && echo "No such directory: $dir" && exit 1
 
 # train sentence piece tokenizer
-[ $start_stage -le 1 ] && python utils/lm_process.py $dir --sta 1 --sto 1
+[ $start_stage -le 1 ] && python utils/pipeline_lm.py $dir --sta 1 --sto 1
 [ ! -f $dir/hyper-p.json ] && echo "No hyper-setting file: $dir/hyper-p.json" && exit 1
 [ ! -f $dir/config.json ] && echo "No model config file: $dir/config.json" && exit 1
 
@@ -57,7 +57,7 @@ if [ $large_corpus == "True" ]; then
 else
     textbin=$dir/lmbin/train.pkl
     if [ ! -f $textbin ]; then
-        python utils/lm_process.py $dir --sta 2 --sto 2 || exit 1
+        python utils/pipeline_lm.py $dir --sta 2 --sto 2 || exit 1
     else
         echo "$textbin found, skip generating."
     fi
