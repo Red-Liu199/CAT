@@ -7,3 +7,4 @@ tensorboard>=2.6.0
 jiwer>=2.2.0
 pyyaml>=6.0
 transformers>=4.12.3
+jieba>=0.42.1

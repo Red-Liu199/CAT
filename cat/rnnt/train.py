@@ -32,7 +32,6 @@ from warp_rnnt import rnnt_loss as RNNTLoss
 import warp_rnnt
 if warp_rnnt.__version__ >= '0.7.1':
     from warp_rnnt import fused_rnnt_loss_ as RNNTFusedLoss
-from warp_rna import rna_loss as RNALoss
 from typing import Union, Optional
 
 import torch
@@ -67,7 +66,6 @@ class TransducerTrainer(nn.Module):
                  compact: bool = False,
                  # enable fused mode for RNN-T loss computation, which would consume less memory but take a little more time
                  fused: bool = False,
-                 isrna: bool = False,                   # use RNA topology instead of RNN-T
                  # weight of ILME loss to conduct joint-training
                  ilme_loss: Optional[float] = None,
                  # insert sub-sampling layer between encoder and joint net
@@ -78,8 +76,6 @@ class TransducerTrainer(nn.Module):
                  num_decoder_mask: int = -1,
                  bos_id: int = 0):
         super().__init__()
-        if isrna:
-            assert not compact and not fused, f"RNA Loss currently doesn't support compact and fused mode yet."
 
         if fused and not jointnet.is_normalize_separated:
             raise RuntimeError(
@@ -105,7 +101,6 @@ class TransducerTrainer(nn.Module):
 
         self.isfused = fused
         self._compact = compact
-        self.isrna = isrna
 
         self.encoder = encoder
         self.decoder = decoder
@@ -201,12 +196,7 @@ class TransducerTrainer(nn.Module):
             loss += self.ilme_weight * self._ilme_criterion(ilm_log_probs, ilm_targets)
         
         with autocast(enabled=False):
-            if self.isrna:
-                loss += RNALoss(joint_out.float(), targets.to(dtype=torch.int),
-                               o_lens.to(device=joint_out.device,
-                                         dtype=torch.int),
-                               target_lengths.to(device=joint_out.device, dtype=torch.int), reduction='mean')
-            elif self.isfused:
+            if self.isfused:
                 loss += RNNTFusedLoss(joint_out.float(), targets.to(dtype=torch.int32),
                                      o_lens.to(device=joint_out.device,
                                                dtype=torch.int32),

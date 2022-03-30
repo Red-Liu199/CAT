@@ -4,6 +4,8 @@ Uage:
     python utils/pipeline_asr.py
 """
 
+from resolvedata import main as resolve_srcdata
+from resolvedata import F_DATAINFO
 
 import os
 import sys
@@ -13,6 +15,11 @@ import pickle
 import argparse
 from typing import Union, Literal, List, Tuple, Optional, Callable, Dict
 from multiprocessing import Process
+
+
+def initial_datainfo():
+    if not os.path.isfile(F_DATAINFO):
+        resolve_srcdata()
 
 
 def mp_spawn(target: Callable, args: Union[tuple, argparse.Namespace]):
@@ -273,32 +280,6 @@ def checkExist(f_type: Literal['d', 'f'], f_list: Union[str, List[str]]):
         return
 
 
-def expandPath(f_type: Literal['t', 's'], s_list: Union[str, List[str]], cwd: Optional[str] = None) -> List[str]:
-    """Expand the dataset to path of CAT data location.
-
-    Args:
-        f_type (str)          : 't': text, 's': scp
-        s_list (list, str)    : list of dataset(s), can be string
-        cwd    (str, optional): location of current working directory
-    """
-    if cwd is None:
-        cwd = os.getcwd()
-
-    cat_data = f'../../tools/CAT/egs/{os.path.basename(cwd)}/data'
-    checkExist('d', cat_data)
-    if f_type == 't':
-        fmt = os.path.join(cat_data, '{}/text')
-    elif f_type == 's':
-        fmt = os.path.join(cat_data, 'all_ark/{}.scp')
-    else:
-        raise RuntimeError(f"expandPath: Unknown expand type '{f_type}'")
-
-    if isinstance(s_list, str):
-        return [fmt.format(s_list)]
-    else:
-        return [fmt.format(s) for s in s_list]
-
-
 def recursive_rpl(src_dict: dict, target_key: str, rpl_val):
     if not isinstance(src_dict, dict):
         return
@@ -413,7 +394,7 @@ def TrainNNModel(
     mp_spawn(MainFunc, updateNamespaceFromDict(training_settings, Parser))
 
 
-def priorResolvePath(dataset: Union[str, List[str]], local_dir: str = 'data/text') -> Tuple[List[str], List[str]]:
+def priorResolvePath(dataset: Union[str, List[str]]) -> Tuple[List[str], List[str]]:
     """Resolve text file location for dataset.
 
     Args:
@@ -425,26 +406,17 @@ def priorResolvePath(dataset: Union[str, List[str]], local_dir: str = 'data/text
     if isinstance(dataset, str):
         dataset = [dataset]
 
-    local_text = []
-    outside_text = []
+    datainfo = readfromjson(F_DATAINFO)
+
+    local_text = []     # find in local path, assume NO uid before each utterance
+    outside_text = []   # find in src data, assume uid before each utterance
     for _set in dataset:
         if os.path.isfile(_set):
             local_text.append(_set)
+        elif _set in datainfo:
+            outside_text.append(datainfo[_set]['trans'])
         else:
-            _text = os.path.join(local_dir, _set)
-            if os.path.isfile(_text):
-                local_text.append(_text)
-            else:
-                outside_text.append(_set)
-
-    if outside_text != []:
-        try:
-            outside_text = expandPath('t', outside_text)
-            checkExist('f', outside_text)
-        except FileNotFoundError as fe:
-            print(fe)
-            print("Resolve outside path as empty.")
-            outside_text = []
+            raise FileNotFoundError(f"request dataset: '{_set}' not found.")
     return local_text, outside_text
 
 
@@ -561,6 +533,8 @@ if __name__ == "__main__":
     checkExist('d', args.expdir)
     f_hyper_settings = os.path.join(args.expdir, 'hyper-p.json')
     checkExist('f', f_hyper_settings)
+    initial_datainfo()
+    datainfo = readfromjson(F_DATAINFO)
 
     ############ Stage 1  Tokenizer training ############
     if s_beg <= 1 and s_end >= 1:
@@ -620,28 +594,27 @@ if __name__ == "__main__":
                     f"warning: missing '{dataset}' in ['data'], skip.\n")
                 continue
             sys.stdout.write(fmt.format(f"parsing {dataset} data..."))
-            f_texts = expandPath('t', data_settings[dataset], cwd)
-            f_scps = expandPath('s', data_settings[dataset], cwd)
+
             if dataset == 'train':
                 filter = data_settings['filter']
             else:
                 filter = None
 
-            parsingData(f_scps, f_texts,
-                        f_out=os.path.join(d_pkl, dataset+'.pkl'),
-                        filter=filter, tokenizer=tokenizer, iszh=iszh)
+            if isinstance(data_settings[dataset], str):
+                data_settings[dataset] = [data_settings[dataset]]
+            f_data = []
+            for _set in data_settings[dataset]:
+                if _set not in datainfo:
+                    raise RuntimeError(
+                        f"'{_set}' not found. you can configure it manually in {F_DATAINFO}")
+                f_data.append(datainfo[_set])
 
-        if not istokenized and 'train' in data_settings:
-            f_text = expandPath('t', data_settings['train'], cwd)[0]
-            # generate word prefix tree from train set
-            from word_prefix_tree import WordPrefixParser
-            from word_prefix_tree import main as WPTMain
-            wpt_settings = {
-                'stripid': True,
-                'output': os.path.join(d_pkl, 'wpt.pkl')}
-
-            mp_spawn(WPTMain, updateNamespaceFromDict(wpt_settings, WordPrefixParser(), [
-                f_text, hyper_settings['tokenizer']['location']]))
+            parsingData(
+                [_data['scp'] for _data in f_data],
+                [_data['trans'] for _data in f_data],
+                f_out=os.path.join(d_pkl, dataset+'.pkl'),
+                filter=filter, tokenizer=tokenizer, iszh=iszh)
+            del f_data
 
     ############ Stage 3  NN training ############
     if s_beg <= 3 and s_end >= 3:
@@ -880,7 +853,7 @@ if __name__ == "__main__":
         testsets = hyper_settings['data']['test']
         if isinstance(testsets, str):
             testsets = [testsets]
-        f_scps = expandPath('s', testsets, cwd)
+        f_scps = [datainfo[_set]['scp'] for _set in testsets]
         checkExist('f', f_scps)
 
         if hyper_settings['topo'] == 'rnnt':
@@ -916,7 +889,7 @@ if __name__ == "__main__":
         err_settings = inference_settings['er']
         assert 'mode' in err_settings, "missing 'mode' in hyper-p['inference']['er']"
 
-        f_texts = expandPath('t', testsets, cwd)
+        f_texts = [datainfo[_set]['trans'] for _set in testsets]
         checkExist('f', f_texts)
 
         if 'oracle' not in err_settings:

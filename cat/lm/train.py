@@ -80,7 +80,11 @@ class LMTrainer(nn.Module):
 
 @torch.no_grad()
 def evaluate(*args) -> float:
-    return math.exp(default_eval(*args))
+    celoss = default_eval(*args)
+    try:
+        return math.exp(celoss)
+    except OverflowError:
+        return float('inf')
 
 
 def build_model(args, configuration, dist=True, wrapper=True) -> Union[LMTrainer, AbsDecoder]:

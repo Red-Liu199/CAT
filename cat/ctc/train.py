@@ -2,12 +2,6 @@
 # Apache 2.0.
 # Author: Zheng Huahuan (maxwellzh@outlook.com)
 
-"""
-This script uses DistributedDataParallel (DDP) to train model within framework of CAT.
-Differed from `train_dist.py`, this one supports read configurations from json file
-and is more non-hard-coding style.
-"""
-
 from ..shared import Manager
 from ..shared import coreutils as utils
 from ..shared import encoder as model_zoo

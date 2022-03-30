@@ -11,7 +11,7 @@ set -e
 ("--output", type=str, default="$dir/${order}gram.klm",
     help="Path of output N-gram file. default: [dir]/[order]gram.klm")
 ("--arpa", action="store_true", help="Store n-gram file as .arpa instead of binary.")
-("--large-corpus", action="store_true", help="Use on-the-fly encoding for large corpus.")
+("--text-corpus", action="store_true", help="Use on-the-fly encoding for text corpus.")
 ("--prune", type=str, default="", nargs='*',
     help="Prune options passed to KenLM lmplz executable. default: ")
 ("--type", type=str, default="trie", choices=['trie', 'probing'],
@@ -33,8 +33,14 @@ if [ "$prune" ]; then
     prune="--prune $prune"
 fi
 
-export text_out="/tmp/$(tr -dc A-Za-z0-9 </dev/urandom | head -c 13 ; echo '').corpus.tmp"
-export arpa_out="/tmp/$(tr -dc A-Za-z0-9 </dev/urandom | head -c 13 ; echo '').arpa.tmp"
+export text_out="/tmp/$(
+    tr -dc A-Za-z0-9 </dev/urandom | head -c 13
+    echo ''
+).corpus.tmp"
+export arpa_out="/tmp/$(
+    tr -dc A-Za-z0-9 </dev/urandom | head -c 13
+    echo ''
+).arpa.tmp"
 
 # we need to manually rm the bos/eos/unk since lmplz tool would add them
 # and kenlm not support <unk> in corpus,
@@ -42,7 +48,7 @@ export arpa_out="/tmp/$(tr -dc A-Za-z0-9 </dev/urandom | head -c 13 ; echo '').a
 # ...if your tokenizer set different bos/eos/unk id, you should make that mapping too.
 export tokenizer="$(cat $dir/hyper-p.json |
     python -c "import sys,json;print(json.load(sys.stdin)['tokenizer']['location'])")"
-if [ $large_corpus == "True" ]; then
+if [ $text_corpus == "True" ]; then
     f_text=$(cat $dir/hyper-p.json |
         python -c "import sys,json;print(json.load(sys.stdin)['data']['train'])" |
         sed "s/\[//g" | sed "s/\]//g" | sed "s/'//g" | sed "s/,/ /g")
