@@ -89,7 +89,13 @@ def main(args):
 
 def dataserver(args, q: mp.Queue):
     testset = ScpDataset(args.input_scp)
-    n_frames = sum(testset.get_seq_len())
+    # sort the dataset in desencding order
+    testset_ls = testset.get_seq_len()
+    len_match = sorted(list(zip(testset_ls, testset._dataset)),
+                       key=lambda item: item[0], reverse=True)
+    testset._dataset = [data for _, data in len_match]
+    n_frames = sum(testset_ls)
+    del len_match, testset_ls
     testloader = DataLoader(
         testset,
         batch_size=(8 if args.batchfly else 1),
