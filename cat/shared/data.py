@@ -314,7 +314,7 @@ class sortedPadCollateTransducer():
         return mats, input_lengths, labels, label_lengths
 
 
-class TestPadCollate():
+class sortedScpPadCollate():
     """Collect data into batch and add padding.
 
     Args:
@@ -328,6 +328,8 @@ class TestPadCollate():
 
     def __call__(self, batch: Sequence[Tuple[str, torch.FloatTensor]]) -> Tuple[Sequence[str], torch.FloatTensor, torch.LongTensor]:
 
+        if len(batch) > 1:
+            batch = sorted(batch, key=lambda item: item[1].size(0), reverse=True)
         keys = [key for key, _ in batch]
 
         mats = utils.pad_list([feature for _, feature in batch])
