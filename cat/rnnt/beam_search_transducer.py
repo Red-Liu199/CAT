@@ -1033,7 +1033,8 @@ class TransducerBeamSearcher():
             group_uncached, group_cached = group_to_batch(
                 batched_beams,
                 dummy_token,
-                prefix_cache)
+                prefix_cache,
+                statelen_fixed=False)
             group_beams = group_uncached + group_cached
 
             idxbeam2srcidx = []   # len: n_beams
@@ -1181,7 +1182,7 @@ def collect_scores(hypos: List[Hypothesis], dummy_tensor: torch.Tensor = None) -
     return dummy_tensor.new_tensor([hyp.score for hyp in hypos], dtype=torch.float)
 
 
-def group_to_batch(hypos: List[Hypothesis], dummy_tensor: torch.Tensor = None, prefix_cache: PrefixCacheDict = None, statelen_fixed: bool = True) -> Tuple[List[int], torch.Tensor, Dict[str, AbsStates]]:
+def group_to_batch(hypos: List[Hypothesis], dummy_tensor: torch.Tensor = None, prefix_cache: PrefixCacheDict = None, statelen_fixed: bool = False) -> Tuple[List[int], torch.Tensor, Dict[str, AbsStates]]:
     """Group the hypothesis in the list into batch with their hidden states
 
     Args:
@@ -1197,6 +1198,8 @@ def group_to_batch(hypos: List[Hypothesis], dummy_tensor: torch.Tensor = None, p
         batched_tokens (torch.LongTensor): [N, 1]
         batched_states (Dict[str, AbsStates]): the hidden states of the hypotheses, depending on the prediction network type.
         batched_output (Dict[str, torch.Tensor]): the cached output being batched
+        statelen_fixed (bool, default False): whether to group the states by hypo lengths, 
+            if set True, this would slightly speedup training, however it requires the cache state to be of fixed length with variable seq lengths (like LSTM)
     """
     if dummy_tensor is None:
         dummy_tensor = torch.empty(1)
