@@ -68,6 +68,7 @@ def main():
         elif not os.path.isdir(src_recipedata):
             print(f"'{recipe}' is not found under ../../tools/CAT/egs")
         else:
+            os.makedirs(os.path.dirname(D_SRCDATA), exist_ok=True)
             os.system(f"ln -s {os.path.abspath(src_recipedata)} {D_SRCDATA}")
             found_datasets.update(find_dataset(src_recipedata))
 
