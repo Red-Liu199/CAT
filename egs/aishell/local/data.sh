@@ -11,4 +11,5 @@ srcdata="/mnt/nas_workspace2/spmiData/aishell_data/"
 )
 
 python local/extract_fbank.py $srcdata/wav \
-    $srcdata/transcript/aishell_transcript_v0.8.txt
+    $srcdata/transcript/aishell_transcript_v0.8.txt \
+    --speed-perturbation 0.9 1.1

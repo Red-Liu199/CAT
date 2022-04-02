@@ -27,9 +27,6 @@
             "num": 10
         },
         "decode": {
-            "lm-path": "exp/lm-v5/5gram.klm",
-            "lm-alpha": 0.3,
-            "lm-beta": 0.6,
             "beam_size": 16,
             "nj": 40
         },

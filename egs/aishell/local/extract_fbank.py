@@ -5,30 +5,42 @@ Compute FBank feature for aishell using torchaudio.
 import os
 import sys
 import glob
-import math
 import argparse
-from typing import List, Dict
-from tqdm import tqdm
+from typing import List, Dict, Any, Tuple
 
-import kaldiio
 
-import torch
-import torchaudio
+prepare_sets = [
+    'train',
+    'dev',
+    'test'
+]
+
+expect_len = {
+    'train': 120098,
+    'dev': 14326,
+    'test': 7176
+}
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("src_data", type=str, default="/data/AISHELL-1/wav",
-                        help="Directory to source audio files, expect sub-dir 'train', 'dev' and 'test' in the directory.")
+                        help="Directory to source audio files, "
+                        f"expect subset: {', '.join(prepare_sets)} in the directory.")
     parser.add_argument("transcript", type=str, default="/data/transcript/aishell_transcript_v0.8.txt",
                         help="Path to the transcript file.")
+    parser.add_argument("--speed-perturbation", type=float, dest='sp',
+                        nargs='*', default=[], help=f"Add speed perturbation to subset: {', '.join(prepare_sets)}")
     args = parser.parse_args()
 
     assert os.path.isfile(
         args.transcript), f"Trancript: '{args.transcript}' does not exist."
     assert os.path.isdir(args.src_data)
-    for _set in ['train', 'dev', 'test']:
+    for _set in prepare_sets:
         assert os.path.isdir(os.path.join(args.src_data, _set))
+    for _sp_factor in args.sp:
+        assert (isinstance(_sp_factor, float) or isinstance(_sp_factor, int)) and _sp_factor > 0, \
+            f"Unsupport speed pertubation value: {_sp_factor}"
 
     os.makedirs('data/src', exist_ok=True)
     trans = {}      # type: Dict[str, str]
@@ -37,14 +49,10 @@ if __name__ == "__main__":
             uid, utt = line.strip().split(maxsplit=1)
             trans[uid] = utt
 
-    expect_len = {
-        'train': 120098,
-        'dev': 14326,
-        'test': 7176
-    }
     audios = {}     # type: Dict[str, Dict[str, str]]
-    subtrans = {}   # type: Dict[str, List[str]]
-    for _set in ['train', 'dev', 'test']:
+    subtrans = {}   # type: Dict[str, List[Tuple[str, str]]]
+
+    for _set in prepare_sets:
         d_audio = os.path.join(args.src_data, _set)
         _audios = glob.glob(f"{d_audio}/**/*.wav")
         audios[_set] = {}
@@ -54,26 +62,22 @@ if __name__ == "__main__":
             if uid not in trans:
                 continue
             audios[_set][uid] = _raw_wav
-            subtrans[_set].append(f"{uid}\t{trans[uid]}")
+            subtrans[_set].append((uid, trans[uid]))
         if len(audios[_set]) != expect_len[_set]:
             sys.stderr.write(
-                f"warning: found {len(audios[_set])} audios in {_set} subset, but expected {expect_len[_set]}")
-    del trans
+                f"warning: found {len(audios[_set])} audios in {_set} subset, but expected {expect_len[_set]}\n")
 
-    _, sample_frequency = torchaudio.load(next(iter(audios['train'].values())))
-    num_mel_bins = 80
-    scp_dir = "data/src/all_ark"
-    os.makedirs(scp_dir, exist_ok=True)
-    for _set in audios.keys():
-        # write transcript
-        os.makedirs(f"data/src/{_set}", exist_ok=True)
-        with open(f"data/src/{_set}/text", 'w') as fo:
-            fo.write('\n'.join(sorted(subtrans[_set])))
-
-        # write feats
-        with kaldiio.WriteHelper(f'ark,scp:{scp_dir}/{_set}.ark,{scp_dir}/{_set}.scp') as writer:
-            for uid, _audio in tqdm(audios[_set].items()):
-                writer(uid, torchaudio.compliance.kaldi.fbank(
-                    torchaudio.load(_audio)[0],
-                    sample_frequency=sample_frequency,
-                    num_mel_bins=num_mel_bins).numpy())
+    try:
+        import cat
+    except ModuleNotFoundError:
+        import sys
+        import os
+        sys.path.append(os.getcwd())
+    from cat.utils.data_prep_kaldi import prepare_kaldi_feat
+    prepare_kaldi_feat(
+        subsets=prepare_sets,
+        trans=subtrans,
+        audios=audios,
+        num_mel_bins=80,
+        speed_perturb=args.sp
+    )
