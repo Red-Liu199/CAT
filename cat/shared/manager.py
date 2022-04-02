@@ -445,7 +445,7 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
                 t_data = 0.0
                 t_last_step = time.time()
 
-            if n_time == args.n_steps or (args.debug and n_time >= 20):
+            if n_time == args.n_steps:
                 dist.barrier()
                 break
 
@@ -476,9 +476,6 @@ def evaluate(testloader, args: argparse.Namespace, manager: Manager) -> float:
 
     for i, minibatch in tqdm(enumerate(testloader), desc=f'Epoch {manager.epoch} | eval',
                              unit='batch', total=len(testloader), disable=(args.gpu != 0), leave=False):
-        if args.debug and i >= 20:
-            dist.barrier()
-            break
 
         features, input_lengths, labels, label_lengths = minibatch
         features, labels, input_lengths, label_lengths = features.cuda(

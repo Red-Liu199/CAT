@@ -446,12 +446,7 @@ def TrainTokenizer(f_hyper: str):
     checkExist('f', f_hyper)
     hyper_settings = readfromjson(f_hyper)
 
-    assert 'data' in hyper_settings, f"missing property 'data': {f_hyper}"
-    assert 'train' in hyper_settings[
-        'data'], f"missing property 'train' in ['data']: {f_hyper}"
     assert 'tokenizer' in hyper_settings, f"missing property 'tokenizer': {f_hyper}"
-    assert 'type' in hyper_settings[
-        'tokenizer'], f"missing property 'type' in ['tokenizer']: {f_hyper}"
     if 'location' not in hyper_settings['tokenizer']:
         sys.stderr.write(
             f"missing property 'location' in ['tokenizer']: {f_hyper}\n")
@@ -466,6 +461,12 @@ def TrainTokenizer(f_hyper: str):
                 "...remove the ['tokenizer']['location'] in setting\n"
                 f"...or remove the file:{hyper_settings['tokenizer']['location']} then re-run the script.\n")
             return
+
+    assert 'type' in hyper_settings[
+        'tokenizer'], f"missing property 'type' in ['tokenizer']: {f_hyper}"
+    assert 'data' in hyper_settings, f"missing property 'data': {f_hyper}"
+    assert 'train' in hyper_settings[
+        'data'], f"missing property 'train' in ['data']: {f_hyper}"
     assert os.access(os.path.dirname(hyper_settings['tokenizer']['location']),
                      os.W_OK), f"['tokenizer']['location'] is not writable: '{hyper_settings['tokenizer']['location']}'"
 

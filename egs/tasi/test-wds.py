@@ -186,13 +186,13 @@ def parsingData(
 
 
 def trans_kaldi2tar():
-    f_scp = '/home/zhenghh/workspace/CAT/egs/tasi/data/all_ark/tasi-train-noiseon.scp'
-    f_text = '/home/zhenghh/workspace/CAT/egs/tasi/data/tasi-train-noiseon/text'
+    f_scp = '/home/zhenghh/workspace/CAT/egs/tasi/data/all_ark/tasi-reset-train.scp'
+    f_text = '/home/zhenghh/workspace/CAT/egs/tasi/data/tasi-reset-train/text'
     from cat.shared import tokenizer as tknz
 
     # train set
     parsingData(f_scp, f_text,
-                "tasi-train-noised/tasi-train-%05d.tar",
+                "tasi-train-denoised/tasi-train-%05d.tar",
                 filter="10:1500",
                 tokenizer=tknz.load(
                     '/home/zhenghh/workspace/Transducer-dev/egs/tasi/exp/rnnt-v1/tokenizer.tknz'),
