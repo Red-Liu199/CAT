@@ -25,10 +25,7 @@
                     "type": "number",
                     "default": 1
                 },
-                "isrna": {
-                    "type": "boolean",
-                    "default": false
-                },
+                "ilme_loss": {},
                 "fused": {
                     "type": "boolean",
                     "default": false
@@ -465,6 +462,7 @@
                     "examples": [
                         "AbsDecoder",
                         "CausalTransformer",
+                        "ILM",
                         "LSTMPredictNet",
                         "NGram",
                         "PlainPN",
@@ -557,6 +555,30 @@
                                     },
                                     "num_classes": {
                                         "type": "number"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "type": {
+                                "const": "ILM"
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "kwargs": {
+                                "type": "object",
+                                "properties": {
+                                    "f_check": {
+                                        "type": "string"
+                                    },
+                                    "f_rnnt_config": {
+                                        "type": "string"
                                     }
                                 }
                             }

@@ -11,7 +11,7 @@ from ..shared import coreutils as utils
 from ..shared.encoder import AbsEncoder
 from ..shared.data import (
     ScpDataset,
-    TestPadCollate
+    sortedScpPadCollate
 )
 
 
@@ -57,7 +57,7 @@ def dataserver(args, q: mp.Queue):
     testloader = DataLoader(
         testset, batch_size=1, shuffle=False,
         num_workers=args.world_size//8,
-        collate_fn=TestPadCollate())
+        collate_fn=sortedScpPadCollate())
 
     t_beg = time.time()
     for batch in tqdm(testloader, total=len(testloader)):

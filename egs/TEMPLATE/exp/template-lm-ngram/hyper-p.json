@@ -1,0 +1,16 @@
+{
+    "data": {
+        "train": "data/local-lm/ptb.train.txt",
+        "dev": "data/local-lm/ptb.valid.txt",
+        "test": "data/local-lm/ptb.test.txt"
+    },
+    "tokenizer": {
+        "type": "SentencePieceTokenizer",
+        "property": {
+            "model_type": "word",
+            "vocab_size": 10000,
+            "use_all_vocab": true,
+            "model_prefix": "sentencepiece/ptb-word/spm"
+        }
+    }
+}

@@ -13,7 +13,7 @@ from ..shared import coreutils as utils
 from ..shared import tokenizer as tknz
 from ..shared.data import (
     ScpDataset,
-    TestPadCollate
+    sortedScpPadCollate
 )
 
 import os
@@ -26,12 +26,19 @@ from typing import Union, Tuple
 
 import torch
 import torch.multiprocessing as mp
-import torch.distributed as dist
 from torch.utils.data import DataLoader
 from torch.cuda.amp import autocast
 
 
 def main(args):
+    if args.batchfly:
+        if args.estimate_ILM:
+            raise NotImplementedError(
+                "ILM estimation has not implemented for batch-decoding yet.")
+
+        if args.rescore:
+            raise NotImplementedError(
+                "Rescoring has not implemented for batch-decoding yet.")
 
     if args.tokenizer is None or not os.path.isfile(args.tokenizer):
         raise FileNotFoundError(
@@ -57,12 +64,6 @@ def main(args):
                   "set rescore=False")
         args.rescore = False
 
-    cachedir = '/tmp'
-    assert os.path.isdir(cachedir), f"Cache directory not found: {cachedir}"
-    if not os.access(cachedir, os.W_OK):
-        raise PermissionError(f"Permission denied for writing to {cachedir}")
-    fmt = os.path.join(cachedir, utils.gen_random_string()+r".{}.tmp")
-
     try:
         mp.set_start_method('spawn')
     except RuntimeError as re:
@@ -77,10 +78,10 @@ def main(args):
             ext_lm.share_memory()
 
         mp.spawn(main_worker, nprocs=world_size+2,
-                 args=(args, q_data_producer, q_nbest_saver, fmt, (model, ext_lm)))
+                 args=(args, q_data_producer, q_nbest_saver, (model, ext_lm)))
     else:
         mp.spawn(main_worker, nprocs=world_size+2,
-                 args=(args, q_data_producer, q_nbest_saver, fmt))
+                 args=(args, q_data_producer, q_nbest_saver))
 
     del q_nbest_saver
     del q_data_producer
@@ -88,11 +89,19 @@ def main(args):
 
 def dataserver(args, q: mp.Queue):
     testset = ScpDataset(args.input_scp)
-    n_frames = sum(testset.get_seq_len())
+    # sort the dataset in desencding order
+    testset_ls = testset.get_seq_len()
+    len_match = sorted(list(zip(testset_ls, testset._dataset)),
+                       key=lambda item: item[0], reverse=True)
+    testset._dataset = [data for _, data in len_match]
+    n_frames = sum(testset_ls)
+    del len_match, testset_ls
     testloader = DataLoader(
-        testset, batch_size=1, shuffle=False,
-        num_workers=0,
-        collate_fn=TestPadCollate())
+        testset,
+        batch_size=(8 if args.batchfly else 1),
+        shuffle=False,
+        num_workers=1,
+        collate_fn=sortedScpPadCollate())
 
     f_nbest = args.output_prefix+'.nbest'
     if os.path.isfile(f_nbest):
@@ -164,7 +173,7 @@ def consumer_output(args, q: mp.Queue):
     del load_and_save
 
 
-def main_worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_nbest: mp.Queue, fmt: str, models=None):
+def main_worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_nbest: mp.Queue, models=None):
     if pid == args.world_size:
         return dataserver(args, q_data)
     elif pid == args.world_size + 1:
@@ -191,26 +200,36 @@ def main_worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_nbest: m
         prefix_merge=True, lm_module=ext_lm, alpha=args.alpha, beta=args.beta,
         word_prefix_tree=args.word_tree, rescore=args.rescore, est_ilm=est_ilm, verbose=(pid == 0))
 
-    local_writer = fmt.format(pid)
     tokenizer = tknz.load(args.tokenizer)
     nbest = {}
-    with torch.no_grad(), autocast(enabled=(True if device != 'cpu' else False)), open(local_writer, 'w') as fi:
+    with torch.no_grad(), autocast(enabled=(True if device != 'cpu' else False)):
         while True:
             batch = q_data.get(block=True)
             if batch is None:
                 break
             key, x, x_lens = batch
-            key = key[0]
             x = x.to(device)
-            nbest_list, scores_nbest = searcher(model.encoder(x, x_lens)[0])
-            nbest[key] = {
-                bid: (score.item(), tokenizer.decode(hypo.cpu().tolist()))
-                for bid, (score, hypo) in enumerate(zip(scores_nbest, nbest_list))
-            }
-            if est_ilm:
-                nbest[key+'-ilm'] = {
-                    bid: (searcher.ilm_score[bid].item(), trans) for bid, (_, trans) in nbest[key].items()
+            if args.batchfly:
+                enc_out, frame_lens = model.encoder(x, x_lens)
+                list_hypos = searcher.batched_rna_decode(enc_out, frame_lens)
+                for k, hypos in zip(key, list_hypos):
+                    nbest[k] = {
+                        bid: (hyp.score.item(), tokenizer.decode(
+                            hyp.get_pred_token().tolist()[1:]))
+                        for bid, hyp in enumerate(hypos)
+                    }
+            else:
+                key = key[0]
+                nbest_list, scores_nbest = searcher(
+                    model.encoder(x, x_lens)[0])
+                nbest[key] = {
+                    bid: (score.item(), tokenizer.decode(hypo.cpu().tolist()))
+                    for bid, (score, hypo) in enumerate(zip(scores_nbest, nbest_list))
                 }
+                if est_ilm:
+                    nbest[key+'-ilm'] = {
+                        bid: (searcher.ilm_score[bid].item(), trans) for bid, (_, trans) in nbest[key].items()
+                    }
             q_nbest.put(nbest, block=True)
             nbest = {}
             del batch
@@ -278,6 +297,8 @@ def DecoderParser():
                         "With this option, the N-best list file would contains ILM scores too. See utils/dispatch_ilm.py")
     parser.add_argument("--word-tree", type=str, default=None,
                         help="Path to word prefix tree file.")
+    parser.add_argument("--batchfly", action='store_true',
+                        default=False, help="Enable batch-decoding.")
     parser.add_argument("--cpu", action='store_true', default=False)
     parser.add_argument("--rescore", action='store_true', default=False)
     parser.add_argument("--silience", action='store_true', default=False)

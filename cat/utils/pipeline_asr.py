@@ -4,8 +4,11 @@ Uage:
     python utils/pipeline_asr.py
 """
 
-from resolvedata import main as resolve_srcdata
-from resolvedata import F_DATAINFO
+try:
+    from resolvedata import main as resolve_srcdata
+    from resolvedata import F_DATAINFO
+except ModuleNotFoundError:
+    print("seems you're trying to import module from pipeline_asr. ensure you know what you're doing.")
 
 import os
 import sys
@@ -329,9 +332,6 @@ def TrainNNModel(
         promt: str = '{}'):
     assert 'train' in settings, promt.format("missing 'train' in hyper-p")
 
-    if args.ngpu > -1:
-        set_visible_gpus(args.ngpu)
-
     if 'tokenizer' not in settings:
         sys.stderr.write(
             f"warning: missing property 'tokenizer': {f_hyper_p}\n")
@@ -536,6 +536,8 @@ if __name__ == "__main__":
     checkExist('f', f_hyper_settings)
     initial_datainfo()
     datainfo = readfromjson(F_DATAINFO)
+    if args.ngpu > -1:
+        set_visible_gpus(args.ngpu)
 
     ############ Stage 1  Tokenizer training ############
     if s_beg <= 1 and s_end >= 1:

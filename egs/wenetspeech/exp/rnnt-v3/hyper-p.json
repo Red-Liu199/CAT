@@ -1,0 +1,57 @@
+{
+    "data": {
+        "train": "train_m",
+        "dev": [
+            "dev"
+        ],
+        "test": [
+            "dev",
+            "test_net",
+            "test_meeting",
+            "aishell-test"
+        ],
+        "filter": ":1000",
+        "lang": "zh-cn"
+    },
+    "tokenizer": {
+        "type": "SentencePieceTokenizer",
+        "property": {
+            "model_type": "char",
+            "add_dummy_prefix": false,
+            "use_all_vocab": true,
+            "model_prefix": "sentencepiece/wenetspeech_char/spm",
+            "vocab_size": 5147
+        },
+        "location": "exp/rnnt-v1/tokenizer.tknz"
+    },
+    "train": {
+        "batch_size": 512,
+        "grad-norm": 5.0,
+        "databalance": true,
+        "checkall": true,
+        "amp": true
+    },
+    "inference": {
+        "avgmodel": {
+            "mode": "best",
+            "num": 10
+        },
+        "lmdir": "exp/lm-trans",
+        "decode": {
+            "algo": "rna",
+            "beam-size": 16,
+            "cpu": true,
+            "nj": 60,
+            "alpha": 0.25,
+            "beta": 3.0,
+            "estimate-ILM": false,
+            "batchfly": true,
+            "resume": "exp/rnnt-v3/checks/best-10.pt"
+        },
+        "er": {
+            "mode": "cer",
+            "oracle": false
+        }
+    },
+    "commit": "5af689af3a00e0a5a18cd1811fd46cc03b403829"
+}

@@ -8,7 +8,8 @@ from pipeline_asr import (
     TrainNNModel,
     TrainTokenizer,
     mp_spawn,
-    readfromjson
+    readfromjson,
+    set_visible_gpus
 )
 
 import os
@@ -43,6 +44,8 @@ if __name__ == "__main__":
     checkExist('d', args.expdir)
     f_hyper_settings = os.path.join(args.expdir, 'hyper-p.json')
     checkExist('f', f_hyper_settings)
+    if args.ngpu > -1:
+        set_visible_gpus(args.ngpu)
 
     ############ Stage 1 Tokenizer training ############
     if s_beg <= 1 and s_end >= 1:
