@@ -29,6 +29,8 @@ if __name__ == "__main__":
                         f"expect subset: {', '.join(prepare_sets)} in the directory.")
     parser.add_argument("transcript", type=str, default="/data/transcript/aishell_transcript_v0.8.txt",
                         help="Path to the transcript file.")
+    parser.add_argument("--subset", type=str, nargs='*',
+                        choices=prepare_sets, help=f"Specify datasets in {prepare_sets}")
     parser.add_argument("--speed-perturbation", type=float, dest='sp',
                         nargs='*', default=[], help=f"Add speed perturbation to subset: {', '.join(prepare_sets)}")
     args = parser.parse_args()
@@ -36,6 +38,11 @@ if __name__ == "__main__":
     assert os.path.isfile(
         args.transcript), f"Trancript: '{args.transcript}' does not exist."
     assert os.path.isdir(args.src_data)
+    if args.subset is not None:
+        for _set in args.subset:
+            assert _set in prepare_sets, f"--subset {_set} not in predefined datasets: {prepare_sets}"
+        prepare_sets = args.subset
+
     for _set in prepare_sets:
         assert os.path.isdir(os.path.join(args.src_data, _set))
     for _sp_factor in args.sp:
@@ -49,19 +56,19 @@ if __name__ == "__main__":
             uid, utt = line.strip().split(maxsplit=1)
             trans[uid] = utt
 
-    audios = {}     # type: Dict[str, Dict[str, str]]
+    audios = {}     # type: Dict[str, List[Tuple[str, str]]]
     subtrans = {}   # type: Dict[str, List[Tuple[str, str]]]
 
     for _set in prepare_sets:
         d_audio = os.path.join(args.src_data, _set)
         _audios = glob.glob(f"{d_audio}/**/*.wav")
-        audios[_set] = {}
+        audios[_set] = []
         subtrans[_set] = []
         for _raw_wav in _audios:
             uid = os.path.basename(_raw_wav).removesuffix('.wav')
             if uid not in trans:
                 continue
-            audios[_set][uid] = _raw_wav
+            audios[_set].append((uid, _raw_wav))
             subtrans[_set].append((uid, trans[uid]))
         if len(audios[_set]) != expect_len[_set]:
             sys.stderr.write(

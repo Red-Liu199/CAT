@@ -7,7 +7,7 @@ import os
 import sys
 import glob
 import argparse
-from typing import List, Dict
+from typing import List, Dict, Tuple
 
 prepare_sets = [
     'dev-clean',
@@ -42,8 +42,8 @@ if __name__ == "__main__":
                              ), f"subset '{_set}' not found in {args.src_data}"
 
     os.makedirs('data/src')
-    trans = {}      # type: Dict[str, List[str]]
-    audios = {}     # type: Dict[str, Dict[str, str]]
+    trans = {}      # type: Dict[str, List[Tuple[str, str]]]
+    audios = {}     # type: Dict[str, List[Tuple[str, str]]]
     for _set in prepare_sets:
         d_audio = os.path.join(args.src_data, _set)
         _audios = glob.glob(f"{d_audio}/**/**/*.flac")
@@ -54,10 +54,10 @@ if __name__ == "__main__":
                     uid, utt = line.strip().split(maxsplit=1)
                     trans[_set].append((uid, utt))
 
-        audios[_set] = {}
+        audios[_set] = []
         for _raw_wav in _audios:
             uid = os.path.basename(_raw_wav).removesuffix('.flac')
-            audios[_set][uid] = _raw_wav
+            audios[_set].append((uid, _raw_wav))
 
         assert len(audios[_set]) == len(trans[_set]), \
             f"# audio mismatches # transcript in {_set}: {len(audios[_set])} != {len(trans[_set])}"
