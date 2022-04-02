@@ -46,7 +46,7 @@ def main(args):
     assert os.path.isfile(
         args.tokenizer), f"Tokenizer model not found: {args.tokenizer}"
 
-    if not torch.cuda.is_available() or args.cpu:
+    if args.cpu or not torch.cuda.is_available():
         if args.verbose:
             print("> Using CPU")
         args.cpu = True
