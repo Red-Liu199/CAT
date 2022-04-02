@@ -12,7 +12,7 @@ from .joint import (
     AbsJointNet
 )
 from ..shared.data import (
-    ModifiedSpeechDataset,
+    KaldiSpeechDataset,
     sortedPadCollateTransducer
 )
 from ctcdecode import CTCBeamDecoder
@@ -42,7 +42,7 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         backend=args.dist_backend, init_method=args.dist_url,
         world_size=args.world_size, rank=args.rank)
 
-    manager = Manager(ModifiedSpeechDataset,
+    manager = Manager(KaldiSpeechDataset,
                       sortedPadCollateTransducer(),
                       args, build_model,
                       func_train=train, extra_tracks=['Pos Acc', 'Noise Acc'])

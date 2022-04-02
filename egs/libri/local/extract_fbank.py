@@ -41,7 +41,6 @@ if __name__ == "__main__":
         assert os.path.isdir(os.path.join(args.src_data, _set)
                              ), f"subset '{_set}' not found in {args.src_data}"
 
-    os.makedirs('data/src')
     trans = {}      # type: Dict[str, List[Tuple[str, str]]]
     audios = {}     # type: Dict[str, List[Tuple[str, str]]]
     for _set in prepare_sets:
