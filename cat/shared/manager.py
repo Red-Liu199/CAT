@@ -367,7 +367,6 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
             scheduler.update_lr(global_step)
 
             # average for logging
-            dist.all_reduce(detach_loss)
             detach_loss /= n_batch
             # measure accuracy and record loss; item() can sync all processes.
             tolog = {
