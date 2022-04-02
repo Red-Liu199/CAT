@@ -66,7 +66,7 @@ class Manager(object):
                 shardshuffle=True,
                 nodesplitter=wds.shardlists.split_by_node)
                 # buffer size of shuffling
-                .shuffle(2000)
+                .shuffle(8000)
                 .decode()
                 .to_tuple("mat.npy", "label.npy")
                 # set partial=False to avoid a partial batch, but would drop a few of data, see bellow disscussion.
@@ -414,7 +414,6 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
             scheduler.update_lr(global_step)
 
             # average for logging
-            dist.all_reduce(detach_loss)
             detach_loss /= n_batch
             # measure accuracy and record loss; item() can sync all processes.
             tolog = {

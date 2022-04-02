@@ -43,7 +43,7 @@ def main(args):
     if args.tokenizer is None or not os.path.isfile(args.tokenizer):
         raise FileNotFoundError(
             "Invalid tokenizer model location: {}".format(args.tokenizer))
-    if not torch.cuda.is_available() or args.cpu:
+    if args.cpu or not torch.cuda.is_available():
         if not args.silience:
             print("> Using CPU")
         args.cpu = True
