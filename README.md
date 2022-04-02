@@ -24,8 +24,10 @@
   
    - CUDA compatible machine, NVIDIA driver installed and CUDA available.
    - PyTorch: `>=1.9.0` is required.
-   - KenLM: refer to the installation [guide](tools/README.md#kenlm)
-   - [CAT](https://github.com/thu-spmi/CAT): **\[optional for LM task\]** : refer to the installation [guide](tools/README.md#cat)
+   - KenLM: [installation guide](tools/README.md#kenlm)
+   - [CAT](https://github.com/thu-spmi/CAT)**\[optional\]**: used for speech data preparation based on kaldi tool, [installation guide](tools/README.md#cat).
+      
+      Use `egs/[task]/local/data.sh` to process data with `torchaudio`.
    
 2. Python packages
 
