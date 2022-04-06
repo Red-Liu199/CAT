@@ -169,7 +169,7 @@ class KaldiSpeechDataset(AbsDataset):
         # [*, *, *, *, -1, -1, rel_len(4)]
         label = self._meta_data['label'][index]
         label = label[:label[-1]]
-        return torch.from_numpy(mat), torch.from_numpy(label)
+        return torch.tensor(mat), torch.tensor(label)
 
 
 class CorpusDataset(IndexMappingDataset):
