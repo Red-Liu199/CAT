@@ -66,7 +66,7 @@ class Manager(object):
                 shardshuffle=True,
                 nodesplitter=wds.shardlists.split_by_node)
                 # buffer size of shuffling
-                .shuffle(8000)
+                .shuffle(2000)
                 .decode()
                 .to_tuple("mat.npy", "label.npy")
                 # set partial=False to avoid a partial batch, but would drop a few of data, see bellow disscussion.

@@ -6,7 +6,7 @@
 
 Usage:
     in working directory:
-    python3 cat/shared/monitor.py <path to my checkpoint>
+    python3 cat/shared/monitor.py <path to my logfile>
 """
 
 import time
@@ -182,26 +182,6 @@ class MonitorWriter():
         return plot_monitor(self._default_path, o_path=fig_path)
 
 
-def read_from_check(path: str, pt_like: bool = False) -> Tuple[np.array, np.array, int, int]:
-
-    tmp_monitor = MonitorWriter()
-    tmp_monitor.load(path)
-    tr_m = {
-        'loss': np.asarray(tmp_monitor['train:loss']._values),
-        'lr': np.asarray(tmp_monitor['train:lr']._values),
-        'time': np.asarray(tmp_monitor['train:loss']._time)
-    }
-    eval_m = {
-        'loss': np.asarray(tmp_monitor['eval:loss']._values),
-        'time': None
-    }
-    # FIXME : for compatible of old API
-    tr_m['time'][1:] = tr_m['time'][1:] - tr_m['time'][:-1]
-    tr_m['time'][0] = 0.0
-    eval_m['time'] = np.zeros_like(eval_m['loss'])
-    return tr_m, eval_m, tmp_monitor['train:loss']._cnt, tmp_monitor['eval:loss']._cnt
-
-
 def draw_time(ax: plt.Axes, summary: BaseSummary, n_epoch: int = -1, prop_box=True):
     d_time = np.asarray(summary.data['time'])
     d_time -= d_time[0]
@@ -209,11 +189,11 @@ def draw_time(ax: plt.Axes, summary: BaseSummary, n_epoch: int = -1, prop_box=Tr
 
     if n_epoch == -1:
         ax.plot(d_time)
-        n_iter = d_time.shape[0]
         fmt = 'iter'
         ylabel = 'Total time (h)'
         ax.ticklabel_format(axis="x", style="sci",
                             scilimits=(0, 0), useMathText=True)
+        speed = d_time[-1]/d_time.shape[0]
     else:
         epoch_time = []
         step_per_epoch = d_time.shape[0]//n_epoch
@@ -224,13 +204,12 @@ def draw_time(ax: plt.Axes, summary: BaseSummary, n_epoch: int = -1, prop_box=Tr
         ax.plot([1+x for x in range(n_epoch)], epoch_time, '.', markersize=2)
         # plot a dummy marker to set ylim to 0.0
         ax.scatter(1, 0, alpha=0.0)
-        n_iter = n_epoch
         fmt = 'epoch'
         ylabel = 'Time (h / epoch)'
+        speed = sum(epoch_time)/n_epoch
 
     if prop_box:
         props = dict(boxstyle='round', facecolor='wheat', alpha=0.8)
-        speed = d_time[-1]/n_iter
         if speed < 1.:
             speed = speed * 60
             if speed < 1.:
@@ -441,13 +420,13 @@ def cmp(checks: List[str], legends: Union[List[str], None] = None, title: str = 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("log", type=str, nargs='+',
-                        help="Location of log files.")
+                        help="Path to the location of log file(s).")
     parser.add_argument("--title", type=str, default=None,
                         help="Configure the plotting title.")
     parser.add_argument("--legend", type=str,
                         help="Legend for two comparing figures, split by '-'. Default: 1-2")
     parser.add_argument("-o", type=str, default=None, dest="o_path",
-                        help="Output figure path.")
+                        help="Path of the output figure path. If not specified, saved at the directory of input log file.")
     args = parser.parse_args()
 
     if len(args.log) == 1:
