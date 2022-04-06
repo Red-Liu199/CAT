@@ -17,7 +17,7 @@ import pickle
 import math
 import hashlib
 import numpy as np
-from typing import Tuple, Sequence, List, Optional, Union, Dict
+from typing import Tuple, Sequence, List, Optional, Union, Dict, Callable
 
 import torch
 from torch.utils.data import Dataset
@@ -168,7 +168,7 @@ class KaldiSpeechDataset(AbsDataset):
         # [*, *, *, *, -1, -1, rel_len(4)]
         label = self._meta_data['label'][index]
         label = label[:label[-1]]
-        return torch.from_numpy(mat), torch.from_numpy(label)
+        return torch.tensor(mat), torch.tensor(label)
 
 
 class CorpusDataset(IndexMappingDataset):
@@ -318,7 +318,7 @@ class sortedPadCollate():
 
 
 class sortedPadCollateTransducer():
-    """Collect data into batch by desending order and add padding.
+    """Collect data into batch by desending order according to frame length and add padding.
 
     Args:
         batch  : list of (mat, label)
@@ -497,3 +497,22 @@ def group_indices(args: Tuple[List[List[int]], List[int], Union[str, None], int,
         idx_groups[k] = g_grouped
 
     return idx_groups, p_id
+
+
+class StringEncodeCollateWrapper():
+    """A wrapper for ASR collator, accept input label in raw text and conduct decoding by given tokenizer."""
+
+    def __init__(
+            self,
+            tokenizer: AbsTokenizer,
+            collator: Callable[[List[Tuple[torch.FloatTensor, str]]], Tuple[torch.FloatTensor, torch.LongTensor, torch.LongTensor, torch.LongTensor]]) -> None:
+        self._tokenizer = tokenizer
+        self._collator = collator
+
+    def __call__(self, minibatch: List[Tuple[torch.FloatTensor, str]]):
+        minibatch = [
+            (mat, torch.tensor(
+                self._tokenizer.encode(_string),
+                dtype=torch.long))
+            for mat, _string in minibatch]
+        return self._collator(minibatch)

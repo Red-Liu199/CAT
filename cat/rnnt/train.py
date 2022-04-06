@@ -169,7 +169,7 @@ class TransducerTrainer(nn.Module):
             inputs, targets, input_lengths, target_lengths)
 
         joint_out, targets, o_lens, target_lengths = tupled_jointout[:4]
-        
+
         loss = 0.0
         if self.ilme_weight != 0.0:
             # calculate the ILME ILM loss
@@ -192,20 +192,21 @@ class TransducerTrainer(nn.Module):
             else:
                 raise ValueError(
                     f"{self.__class__.__name__}: invalid dimension of targets '{targets.dim()}', expected 1 or 2.")
-            
-            loss += self.ilme_weight * self._ilme_criterion(ilm_log_probs, ilm_targets)
-        
+
+            loss += self.ilme_weight * \
+                self._ilme_criterion(ilm_log_probs, ilm_targets)
+
         with autocast(enabled=False):
             if self.isfused:
                 loss += RNNTFusedLoss(joint_out.float(), targets.to(dtype=torch.int32),
-                                     o_lens.to(device=joint_out.device,
-                                               dtype=torch.int32),
-                                     target_lengths.to(device=joint_out.device, dtype=torch.int32), reduction='mean')
+                                      o_lens.to(device=joint_out.device,
+                                                dtype=torch.int32),
+                                      target_lengths.to(device=joint_out.device, dtype=torch.int32), reduction='mean')
             else:
                 loss += RNNTLoss(joint_out.float(), targets.to(dtype=torch.int32),
-                                o_lens.to(device=joint_out.device, dtype=torch.int32), target_lengths.to(
-                                    device=joint_out.device, dtype=torch.int32),
-                                reduction='mean', gather=True, compact=self._compact)
+                                 o_lens.to(device=joint_out.device, dtype=torch.int32), target_lengths.to(
+                    device=joint_out.device, dtype=torch.int32),
+                    reduction='mean', gather=True, compact=self._compact)
 
         return loss
 
@@ -331,6 +332,8 @@ def build_model(args, configuration: dict, dist: bool = True, verbose: bool = Tr
 
 def RNNTParser():
     parser = utils.BasicDDPParser("RNN-Transducer training")
+    parser.add_argument("--tokenizer", type=str,
+                        help="Specify tokenizer. Currently, only used with --large-dataset.")
     parser.add_argument("--large-dataset", action="store_true",
                         help="Use webdataset to load data in POSIX tar format. Be careful with this option, it would change many things than you might think.")
     return parser

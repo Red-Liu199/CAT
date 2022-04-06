@@ -4,6 +4,7 @@ Test the usage of webdataset module for the further develop
 
 from cat.shared.data import CorpusDataset
 from cat.shared import coreutils
+from cat.utils.pipeline_asr import readfromjson
 
 import os
 import io
@@ -103,7 +104,6 @@ def parsingData(
         f_labels: Union[List[str], str],
         f_out_fmt: str,
         filter: str = None,
-        tokenizer=None,
         iszh: bool = False):
     """Parsing audio feature and text label into pickle file.
 
@@ -113,13 +113,13 @@ def parsingData(
         f_out   (str): Ouput pickle file location.
         filter (str, optional): identifier for filtering out seqs with unqualified length. 
             such as '100:2000' means remove those whose length is shorter than 100 or longer than 2000. Default: None
-        tokenizer (AbsTokenizer, optional): If `tokenizer` is None, lines in `f_label` MUST be token indices, 
-            otherwise it should be text.
         iszh (bool, optional): whether is chinese-liked lang (charater-based)
     """
     import kaldiio
     import numpy as np
     from tqdm import tqdm
+
+    os.makedirs(os.path.dirname(f_out_fmt), exist_ok=True)
 
     if isinstance(f_scps, str):
         f_scps = [f_scps]
@@ -144,17 +144,10 @@ def parsingData(
     labels = [l.split() for l in labels]
     num_label_lines = len(labels)
 
-    if tokenizer is None:
-        # assume the labels are given in number ids
-        labels = {l[0]: np.asarray(
-            [int(i) for i in l[1:]], dtype=np.int64) for l in labels}
+    if iszh:
+        labels = {l[0]: ''.join(l[1:]) for l in labels}
     else:
-        if iszh:
-            labels = {l[0]: np.asarray(tokenizer.encode(''.join(l[1:])), dtype=np.int64)
-                      for l in labels}
-        else:
-            labels = {l[0]: np.asarray(tokenizer.encode(' '.join(l[1:])), dtype=np.int64)
-                      for l in labels}
+        labels = {l[0]: ' '.join(l[1:]) for l in labels}
 
     num_utts = [sum(1 for _ in open(_f_scp, 'r')) for _f_scp in f_scps]
     total_utts = sum(num_utts)
@@ -178,25 +171,22 @@ def parsingData(
                     sink.write({
                         '__key__': key,
                         "mat.npy": np.asarray(feature, dtype=np.float32),
-                        "label.npy": np.asarray(tag, dtype=np.int64)
+                        "label.txt": tag
                     })
 
     for f in f_opened.values():
         f.close()
 
 
-def trans_kaldi2tar():
-    f_scp = '/home/zhenghh/workspace/CAT/egs/tasi/data/all_ark/tasi-reset-train.scp'
-    f_text = '/home/zhenghh/workspace/CAT/egs/tasi/data/tasi-reset-train/text'
-    from cat.shared import tokenizer as tknz
+def trans_kaldi2tar(f_scp, f_text, fmt_dest):
 
     # train set
-    parsingData(f_scp, f_text,
-                "tasi-train-denoised/tasi-train-%05d.tar",
-                filter="10:1500",
-                tokenizer=tknz.load(
-                    '/home/zhenghh/workspace/Transducer-dev/egs/tasi/exp/rnnt-v1/tokenizer.tknz'),
-                iszh=True)
+    parsingData(
+        f_scp,
+        f_text,
+        fmt_dest,
+        filter="10:1500",
+        iszh=True)
 
 
 def trans_old2tar(src_data: str):
@@ -223,4 +213,15 @@ if __name__ == "__main__":
     # trans_old2tar(
     #     '/home/zhenghh/workspace/Transducer-dev/egs/wenetspeech/exp/rnnt-v1/pkl/dev.pkl')
 
-    trans_kaldi2tar()
+    srcdata = readfromjson('data/.CATDATA.info')
+
+    trans_kaldi2tar(
+        f_scp=srcdata["tasi-reset-train-clean"]['scp'],
+        f_text=srcdata["tasi-reset-train-clean"]['trans'],
+        fmt_dest="/mnt/nvme_workspace/zhenghh/tasi-train-clean/tasi-%05d.tar",
+    )
+    trans_kaldi2tar(
+        f_scp=srcdata["tasi-reset-train-noised"]['scp'],
+        f_text=srcdata["tasi-reset-train-noised"]['trans'],
+        fmt_dest="/mnt/nvme_workspace/zhenghh/tasi-train-noised/tasi-%05d.tar",
+    )

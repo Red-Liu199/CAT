@@ -4,7 +4,11 @@
 
 """training/evaluating manager"""
 
-from ..shared.data import BalancedDistributedSampler
+from ..shared.data import (
+    BalancedDistributedSampler,
+    StringEncodeCollateWrapper
+)
+from ..shared import tokenizer as tknz
 from . import scheduler
 from . import coreutils as utils
 from ._specaug import SpecAug
@@ -12,7 +16,6 @@ from .monitor import MonitorWriter, BASE_METRIC
 
 import os
 import argparse
-import random
 import time
 import json
 import shutil
@@ -54,6 +57,10 @@ class Manager(object):
 
         setattr(args, 'n_steps', 0)
         if args.large_dataset:
+            assert args.tokenizer is not None, f"--tokenizer is required for --large-dataset"
+            assert os.path.isfile(args.tokenizer), \
+                f"--tokenizer={args.tokenizer} is not a valid file."
+
             # ref: https://github.com/tmbdev-archive/webdataset-examples/blob/master/main-wds.py
             # NOTE (Huahuan):
             # Explicitly setting 'RANK' and 'WORLD_SIZE' is useful for webdataset to
@@ -68,9 +75,14 @@ class Manager(object):
                 # buffer size of shuffling
                 .shuffle(2000)
                 .decode()
-                .to_tuple("mat.npy", "label.npy")
-                # set partial=False to avoid a partial batch, but would drop a few of data, see bellow disscussion.
-                .batched(args.batch_size//dist.get_world_size(), collation_fn=collate_fn, partial=False))
+                .to_tuple("mat.npy", "label.txt")
+                .batched(
+                    args.batch_size//dist.get_world_size(),
+                    collation_fn=StringEncodeCollateWrapper(
+                        tokenizer=tknz.load(args.tokenizer),
+                        collator=collate_fn),
+                    # set partial=False to avoid a partial batch, but would drop a few of data, see bellow disscussion.
+                    partial=False))
             args.batch_size = (args.batch_size //
                                dist.get_world_size()) * dist.get_world_size()
             trainloader = wds.WebLoader(
@@ -413,8 +425,9 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
             global_step = manager.step
             scheduler.update_lr(global_step)
 
-            # average for logging
-            detach_loss /= n_batch
+            # average for logging, since we divide loss by fold for backward,
+            # here we multiply fold back for logging
+            detach_loss *= fold / n_batch
             # measure accuracy and record loss; item() can sync all processes.
             tolog = {
                 'loss': detach_loss.item(),
