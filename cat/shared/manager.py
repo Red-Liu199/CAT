@@ -366,8 +366,9 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
             global_step = manager.step
             scheduler.update_lr(global_step)
 
-            # average for logging
-            detach_loss /= n_batch
+            # average for logging, since we divide loss by fold for backward,
+            # here we multiply fold back for logging
+            detach_loss *= fold / n_batch
             # measure accuracy and record loss; item() can sync all processes.
             tolog = {
                 'loss': detach_loss.item(),
