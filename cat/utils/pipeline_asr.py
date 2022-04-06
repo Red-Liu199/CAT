@@ -143,14 +143,11 @@ def parsingData(
     import kaldiio
     import numpy as np
     from tqdm import tqdm
-    f_data = f_out+'.npy'
-    f_linfo = f_out + '.linfo'
 
     if os.path.isfile(f_out):
         sys.stderr.write("warning: parsingData() "
                          f"file exists: {f_out}, "
                          "rm it if you want to update the data.\n\n")
-        checkExist('f', f_data)
         return
 
     if isinstance(f_scps, str):
@@ -199,52 +196,61 @@ def parsingData(
 
     f_opened = {}
     cnt_frames = 0
-    cnt_tokens = 0
     linfo = np.empty(total_utts, dtype=np.int64)
-    _seeks = np.empty(total_utts, dtype=np.int64)
     _keys = []
+    _ark_seeks = []
     idx = 0
     cnt_rm = 0
+    for n, _f_scp in enumerate(f_scps):
+        with open(_f_scp, 'r') as fi_scp:
+            for line in tqdm(fi_scp, total=num_utts[n]):
+                key, loc_ark = line.split()
+                mat = kaldiio.load_mat(
+                    loc_ark, fd_dict=f_opened)   # type:np.ndarray
 
-    with open(f_data, 'wb') as fo_bin:
-        for n, _f_scp in enumerate(f_scps):
-            with open(_f_scp, 'r') as fi_scp:
-                for line in tqdm(fi_scp, total=num_utts[n]):
-                    key, loc_ark = line.split()
-                    tag = labels[key]
-                    feature = kaldiio.load_mat(
-                        loc_ark, fd_dict=f_opened)   # type:np.ndarray
+                if mat.shape[0] < l_min or mat.shape[0] > l_max:
+                    cnt_rm += 1
+                    continue
 
-                    if feature.shape[0] < l_min or feature.shape[0] > l_max:
-                        cnt_rm += 1
-                        continue
+                linfo[idx] = mat.shape[0]
+                _keys.append(key)
+                _ark_seeks.append(loc_ark)
 
-                    linfo[idx] = feature.shape[0]
-                    _seeks[idx] = fo_bin.tell()
-                    _keys.append(key)
-                    np.save(fo_bin, np.asarray(feature, dtype=np.float32))
-                    np.save(fo_bin, np.asarray(tag, dtype=np.int64))
-
-                    cnt_frames += feature.shape[0]
-                    cnt_tokens += tag.shape[0]
-                    idx += 1
-
-    linfo = linfo[:idx]
-    _seeks = _seeks[:idx]
+                cnt_frames += mat.shape[0]
+                idx += 1
 
     for f in f_opened.values():
         f.close()
 
+    # in order to store labels in a ndarray,
+    # first I pad all labels to the max length with -1 (this won't take many memory since labels are short compared to frames)
+    # then store the length in the last place, such as
+    # [0 1 2 3] -> [0 1 2 3 -1 -1 4]
+    # then we can access the data via array[:array[-1]]
+    labels = list([labels[k_] for k_ in _keys])
+    cnt_tokens = sum(_x.shape[0] for _x in labels)
+    max_len_label = max(x.shape[0] for x in labels)
+    labels = np.array([
+        np.concatenate((
+            _x,
+            np.array([-1]*(max_len_label-_x.shape[0]) + [_x.shape[0]])
+        ))
+        for _x in labels])
+
+    linfo = linfo[:idx]
+    ark_locs = np.array(_ark_seeks)
+    assert len(linfo) == len(labels)
+    assert len(labels) == len(ark_locs)
+
     with open(f_out, 'wb') as fo:
-        pickle.dump(os.path.basename(f_data), fo)
-        pickle.dump(_seeks, fo)
-        pickle.dump(_keys, fo)
+        pickle.dump({
+            'label': labels,
+            'linfo': linfo,
+            'arkname': ark_locs,
+            'key': np.array(_keys)}, fo)
 
-    # save length info in case of further usage
-    with open(f_linfo, 'wb') as fo:
-        pickle.dump(linfo, fo)
-
-    print(f"parsingData: remove {cnt_rm} unqualified sequences.")
+    if cnt_rm > 0:
+        print(f"parsingData: remove {cnt_rm} unqualified sequences.")
     print(
         f"...# frames: {cnt_frames} | # tokens: {cnt_tokens} | # seqs: {idx}")
 
@@ -820,7 +826,7 @@ if __name__ == "__main__":
         if hyper_settings['topo'] == 'rnnt' and 'algo' in decode_settings \
                 and decode_settings['algo'] == 'alsd' and 'umax-portion' not in decode_settings:
             # trying to compute a reasonable portion value from trainset
-            from cat.shared.data import ModifiedSpeechDataset
+            from cat.shared.data import KaldiSpeechDataset
             import numpy as np
             f_pkl = os.path.join(args.expdir, f'pkl/train.pkl')
             if os.path.isfile(f_pkl):
@@ -830,7 +836,7 @@ if __name__ == "__main__":
                     assert sub_factor > 1, f"can't deal with 'subsample'={sub_factor} in hyper-p['inference']"
                     sys.stdout.write(fmt.format(
                         f"resolving portion data from train set, might takes a while."))
-                    dataset = ModifiedSpeechDataset(f_pkl)
+                    dataset = KaldiSpeechDataset(f_pkl)
                     lt = np.asarray(dataset.get_seq_len()).astype(np.float64)
                     # get label lengths
                     ly = np.zeros_like(lt)

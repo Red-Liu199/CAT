@@ -138,6 +138,39 @@ class ModifiedSpeechDataset(IndexMappingDataset):
         return torch.from_numpy(mat), torch.from_numpy(label)
 
 
+class KaldiSpeechDataset(AbsDataset):
+    """Read in kaldi style with ark file.
+    
+    Data format (store with pickle):
+        {
+            'label': np.ndarray,
+            'linfo': np.ndarray,
+            'arkname': np.ndarray,
+            'key': np.ndarray
+        }
+    """
+
+    def __init__(self, path: str) -> None:
+        super().__init__(path)
+        with open(path, 'rb') as fib:
+            self._meta_data = pickle.load(fib)
+        self._feat_reader = FeatureReader()
+
+    def get_seq_len(self) -> List[int]:
+        return self._meta_data['linfo']
+
+    def __len__(self) -> int:
+        return len(self._meta_data['linfo'])
+
+    def __getitem__(self, index: int) -> Tuple[torch.FloatTensor, torch.LongTensor]:
+        mat = self._feat_reader(self._meta_data['arkname'][index])
+        # remove padding in label
+        # [*, *, *, *, -1, -1, rel_len(4)]
+        label = self._meta_data['label'][index]
+        label = label[:label[-1]]
+        return torch.from_numpy(mat), torch.from_numpy(label)
+
+
 class CorpusDataset(IndexMappingDataset):
     """LM corpus dataset"""
 
@@ -331,7 +364,8 @@ class sortedScpPadCollate():
     def __call__(self, batch: Sequence[Tuple[str, torch.FloatTensor]]) -> Tuple[Sequence[str], torch.FloatTensor, torch.LongTensor]:
 
         if len(batch) > 1:
-            batch = sorted(batch, key=lambda item: item[1].size(0), reverse=True)
+            batch = sorted(
+                batch, key=lambda item: item[1].size(0), reverse=True)
         keys = [key for key, _ in batch]
 
         mats = utils.pad_list([feature for _, feature in batch])

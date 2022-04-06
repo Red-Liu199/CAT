@@ -49,7 +49,6 @@ if __name__ == "__main__":
         assert (isinstance(_sp_factor, float) or isinstance(_sp_factor, int)) and _sp_factor > 0, \
             f"Unsupport speed pertubation value: {_sp_factor}"
 
-    os.makedirs('data/src', exist_ok=True)
     trans = {}      # type: Dict[str, str]
     with open(args.transcript, 'r') as fi:
         for line in fi:

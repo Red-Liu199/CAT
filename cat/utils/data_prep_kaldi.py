@@ -100,7 +100,6 @@ class FBankProcessor(Processor):
 
 
 def process_feat_as_kaldi(raw_audios: List[Tuple[str, str]], f_scp: str, f_ark: str, processor: Processor):
-    torch.set_num_threads(os.cpu_count())
     with kaldiio.WriteHelper(f'ark,scp:{f_ark},{f_scp}') as writer:
         for uid, _audio in tqdm(raw_audios):
             writer(uid, processor(_audio).numpy())
