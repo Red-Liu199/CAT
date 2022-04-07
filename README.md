@@ -32,7 +32,6 @@
 2. Python packages
 
    ```bash
-   cd Transducer-dev/
    pip install -r requirements.txt
    ```
 
@@ -51,7 +50,9 @@
    
    **ASR (All functions):**
    
-   Please refer to [src/INSTALL](src/INSTALL) for installation instruction.
+   ```bash
+   bash src/install
+   ```
 
 ## Examples and Usage
 

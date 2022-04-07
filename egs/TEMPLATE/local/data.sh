@@ -30,3 +30,4 @@ cd $cwd
 )
 
 python local/compute_fbank.py data/local/waves_yesno/
+python utils/resolvedata.py

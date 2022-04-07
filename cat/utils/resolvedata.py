@@ -64,7 +64,7 @@ def main():
         recipe = os.path.basename(os.getcwd())
         src_recipedata = f"../../tools/CAT/egs/{recipe}/data"
         if not os.path.isdir("../../tools/CAT"):
-            print("tool:CAT is not linked to ../../tools/CAT")
+            print("warning: tool/CAT is not linked to ../../tools/CAT")
         elif not os.path.isdir(src_recipedata):
             print(f"'{recipe}' is not found under ../../tools/CAT/egs")
         else:

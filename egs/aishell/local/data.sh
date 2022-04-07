@@ -17,3 +17,5 @@ python local/extract_fbank.py $srcdata/wav \
 python local/extract_fbank.py $srcdata/wav \
     $srcdata/transcript/aishell_transcript_v0.8.txt \
     --subset train --speed-perturbation 0.9 1.1 || exit 1
+
+python utils/resolvedata.py

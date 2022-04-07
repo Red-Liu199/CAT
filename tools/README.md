@@ -54,5 +54,5 @@
     # link executable binary files
     cd ../../src/
     mkdir -p bin/ && cd bin/
-    ln -s ../../tools/kenlm/build/bin/* ./
+    ln -s ../../tools/kenlm/build/bin/* ./ && cd ../../
     ```
