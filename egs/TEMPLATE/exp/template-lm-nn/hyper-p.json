@@ -14,10 +14,12 @@
             "vocab_size": 10000,
             "use_all_vocab": true,
             "model_prefix": "sentencepiece/ptb-word/spm"
-        }
+        },
+        "location": "exp/template-lm-nn/tokenizer.tknz"
     },
     "train": {
         "batch_size": 64,
         "amp": true
-    }
+    },
+    "commit": "d35889b96d8d1e3025261feea2222e0023b3c5d1"
 }

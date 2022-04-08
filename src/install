@@ -1,0 +1,34 @@
+EC='\033[0;32m' # Enable Color
+NC='\033[0m' # No Color
+
+# Fetch modules
+echo -e "${EC}[1] Fetch submodules...${NC}"
+git submodule update --init --recursive && cd src/ >/dev/null
+echo -e "${EC}[1] Submodules fetched.${NC}"
+
+echo -e "${EC}[2] Install submodules...${NC}"
+python -m pip install ninja >/dev/null
+# warp-rnnt >= 0.7.2
+echo -e "${EC}[2]-1 install warp-rnnt...${NC}"
+cd warp-rnnt/pytorch_binding/ >/dev/null
+python setup.py install >/dev/null
+cd ../../
+echo -e "${EC}[2]-1 warp-rnnt installed.${NC}"
+
+# gather >= 0.2.2
+echo -e "${EC}[2]-2 install torch-gather...${NC}"
+cd torch-gather/
+python setup.py install >/dev/null
+cd ../
+echo -e "${EC}[2]-2 torch-gather installed.${NC}"
+
+# ctcdecode >= 1.0.3
+echo -e "${EC}\
+[2]-3 install ctcdecode...
+      this would take some time since ctcdecode requires
+      ... downloading extra files (depending on your network.)${NC}"
+cd ctcdecode/
+python setup.py install >/dev/null
+cd ../
+echo -e "${EC}[2]-3 ctcdecode installed.${NC}"
+echo -e "${EC}[2] Submodules installed.${NC}"

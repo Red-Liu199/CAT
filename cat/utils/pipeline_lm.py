@@ -9,7 +9,8 @@ from pipeline_asr import (
     TrainTokenizer,
     mp_spawn,
     readfromjson,
-    set_visible_gpus
+    set_visible_gpus,
+    initial_datainfo
 )
 
 import os
@@ -46,6 +47,7 @@ if __name__ == "__main__":
     checkExist('f', f_hyper_settings)
     if args.ngpu > -1:
         set_visible_gpus(args.ngpu)
+    initial_datainfo()
 
     ############ Stage 1 Tokenizer training ############
     if s_beg <= 1 and s_end >= 1:

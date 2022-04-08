@@ -32,7 +32,6 @@
 2. Python packages
 
    ```bash
-   cd Transducer-dev/
    pip install -r requirements.txt
 
    # install webdataset from github source, DO NOT install from pypi, it's too old.
@@ -54,7 +53,9 @@
    
    **ASR (All functions):**
    
-   Please refer to [src/INSTALL](src/INSTALL) for installation instruction.
+   ```bash
+   bash src/install
+   ```
 
 ## Examples and Usage
 
