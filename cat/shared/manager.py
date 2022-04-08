@@ -19,6 +19,7 @@ import argparse
 import time
 import json
 import shutil
+import glob
 import webdataset as wds
 from collections import OrderedDict
 from typing import Callable, Union, Iterable, Optional, List
@@ -69,7 +70,7 @@ class Manager(object):
             os.environ['RANK'] = str(dist.get_rank())
             os.environ['WORLD_SIZE'] = str(dist.get_world_size())
             tr_set = (wds.WebDataset(
-                args.trset,
+                glob.glob(args.trset),
                 shardshuffle=True,
                 nodesplitter=wds.shardlists.split_by_node)
                 # buffer size of shuffling
