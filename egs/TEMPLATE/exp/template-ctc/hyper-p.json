@@ -25,6 +25,10 @@
         "databalance": true
     },
     "inference": {
+        "avgmodel": {
+            "mode": "last",
+            "num": 3
+        },
         "decode": {
             "beam-size": 16,
             "nj": 8

@@ -5,8 +5,8 @@ https://github.com/parlance/ctcdecode
 """
 
 from .train import build_model as ctc_builder
-from ..shared import coreutils as utils
 from ..shared import tokenizer as tknz
+from ..shared import coreutils
 from ..shared.encoder import AbsEncoder
 from ..shared.data import (
     ScpDataset,
@@ -16,7 +16,6 @@ from ctcdecode import CTCBeamDecoder
 
 
 import os
-import json
 import time
 import pickle
 import argparse
@@ -44,7 +43,7 @@ def main(args: argparse.Namespace):
     cachedir = '/tmp'
     if not os.access(cachedir, os.W_OK):
         raise PermissionError(f"Permission denied for writing to {cachedir}")
-    fmt = os.path.join(cachedir, utils.gen_random_string()+r".{}.tmp")
+    fmt = os.path.join(cachedir, coreutils.randstr()+r".{}.tmp")
 
     try:
         mp.set_start_method('spawn')
@@ -152,19 +151,19 @@ def worker(pid: int, args: argparse.Namespace, q: mp.Queue, fmt: str, model: Abs
 def build_model(args: argparse.Namespace):
     assert args.resume is not None, "Trying to decode with uninitialized parameters. Add --resume"
 
-    with open(args.config, 'r') as fi:
-        configures = json.load(fi)
-
-    model = ctc_builder(None, configures, dist=False)
-    model = utils.load_checkpoint(model, args.resume)
+    model = ctc_builder(coreutils.readjson(args.config), dist=False)
+    model = coreutils.load_checkpoint(model, args.resume)
     model = model.am
     model.eval()
     return model
 
 
 def DecoderParser():
-    parser = utils.BasicDDPParser(
-        istraining=False, prog='CTC decoder.')
+    parser = coreutils.basic_trainer_parser(
+        prog="CTC decoder.",
+        training=False,
+        isddp=False
+    )
 
     parser.add_argument("--input_scp", type=str, default=None)
     parser.add_argument("--output_prefix", type=str, default='./decode')

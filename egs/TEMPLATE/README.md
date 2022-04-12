@@ -55,7 +55,4 @@
 
    ```bash
    bash utils/pipeline_ngram.sh exp/template-lm-ngram --text-corpus -o 3
-   
-   # calculate ppl over test
-   python utils/ppl_compute_ngram.py exp/template-lm-ngram/ -e data/local-lm/ptb.test.txt --tokenizer exp/template-lm-ngram/tokenizer.tknz
    ```

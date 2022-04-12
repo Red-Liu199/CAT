@@ -318,6 +318,19 @@
                 "lmdir": {
                     "type": "string"
                 },
+                "ppl": {
+                    "description": "configuration of LM perplexity calculation. For LM only.",
+                    "type": "object",
+                    "properties": {
+                        "resume": {
+                            "type": "string"
+                        },
+                        "nj": {
+                            "type": "number",
+                            "default": 1
+                        }
+                    }
+                },
                 "decode": {
                     "description": "Configuration of decoding. Run 'python -m cat.[topo].decode -h' for support options",
                     "type": "object"

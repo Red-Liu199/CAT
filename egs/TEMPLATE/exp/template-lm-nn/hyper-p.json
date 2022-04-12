@@ -2,7 +2,10 @@
     "data": {
         "train": "data/local-lm/ptb.train.txt",
         "dev": "data/local-lm/ptb.valid.txt",
-        "test": "data/local-lm/ptb.test.txt",
+        "test": [
+            "data/local-lm/ptb.test.txt",
+            "data/local-lm/ptb.valid.txt"
+        ],
         "text_processing": {
             "truncate": 32
         }
@@ -19,7 +22,13 @@
     },
     "train": {
         "batch_size": 64,
-        "amp": true
+        "amp": true,
+        "checkall": true
     },
-    "commit": "d35889b96d8d1e3025261feea2222e0023b3c5d1"
+    "inference": {
+        "avgmodel": {
+            "mode": "last",
+            "num": 2
+        }
+    }
 }

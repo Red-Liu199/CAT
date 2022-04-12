@@ -7,7 +7,7 @@
 """Data loading module
 """
 
-from . import coreutils as utils
+from . import coreutils as coreutils
 from .tokenizer import AbsTokenizer
 
 import io
@@ -17,7 +17,6 @@ import pickle
 import math
 import hashlib
 import numpy as np
-from collections import OrderedDict
 from typing import Tuple, Sequence, List, Optional, Union, Dict
 
 import torch
@@ -281,7 +280,7 @@ class NbestListCollate():
 
         ids = [[self.bos_id] +
                self._tokenizer.encode(seqs) for seqs in trans]
-        token_ids = utils.pad_list(
+        token_ids = coreutils.pad_list(
             [torch.LongTensor(i) for i in ids])
         lens = torch.LongTensor([len(x) for x in ids])
         token_mask = torch.arange(
@@ -307,7 +306,7 @@ class sortedPadCollate():
                    for mat, label in batch]
         batch_sorted = sorted(batches, key=lambda item: item[2], reverse=True)
 
-        mats = utils.pad_list([x[0] for x in batch_sorted])
+        mats = coreutils.pad_list([x[0] for x in batch_sorted])
 
         labels = torch.cat([x[1] for x in batch_sorted])
 
@@ -335,9 +334,9 @@ class sortedPadCollateTransducer():
                    for mat, label in batch]
         batch_sorted = sorted(batches, key=lambda item: item[2], reverse=True)
 
-        mats = utils.pad_list([x[0] for x in batch_sorted])
+        mats = coreutils.pad_list([x[0] for x in batch_sorted])
 
-        labels = utils.pad_list(
+        labels = coreutils.pad_list(
             [x[1] for x in batch_sorted]).to(torch.long)
 
         input_lengths = torch.LongTensor([x[2] for x in batch_sorted])
@@ -366,7 +365,7 @@ class sortedScpPadCollate():
                 batch, key=lambda item: item[1].size(0), reverse=True)
         keys = [key for key, _ in batch]
 
-        mats = utils.pad_list([feature for _, feature in batch])
+        mats = coreutils.pad_list([feature for _, feature in batch])
 
         lengths = torch.LongTensor([feature.size(0) for _, feature in batch])
 
@@ -395,12 +394,12 @@ class sortedPadCollateLM():
         X, Y = list(zip(*batch_sorted))
         input_lengths = torch.LongTensor(
             [x.size(0) for x in X])  # type: torch.LongTensor
-        xs = utils.pad_list(X)   # type: torch.Tensor
+        xs = coreutils.pad_list(X)   # type: torch.Tensor
 
         if self.flatten_target:
             target = torch.cat(Y, dim=0)
         else:
-            target = utils.pad_list(Y)
+            target = coreutils.pad_list(Y)
 
         return xs, input_lengths, target, torch.empty(1)
 
@@ -490,7 +489,7 @@ def group_indices(args: Tuple[List[List[int]], List[int], Union[str, None], int,
     for k, g in enumerate(idx_groups):
         g_sorted = sorted(g, key=lambda i: global_ls[i], reverse=True)
 
-        g_grouped = utils.group_by_lens(
+        g_grouped = coreutils.group_by_lens(
             g_sorted, [global_ls[i] for i in g_sorted], n_replicas, l_norm)
         idx_groups[k] = g_grouped
 

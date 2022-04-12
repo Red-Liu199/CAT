@@ -15,11 +15,11 @@ except ModuleNotFoundError:
     sys.exit(1)
 from collections import OrderedDict
 from typing import List, Union, Iterable, Optional, Dict
-from ..shared.coreutils import gen_random_string
+from ..shared.coreutils import randstr
 
 
 def gen_cache_path() -> str:
-    return os.path.join('/tmp', gen_random_string())
+    return os.path.join('/tmp', randstr())
 
 
 def file2bin(f_text: str) -> bytes:

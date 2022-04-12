@@ -10,8 +10,8 @@ Author: Huahuan Zhengh (maxwellzh@outlook.com)
 """
 
 from .joint import AbsJointNet
+from ..shared import coreutils
 from ..shared.decoder import AbsDecoder, AbsStates
-from ..shared import coreutils as utils
 
 import os
 import yaml
@@ -408,7 +408,7 @@ class TransducerBeamSearcher():
         dummy_tensor = next(iter(self.lm.parameters())).new_empty(1)
         lens_in = dummy_tensor.new_tensor(
             [len(hypo) for hypo in decoded_hypos])
-        in_seqs = utils.pad_list([hypo.get_pred_token()
+        in_seqs = coreutils.pad_list([hypo.get_pred_token()
                                  for hypo in decoded_hypos], 0)
 
         # suppose </s> = <s>

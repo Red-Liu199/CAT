@@ -41,20 +41,25 @@ egs/<task>/exp/template
     "train": {
         ...
     },
-    // "inference" is for ASR only, decoding related setting
+    // inference related setting
     "inference": {
         // model averaging setting, optional
         "avgmodel": {
             "mode": "best",  // 'best' of 'last'
             "num": 10        // number of checkpoints to be averaged
         },
-        // decoding setting, for support options (in egs/<task>/):
+        // perplexity computation for LM, for support optionsrun (in egs/<task>/):
+        // run 'python -m cat.lm.ppl_compute -h'
+        "ppl": {
+            ...
+        },
+        // ASR only, decoding setting, for support options (in egs/<task>/):
         // RNN-T: run 'python -m cat.rnnt.decode -h'
         // CTC: run 'python -m cat.ctc.decode -h'
         "decode": {
             ...
         },
-        // WER/CER computing setting, run `python utils/wer.py -h` for more options
+        // ASR only, WER/CER computing setting, run `python utils/wer.py -h` for more options
         "er": {
             "mode": "wer",  // 'wer' or 'cer'
             "oracle": true  // compute oracle wer for N-best list or not

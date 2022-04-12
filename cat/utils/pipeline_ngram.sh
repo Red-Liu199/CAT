@@ -88,8 +88,6 @@ else
     rm $arpa_out
 fi
 
-echo "LM saved at $output"
-
 if [ -f $dir/config.json ]; then
     cat $dir/config.json | python -c "
 import sys, json
@@ -103,11 +101,7 @@ json.dump(configure, sys.stdout, indent=4)" >$dir/config.json.tmp
     mv $dir/config.json.tmp $dir/config.json
 fi
 
-# test
-# You may need to set the 'num_classes' in
-# ... $dir/config.json to the number of vocab of your TOKENIZER
-if [[ -d $dir/lmbin ]] && [[ $(find $dir/lmbin -name test-*.pkl) ]]; then
-    python utils/ppl_compute_ngram.py $dir -e $dir/lmbin/test-*.pkl
-else
-    echo "No test data found, training done."
-fi
+echo "LM saved at $output."
+
+python utils/pipeline_lm.py $dir --start_stage 4 --ngpu 1
+exit 0

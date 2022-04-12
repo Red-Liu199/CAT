@@ -7,7 +7,7 @@ Language model trainer.
 """
 
 from ..shared import Manager
-from ..shared import coreutils as utils
+from ..shared import coreutils
 from ..shared.manager import evaluate as default_eval
 from ..shared.decoder import *
 from ..shared.data import (
@@ -25,7 +25,7 @@ import torch.distributed as dist
 
 
 def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
-    utils.SetRandomSeed(args.seed)
+    coreutils.set_random_seed(args.seed)
     args.gpu = gpu
     args.rank = args.rank * ngpus_per_node + gpu
     torch.cuda.set_device(args.gpu)
@@ -34,22 +34,8 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         backend=args.dist_backend, init_method=args.dist_url,
         world_size=args.world_size, rank=args.rank)
 
-    if args.eval is not None:
-        args.databalance = False
-        args.trset = args.eval
-        args.devset = args.eval
-        if args.resume is None:
-            utils.distprint(
-                "You're trying to evalute over the data with untrained model.", args.gpu)
-
     manager = Manager(CorpusDataset, sortedPadCollateLM(),
                       args, build_model, func_eval=evaluate)
-
-    if args.eval is not None:
-        manager.model.eval()
-        ppl = evaluate(manager.valloader, args, manager)
-        utils.distprint(f"Perplexity over dataset is {ppl:.2f}", args.gpu)
-        return
 
     # lm training does not need specaug
     manager.specaug = None
@@ -82,12 +68,19 @@ class LMTrainer(nn.Module):
 def evaluate(*args) -> float:
     celoss = default_eval(*args)
     try:
+        # NOTE: perplexity = exp(cross-entropy loss)
+        # if you custom the criterion in LMTrainer,
+        # please also add a custom evaluate() function like this.
         return math.exp(celoss)
     except OverflowError:
         return float('inf')
 
 
-def build_model(args, configuration, dist=True, wrapper=True) -> Union[LMTrainer, AbsDecoder]:
+def build_model(
+        configuration: dict,
+        args: Optional[Union[argparse.Namespace, dict]] = None,
+        dist=True, wrapper=True) -> Union[nn.parallel.DistributedDataParallel, LMTrainer, AbsDecoder]:
+
     def _build_decoder(config) -> nn.Module:
         LMNet = eval(config['type'])    # type: AbsDecoder
         NetKwargs = config['kwargs']
@@ -105,20 +98,24 @@ def build_model(args, configuration, dist=True, wrapper=True) -> Union[LMTrainer
     if not dist:
         return model
 
-    # make batchnorm synced across all processes
-    model = utils.convert_syncBatchNorm(model)
+    assert args is not None, f"You must tell the GPU id to build a DDP model."
+    if isinstance(args, argparse.Namespace):
+        args = vars(args)
+    elif not isinstance(args, dict):
+        raise ValueError(f"unsupport type of args: {type(args)}")
 
-    model.cuda(args.gpu)
+    # make batchnorm synced across all processes
+    model = coreutils.convert_syncBatchNorm(model)
+
+    model.cuda(args['gpu'])
     model = torch.nn.parallel.DistributedDataParallel(
-        model, device_ids=[args.gpu])
+        model, device_ids=[args['gpu']])
 
     return model
 
 
 def LMParser():
-    parser = utils.BasicDDPParser('Language model training.')
-    parser.add_argument("--eval", type=str,
-                        help="Do evaluation and calculate the PPL.")
+    parser = coreutils.basic_trainer_parser('Language model trainer.')
     return parser
 
 
@@ -127,5 +124,5 @@ def main(args: argparse = None):
         parser = LMParser()
         args = parser.parse_args()
 
-    utils.setPath(args)
-    utils.main_spawner(args, main_worker)
+    coreutils.setup_path(args)
+    coreutils.main_spawner(args, main_worker)
