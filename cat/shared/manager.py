@@ -62,11 +62,19 @@ class Manager(object):
             assert os.path.isfile(args.tokenizer), \
                 f"--tokenizer={args.tokenizer} is not a valid file."
 
-            # ref: https://github.com/tmbdev-archive/webdataset-examples/blob/master/main-wds.py
-            # NOTE (Huahuan):
-            # Explicitly setting 'RANK' and 'WORLD_SIZE' is useful for webdataset to
-            # recognize the DDP. Without the setting, data in all nodes are the same.
-            # I guess this is a bug of WebDataset.
+            '''
+            NOTE (Huahuan):
+            1.  ref: https://github.com/tmbdev-archive/webdataset-examples/blob/master/main-wds.py
+                Explicitly setting 'RANK' and 'WORLD_SIZE' is useful for webdataset to
+                recognize the DDP. Without the setting, data in all nodes are the same.
+                I guess this is a bug of WebDataset.
+              
+            2.  In DDP, commonly, all nodes should get the same size of batches, however, 
+                the data size might not be divisible to the num_nodes as well as the batch size.
+                so we just drop a few of data every epoch. This won't affect much since we usually 
+                train lots of epochs. And if you're concerned about that, duplicating part of the dataset to 
+                allow it fitting the size is OK. But that would require knowing the size of dataset and is somewhat more complicated.
+            '''
             os.environ['RANK'] = str(dist.get_rank())
             os.environ['WORLD_SIZE'] = str(dist.get_world_size())
             tr_set = (wds.WebDataset(
@@ -91,11 +99,6 @@ class Manager(object):
                 # batching is done by webdataset
                 batch_size=None)
             '''
-            In DDP, commonly, all nodes should get the same size of batches, however, 
-            the data size might not be divisible to the num_nodes as well as the batch size.
-            so we just drop a few of data every epoch. This won't affect much since we usually 
-            train lots of epochs. And if you're concerned about that, duplicating part of the dataset to 
-            allow it fitting the size is OK. But that would require knowing the size of dataset and is somewhat more complicated.
             '''
 
             # we don't know the size of dataset, just set a value large enough
