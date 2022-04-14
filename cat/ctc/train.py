@@ -3,7 +3,7 @@
 # Author: Zheng Huahuan (maxwellzh@outlook.com)
 
 from ..shared import Manager
-from ..shared import coreutils as utils
+from ..shared import coreutils
 from ..shared import encoder as model_zoo
 from ..shared.data import KaldiSpeechDataset, sortedPadCollate
 
@@ -19,7 +19,7 @@ from torch.cuda.amp import autocast
 
 
 def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
-    utils.SetRandomSeed(args.seed)
+    coreutils.set_random_seed(args.seed)
     args.gpu = gpu
     args.rank = args.rank * ngpus_per_node + gpu
     torch.cuda.set_device(args.gpu)
@@ -83,7 +83,11 @@ class AMTrainer(nn.Module):
         return loss.mean()
 
 
-def build_model(args: argparse.Namespace, configuration: dict, dist: bool = True, wrapper: bool = True) -> Union[model_zoo.AbsEncoder, AMTrainer]:
+def build_model(
+        configuration: dict,
+        args: Optional[Union[argparse.Namespace, dict]] = None,
+        dist: bool = True,
+        wrapper: bool = True) -> Union[nn.parallel.DistributedDataParallel, AMTrainer, model_zoo.AbsEncoder]:
 
     if 'ctc-trainer' not in configuration:
         configuration['ctc-trainer'] = {}
@@ -101,17 +105,26 @@ def build_model(args: argparse.Namespace, configuration: dict, dist: bool = True
     if not dist:
         return model
 
-    model.cuda(args.gpu)
+    assert args is not None, f"You must tell the GPU id to build a DDP model."
+    if isinstance(args, argparse.Namespace):
+        args = vars(args)
+    elif not isinstance(args, dict):
+        raise ValueError(f"unsupport type of args: {type(args)}")
+
+    # make batchnorm synced across all processes
+    model = coreutils.convert_syncBatchNorm(model)
+
+    model.cuda(args['gpu'])
     if 'use_crf' in configuration['ctc-trainer'] and configuration['ctc-trainer']['use_crf']:
         assert 'den-lm' in configuration['ctc-trainer']
         model.register_crf_ctx(configuration['ctc-trainer']['den-lm'])
     model = torch.nn.parallel.DistributedDataParallel(
-        model, device_ids=[args.gpu])
+        model, device_ids=[args['gpu']])
     return model
 
 
 def CTCParser():
-    parser = utils.BasicDDPParser("CTC trainer.")
+    parser = coreutils.basic_trainer_parser("CTC trainer.")
     return parser
 
 
@@ -120,5 +133,5 @@ def main(args: argparse.Namespace = None):
         parser = CTCParser()
         args = parser.parse_args()
 
-    utils.setPath(args)
-    utils.main_spawner(args, main_worker)
+    coreutils.setup_path(args)
+    coreutils.main_spawner(args, main_worker)

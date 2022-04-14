@@ -493,13 +493,10 @@ class ILM(AbsDecoder):
         super().__init__(1, 1)
         del self.embedding
         del self.classifier
-        import json
         from cat.rnnt import rnnt_builder
         from cat.shared import coreutils
-        with open(f_rnnt_config, 'r') as fi:
-            configuration = json.load(fi)
-        rnntmodel = rnnt_builder(
-            None, configuration, dist=False, verbose=False)
+        configuration = coreutils.readjson(f_rnnt_config)
+        rnntmodel = rnnt_builder(configuration, dist=False)
         coreutils.load_checkpoint(rnntmodel, f_check)
         self._stem = rnntmodel.decoder
         self._head = rnntmodel.joint

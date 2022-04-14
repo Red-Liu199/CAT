@@ -126,8 +126,7 @@ def parsingData(
         f_labels: Union[List[str], str],
         f_out: str,
         filter: Optional[str] = None,
-        tokenizer=None,
-        iszh: bool = False):
+        tokenizer=None):
     """Parsing audio feature and text label into pickle file.
 
     Args:
@@ -138,7 +137,6 @@ def parsingData(
             such as '100:2000' means remove those whose length is shorter than 100 or longer than 2000. Default: None
         tokenizer (AbsTokenizer, optional): If `tokenizer` is None, lines in `f_label` MUST be token indices, 
             otherwise it should be text.
-        iszh (bool, optional): whether is chinese-liked lang (charater-based)
     """
     import kaldiio
     import numpy as np
@@ -173,20 +171,28 @@ def parsingData(
     for _f_lb in f_labels:
         with open(_f_lb, 'r') as fi_label:
             labels += fi_label.readlines()
-    labels = [l.split() for l in labels]
+
+    labels = [l.split(maxsplit=1)
+              for l in labels]      # type: List[Tuple[str, str]]
     num_label_lines = len(labels)
 
     if tokenizer is None:
         # assume the labels are given in number ids
-        labels = {l[0]: np.asarray(
-            [int(i) for i in l[1:]], dtype=np.int64) for l in labels}
+        labels = {
+            uid: np.asarray(
+                [int(i) for i in utt.split()],
+                dtype=np.int64
+            )
+            for uid, utt in labels
+        }
     else:
-        if iszh:
-            labels = {l[0]: np.asarray(tokenizer.encode(''.join(l[1:])), dtype=np.int64)
-                      for l in labels}
-        else:
-            labels = {l[0]: np.asarray(tokenizer.encode(' '.join(l[1:])), dtype=np.int64)
-                      for l in labels}
+        labels = {
+            uid: np.asarray(
+                tokenizer.encode(utt),
+                dtype=np.int64
+            )
+            for uid, utt in labels
+        }
 
     num_utts = [sum(1 for _ in open(_f_scp, 'r')) for _f_scp in f_scps]
     total_utts = sum(num_utts)
@@ -336,11 +342,11 @@ def TrainNNModel(
         Parser: argparse.ArgumentParser,
         MainFunc: Callable[[argparse.Namespace], None],
         promt: str = '{}'):
-    assert 'train' in settings, promt.format("missing 'train' in hyper-p")
+    assert 'train' in settings, promt.format("missing 'train' in field:")
 
     if 'tokenizer' not in settings:
         sys.stderr.write(
-            f"warning: missing property 'tokenizer': {f_hyper_p}\n")
+            f"warning: missing 'tokenizer': {f_hyper_p}\n")
     else:
         try:
             import cat
@@ -400,7 +406,7 @@ def TrainNNModel(
     mp_spawn(MainFunc, updateNamespaceFromDict(training_settings, Parser))
 
 
-def priorResolvePath(dataset: Union[str, List[str]]) -> Tuple[List[str], List[str]]:
+def resolve_in_priority(dataset: Union[str, List[str]]) -> Tuple[List[str], List[str]]:
     """Resolve text file location for dataset.
 
     Args:
@@ -426,9 +432,9 @@ def priorResolvePath(dataset: Union[str, List[str]]) -> Tuple[List[str], List[st
     return local_text, outside_text
 
 
-def combineText(datasets: Union[str, List[str]], f_out: Optional[str] = None, seperator: str = ' ') -> str:
+def combineText(datasets: Union[str, List[str]], f_out: Optional[str] = None) -> str:
     """Combine text files of dataset(s) and return the combined file."""
-    text_noid, text_withid = priorResolvePath(datasets)
+    text_noid, text_withid = resolve_in_priority(datasets)
     assert len(text_noid) > 0 or len(
         text_withid) > 0, f"combineText: dataset '{datasets}' seems empty."
 
@@ -443,8 +449,8 @@ def combineText(datasets: Union[str, List[str]], f_out: Optional[str] = None, se
             with open(_text, 'r') as fi:
                 for line in fi:
                     # rm the seq id in first column
-                    line = line.split()
-                    fo.write(seperator.join(line[1:]) + '\n')
+                    _, utt = line.split(maxsplit=1)
+                    fo.write(utt + '\n')
     return f_out
 
 
@@ -452,10 +458,10 @@ def TrainTokenizer(f_hyper: str):
     checkExist('f', f_hyper)
     hyper_settings = readfromjson(f_hyper)
 
-    assert 'tokenizer' in hyper_settings, f"missing property 'tokenizer': {f_hyper}"
+    assert 'tokenizer' in hyper_settings, f"missing 'tokenizer': {f_hyper}"
     if 'location' not in hyper_settings['tokenizer']:
         sys.stderr.write(
-            f"missing property 'location' in ['tokenizer']: {f_hyper}\n")
+            f"missing 'location' in ['tokenizer']: {f_hyper}\n")
         sys.stderr.write(f"set ['tokenizer']='tokenizer.tknz'\n")
         hyper_settings['tokenizer']['location'] = os.path.join(
             os.path.dirname(f_hyper), 'tokenizer.tknz')
@@ -478,13 +484,11 @@ def TrainTokenizer(f_hyper: str):
 
     if 'lang' in hyper_settings['data']:
         # check if it's chinese-like languages
-        iszh = ('zh' == hyper_settings['data']['lang'].split('-')[0])
-    else:
-        iszh = False
-    seperator = '' if iszh else ' '
+        if ('zh' == hyper_settings['data']['lang'].split('-')[0]):
+            sys.stderr.write(
+                "TrainTokenizer(): for Asian language, it's your duty to remove the segment spaces up to your requirement.\n")
 
-    f_corpus_tmp = combineText(
-        hyper_settings['data']['train'], seperator=seperator)
+    f_corpus_tmp = combineText(hyper_settings['data']['train'])
     tokenizer_type = hyper_settings['tokenizer']['type']
     if 'property' not in hyper_settings['tokenizer']:
         hyper_settings['tokenizer']['property'] = {}
@@ -514,6 +518,59 @@ def TrainTokenizer(f_hyper: str):
     os.remove(f_corpus_tmp)
 
 
+def model_average(
+        setting: dict,
+        checkdir: str,
+        returnifexist: bool = False,
+        _pattern: str = r"checkpoint[.]\d+[.]pt") -> Tuple[str, str]:
+    """Do model averaging according to given setting, return the averaged model path."""
+
+    assert 'mode' in setting, "missing 'mode' in ['avgmodel']"
+    assert 'num' in setting, "missing 'num' in ['avgmodel']"
+    avg_mode, avg_num = setting['mode'], setting['num']
+
+    import re
+    import torch
+    from avgmodel import find_n_best, average_checkpoints
+
+    suffix_avgmodel = f"{avg_mode}-{avg_num}"
+    checkpoint = os.path.join(checkdir, suffix_avgmodel)
+    tmp_check = checkpoint + ".pt"
+    if os.path.isfile(tmp_check) and returnifexist:
+        return tmp_check, suffix_avgmodel
+    i = 1
+    while os.path.isfile(tmp_check):
+        tmp_check = checkpoint + f".{i}.pt"
+        i += 1
+    checkpoint = tmp_check
+
+    if avg_mode == 'best':
+        f_check_list = find_n_best(checkdir, avg_num)
+    elif avg_mode == 'last':
+        pattern = re.compile(_pattern)
+        f_check_all = [os.path.join(checkdir, _f) for _f in os.listdir(
+            checkdir) if pattern.search(_f) is not None]
+        if len(f_check_all) < avg_num:
+            raise RuntimeError(
+                f"trying to average {avg_num} models, with only {len(f_check_all)} checkpoints existing.")
+        # assume the checkpoint name as checkpoint.0001.pt,
+        # so we could sort the files to get last N ones
+        f_check_list = sorted(f_check_all, reverse=True)[:avg_num]
+        del f_check_all
+    else:
+        raise NotImplementedError(
+            f"Unknown model averaging mode: {avg_mode}, expected in ['best', 'last']")
+
+    params = average_checkpoints(f_check_list)
+    # delete the parameter of optimizer for saving disk.
+    for k in list(params.keys()):
+        if k != 'model':
+            del params[k]
+
+    torch.save(params, checkpoint)
+    return checkpoint, suffix_avgmodel
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
@@ -524,7 +581,7 @@ if __name__ == "__main__":
                         type=int, default=-1, help="Stop stage of processing. Default: last stage.")
     parser.add_argument("--ngpu", type=int, default=-1,
                         help="Number of GPUs to be used.")
-    parser.add_argument("--silient", action="store_true",
+    parser.add_argument("--silent", action="store_true",
                         help="Disable detailed messages output.")
 
     args = parser.parse_args()
@@ -547,9 +604,9 @@ if __name__ == "__main__":
 
     ############ Stage 1  Tokenizer training ############
     if s_beg <= 1 and s_end >= 1:
-        if not args.silient:
+        if not args.silent:
             print("{0} {1} {0}".format("="*20, "Stage 1 Tokenizer training"))
-        fmt = "# Tokenizer trainin # {}\n" if not args.silient else ""
+        fmt = "# Tokenizer trainin # {}\n" if not args.silent else ""
         hyper_settings = readfromjson(f_hyper_settings)
         if 'tokenizer' not in hyper_settings:
             sys.stderr.write(
@@ -559,17 +616,12 @@ if __name__ == "__main__":
 
     ############ Stage 2  Pickle data ############
     if s_beg <= 2 and s_end >= 2:
-        if not args.silient:
+        if not args.silent:
             print("{0} {1} {0}".format("="*20, "Stage 2 Pickle data"))
-        fmt = "# Pickle data # {}\n" if not args.silient else ""
+        fmt = "# Pickle data # {}\n" if not args.silent else ""
 
         hyper_settings = readfromjson(f_hyper_settings)
-        assert 'data' in hyper_settings, f"missing property 'data': {f_hyper_settings}"
-        if 'lang' in hyper_settings['data']:
-            # check if it's chinese-like languages
-            iszh = ('zh' == hyper_settings['data']['lang'].split('-')[0])
-        else:
-            iszh = False
+        assert 'data' in hyper_settings, f"missing 'data': {f_hyper_settings}"
 
         try:
             import cat
@@ -578,13 +630,13 @@ if __name__ == "__main__":
         from cat.shared import tokenizer as tknz
         if 'tokenizer' not in hyper_settings:
             sys.stderr.write(
-                f"warning: missing property 'tokenizer', assume the ground truth text files as tokenized ones.")
+                f"warning: missing 'tokenizer', assume the ground truth text files as tokenized ones.")
             istokenized = True
             tokenizer = None
         else:
             # load tokenizer from file
             assert 'location' in hyper_settings[
-                'tokenizer'], f"missing property 'location' in ['tokenizer']: {f_hyper_settings}"
+                'tokenizer'], f"missing 'location' in ['tokenizer']: {f_hyper_settings}"
 
             f_tokenizer = hyper_settings['tokenizer']['location']
             checkExist('f', f_tokenizer)
@@ -622,14 +674,14 @@ if __name__ == "__main__":
                 [_data['scp'] for _data in f_data],
                 [_data['trans'] for _data in f_data],
                 f_out=os.path.join(d_pkl, dataset+'.pkl'),
-                filter=filter, tokenizer=tokenizer, iszh=iszh)
+                filter=filter, tokenizer=tokenizer)
             del f_data
 
     ############ Stage 3  NN training ############
     if s_beg <= 3 and s_end >= 3:
-        if not args.silient:
+        if not args.silent:
             print("{0} {1} {0}".format("="*20, "Stage 3 NN training"))
-        fmt = "# NN training # {}\n" if not args.silient else ""
+        fmt = "# NN training # {}\n" if not args.silent else ""
         try:
             import cat
         except ModuleNotFoundError:
@@ -657,21 +709,32 @@ if __name__ == "__main__":
 
     ############ Stage 4  Decode ############
     if s_beg <= 4 and s_end >= 4:
-        if not args.silient:
+        # FIXME: runing script directly from NN training to decoding always producing SIGSEGV error
+        if s_beg <= 3:
+            os.system(" ".join([
+                sys.executable,     # python interpreter
+                sys.argv[0],        # file script
+                args.expdir,
+                "--silent" if args.silent else "",
+                f"--start_stage={4}",
+                f"--stop_stage={args.stage_end}",
+                f"--ngpu={args.ngpu}"
+            ]))
+            sys.exit(0)
+
+        if not args.silent:
             print("{0} {1} {0}".format("="*20, "Stage 4 Decode"))
-        fmt = "# Decode # {}\n" if not args.silient else ""
-        import re
-        import torch
+        fmt = "# Decode # {}\n" if not args.silent else ""
         try:
             import cat
         except ModuleNotFoundError:
             sys.path.append(cwd)
 
         hyper_settings = readfromjson(f_hyper_settings)
-        assert 'inference' in hyper_settings, f"missing property 'inference': {f_hyper_settings}"
-        assert 'data' in hyper_settings, f"missing property 'data': {f_hyper_settings}"
+        assert 'inference' in hyper_settings, f"missing 'inference': {f_hyper_settings}"
+        assert 'data' in hyper_settings, f"missing 'data': {f_hyper_settings}"
         assert 'test' in hyper_settings[
-            'data'], "missing property 'test' in ['data']: {f_hyper_settings}"
+            'data'], "missing 'test' in ['data']: {f_hyper_settings}"
         if 'topo' not in hyper_settings:
             hyper_settings['topo'] = 'rnnt'
             sys.stdout.write(fmt.format(f"set 'topo' to 'rnnt'"))
@@ -682,10 +745,9 @@ if __name__ == "__main__":
 
         inference_settings = hyper_settings['inference']
         checkdir = os.path.join(args.expdir, 'checks')
-        checkExist('d', checkdir)
 
         # decode
-        assert 'decode' in inference_settings, "missing 'decode' in hyper-p['inference']"
+        assert 'decode' in inference_settings, "missing 'decode' in field:['inference']"
         decode_settings = inference_settings['decode']
 
         if 'resume' in decode_settings:
@@ -706,32 +768,9 @@ if __name__ == "__main__":
                 suffix_avgmodel = 'best-1'
                 checkpoint = os.path.join(checkdir, 'bestckpt.pt')
             else:
-                assert 'avgmodel' in inference_settings, "missing 'avgmodel' in hyper-p['inference']"
-
-                avgmodel_settings = inference_settings['avgmodel']
-                assert 'mode' in avgmodel_settings, "missing 'mode' in hyper-p['inference']['avgmodel']"
-                assert 'num' in avgmodel_settings, "missing 'num' in hyper-p['inference']['avgmodel']"
-                avg_mode, avg_num = avgmodel_settings['mode'], avgmodel_settings['num']
-
-                from avgmodel import find_n_best, average_checkpoints
-                suffix_avgmodel = f"{avg_mode}-{avg_num}"
-                if avg_mode == 'best':
-                    f_check_list = find_n_best(checkdir, avg_num)
-                elif avg_mode == 'last':
-                    pattern = re.compile(r"checkpoint[.]\d{3}[.]pt")
-                    f_check_all = [os.path.join(checkdir, _f) for _f in os.listdir(
-                        checkdir) if pattern.search(_f) is not None]
-                    if len(f_check_all) < avg_num:
-                        raise RuntimeError(
-                            f"trying to do model averaging {avg_num} over {len(f_check_all)} checkpoint.")
-                    f_check_list = sorted(f_check_all, reverse=True)[:avg_num]
-                    del f_check_all
-                else:
-                    raise NotImplementedError(
-                        f"Unknown model averaging mode {avg_mode}")
-                checkpoint = os.path.join(checkdir, suffix_avgmodel+'.pt')
-                params = average_checkpoints(f_check_list)
-                torch.save(params, checkpoint)
+                checkpoint, suffix_avgmodel = model_average(
+                    setting=inference_settings['avgmodel'],
+                    checkdir=checkdir)
 
             _hyper = readfromjson(f_hyper_settings)
             _hyper['inference']['decode']['resume'] = checkpoint
@@ -771,8 +810,8 @@ if __name__ == "__main__":
                 sys.stderr.write(
                     "\n"
                     "To use external LM with RNN-T topo, at least one option is required:\n"
-                    "  1 (higer priority): set 'lmdir' in hyper-p['inference'];\n"
-                    "  2: set both 'lm-config' and 'lm-check' in hyper-p['inference']['decode']\n\n")
+                    "  1 (higer priority): set 'lmdir' in field:['inference'];\n"
+                    "  2: set both 'lm-config' and 'lm-check' in field:['inference']['decode']\n\n")
                 exit(1)
 
             if 'beta' in decode_settings:
@@ -833,7 +872,7 @@ if __name__ == "__main__":
                 # since we using conformer, there's a 1/4 subsapling, if it's not, modify that
                 if "subsample" in inference_settings:
                     sub_factor = inference_settings['subsample']
-                    assert sub_factor > 1, f"can't deal with 'subsample'={sub_factor} in hyper-p['inference']"
+                    assert sub_factor > 1, f"can't deal with 'subsample'={sub_factor} in field:['inference']"
                     sys.stdout.write(fmt.format(
                         f"resolving portion data from train set, might takes a while."))
                     dataset = KaldiSpeechDataset(f_pkl)
@@ -894,9 +933,9 @@ if __name__ == "__main__":
         # compute wer/cer
         from wer import WERParser
         from wer import main as WERMain
-        assert 'er' in inference_settings, "missing 'er' in hyper-p['inference']"
+        assert 'er' in inference_settings, "missing 'er' in field:['inference']"
         err_settings = inference_settings['er']
-        assert 'mode' in err_settings, "missing 'mode' in hyper-p['inference']['er']"
+        assert 'mode' in err_settings, "missing 'mode' in field:['inference']['er']"
 
         f_texts = [datainfo[_set]['trans'] for _set in testsets]
         checkExist('f', f_texts)

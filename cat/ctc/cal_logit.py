@@ -7,7 +7,7 @@ Author: Hongyu Xiang, Keyu An, Huahuan Zheng
 import kaldiio
 
 from .train import build_model as ctc_builder
-from ..shared import coreutils as utils
+from ..shared import coreutils
 from ..shared.encoder import AbsEncoder
 from ..shared.data import (
     ScpDataset,
@@ -16,7 +16,6 @@ from ..shared.data import (
 
 
 import os
-import json
 import time
 import argparse
 import numpy as np
@@ -24,7 +23,6 @@ from tqdm import tqdm
 
 import torch
 import torch.multiprocessing as mp
-import torch.distributed as dist
 from torch.utils.data import DataLoader
 
 
@@ -103,19 +101,19 @@ def worker(pid: int, args: argparse.Namespace, q: mp.Queue, model: AbsEncoder):
 def build_model(args: argparse.Namespace):
     assert args.resume is not None, "Trying to decode with uninitialized parameters. Add --resume"
 
-    with open(args.config, 'r') as fi:
-        configures = json.load(fi)
-
-    model = ctc_builder(None, configures, dist=False)
-    model = utils.load_checkpoint(model, args.resume)
+    model = ctc_builder(coreutils.readjson(args.config), dist=False)
+    model = coreutils.load_checkpoint(model, args.resume)
     model = model.am
     model.eval()
     return model
 
 
 def DecoderParser():
-    parser = utils.BasicDDPParser(
-        istraining=False, prog='CTC decoder.')
+    parser = coreutils.basic_trainer_parser(
+        prog="CTC logit generator.",
+        training=False,
+        isddp=False
+    )
 
     parser.add_argument("--input_scp", type=str, default=None)
     parser.add_argument("--output-dir", type=str, help="Ouput directory.")

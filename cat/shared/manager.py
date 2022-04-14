@@ -10,19 +10,18 @@ from ..shared.data import (
 )
 from ..shared import tokenizer as tknz
 from . import scheduler
-from . import coreutils as utils
+from . import coreutils
 from ._specaug import SpecAug
 from .monitor import MonitorWriter, BASE_METRIC
 
 import os
 import argparse
 import time
-import json
 import shutil
 import glob
 import webdataset as wds
 from collections import OrderedDict
-from typing import Callable, Union, Iterable, Optional, List
+from typing import Callable, Union, Iterable, Optional, List, Any
 from datetime import datetime
 from tqdm import tqdm
 
@@ -43,15 +42,15 @@ class Manager(object):
             Dataset: torch.utils.data.Dataset,
             collate_fn: Callable,
             args: argparse.Namespace,
-            func_build_model: Callable[[argparse.Namespace, dict], Union[nn.Module, nn.parallel.DistributedDataParallel]],
+            func_build_model: Callable[[dict, argparse.Namespace], Union[nn.Module, nn.parallel.DistributedDataParallel]],
             func_train: Optional[Callable] = None,
             func_eval: Optional[Callable] = None,
             extra_tracks: Union[str, List[str], None] = None):
         super().__init__()
 
-        utils.check_parser(args, ['rank', 'gpu', 'workers', 'trset', 'devset', 'databalance',
-                                  'batch_size', 'grad_accum_fold', 'config', 'dir', 'debug',
-                                  'logsdir', 'resume', 'init_model'])
+        coreutils.check_parser(args, ['rank', 'gpu', 'workers', 'trset', 'devset', 'databalance',
+                                      'batch_size', 'grad_accum_fold', 'config', 'dir', 'debug',
+                                      'logsdir', 'resume', 'init_model'])
 
         # setup dataloader
         val_set = Dataset(args.devset)
@@ -108,7 +107,7 @@ class Manager(object):
             tr_set = Dataset(args.trset)
 
             if args.databalance:
-                utils.distprint(
+                coreutils.distprint(
                     "> Enable data balanced loading\n"
                     "  this takes a while for large dataset.", args.gpu)
                 train_sampler = BalancedDistributedSampler(
@@ -117,7 +116,7 @@ class Manager(object):
                     tr_set, batch_sampler=train_sampler,
                     num_workers=args.workers, collate_fn=collate_fn,
                     prefetch_factor=4, persistent_workers=True)
-                utils.distprint(
+                coreutils.distprint(
                     "> Seq length info for balanced loading generated.", args.gpu)
                 args.n_steps = train_sampler.total_size//args.batch_size//args.grad_accum_fold
             else:
@@ -138,18 +137,17 @@ class Manager(object):
         self.valloader = valloader
 
         # Initial model
-        with open(args.config, 'r') as fi:
-            configures = json.load(fi)  # type: dict
-        self.model = func_build_model(args, configures)
+        configures = coreutils.readjson(args.config)  # type: dict
+        self.model = func_build_model(configures, args)
 
-        utils.distprint("> Model built. Size: {:.2f}M".format(
-            utils.count_parameters(self.model)/1e6), args.gpu)
+        coreutils.distprint("> Model built. Size: {:.2f}M".format(
+            coreutils.count_parameters(self.model)/1e6), args.gpu)
 
         # get GPU info and create readme.md
-        gpu_info = utils.gather_all_gpu_info(args.gpu)
+        gpu_info = coreutils.gather_all_gpu_info(args.gpu)
         if args.rank == 0 and not args.debug:
-            utils.gen_readme(os.path.join(args.dir, 'readme.md'),
-                             model=self.model, gpu_info=gpu_info)
+            coreutils.gen_readme(os.path.join(args.dir, 'readme.md'),
+                                 model=self.model, gpu_info=gpu_info)
 
         # hook the function
         if func_train is None:
@@ -165,7 +163,7 @@ class Manager(object):
         # Initial specaug module
         if 'specaug_config' not in configures:
             specaug = None
-            utils.distprint("> Disable SpecAug", args.gpu)
+            coreutils.distprint("> Disable SpecAug", args.gpu)
         else:
             specaug = SpecAug(**configures['specaug_config'])
             specaug = specaug.to(f'cuda:{args.gpu}')
@@ -200,13 +198,13 @@ class Manager(object):
 
         assert args.resume is None or args.init_model is None, f"Don't specify both --resume and --init-model"
         if args.resume is not None:
-            utils.distprint(
+            coreutils.distprint(
                 f"> Resuming from: {args.resume}", args.gpu)
             checkpoint = torch.load(
                 args.resume, map_location=f'cuda:{args.gpu}')  # type: OrderedDict
             self.load(checkpoint)
         elif args.init_model is not None:
-            utils.distprint(
+            coreutils.distprint(
                 f"> Initialize model from: {args.init_model}", args.gpu)
             checkpoint = torch.load(
                 args.init_model, map_location=f'cuda:{args.gpu}')  # type: OrderedDict
@@ -214,7 +212,7 @@ class Manager(object):
 
     def run(self, args: argparse.Namespace):
 
-        utils.check_parser(
+        coreutils.check_parser(
             args, ['checksdir', 'rank', 'gpu', 'dir', 'checkall'])
 
         self.model.train()
@@ -238,7 +236,7 @@ class Manager(object):
 
             state, info = self.scheduler.step(self.epoch, metrics)
 
-            utils.distprint(info, args.gpu)
+            coreutils.distprint(info, args.gpu)
             self.model.train()
 
             if args.checkall:
@@ -258,7 +256,8 @@ class Manager(object):
                 if args.checkall and self.rank == 0 and not self.DEBUG:
                     shutil.copyfile(checkpoint, os.path.join(
                         args.checksdir, "checkpoint.pt"))
-                utils.distprint("Terminated: GPU[%d]" % self.rank, args.gpu)
+                coreutils.distprint(
+                    "Terminated: GPU[%d]" % self.rank, args.gpu)
                 dist.barrier()
                 break
             elif state == 1:
@@ -375,8 +374,8 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
 
         return detach_loss, n_batch
 
-    utils.check_parser(args, ['grad_accum_fold', 'n_steps', 'verbose',
-                              'print_freq', 'rank', 'gpu', 'debug', 'amp', 'grad_norm'])
+    coreutils.check_parser(args, ['grad_accum_fold', 'n_steps', 'verbose',
+                                  'print_freq', 'rank', 'gpu', 'debug', 'amp', 'grad_norm'])
 
     model = manager.model
     scheduler = manager.scheduler
@@ -454,7 +453,7 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
             n_time = (i+1)//fold
 
             if args.verbose:
-                utils.distprint(
+                coreutils.distprint(
                     f"[{manager.epoch} - {n_time}/{args.n_steps}] | data {t_data:6.3f} | time {time.time()-t_last_step:6.3f} | "
                     f"loss {tolog['loss']:.2e} | lr {tolog['lr']:.2e}",
                     args.gpu)

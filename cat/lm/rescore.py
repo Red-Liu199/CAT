@@ -12,8 +12,8 @@ P.S. CPU is faster when rescoring with n-gram model, while GPU
      would be faster rescoring with NN model.
 """
 
-from ..shared import coreutils as utils
 from ..shared import tokenizer as tknz
+from ..shared import coreutils
 from . import lm_builder
 from ..shared.decoder import (
     AbsDecoder,
@@ -25,7 +25,6 @@ from ..shared.data import (
 )
 
 import os
-import json
 import time
 import pickle
 import argparse
@@ -64,7 +63,7 @@ def main(args):
     assert os.path.isdir(cachedir), f"Cache directory not found: {cachedir}"
     if not os.access(cachedir, os.W_OK):
         raise PermissionError(f"Permission denied for writing to {cachedir}")
-    fmt = os.path.join(cachedir, utils.gen_random_string()+r".{}.tmp")
+    fmt = os.path.join(cachedir, coreutils.randstr()+r".{}.tmp")
 
     try:
         mp.set_start_method('spawn')
@@ -189,19 +188,20 @@ def build_lm(f_config: str, f_check: str, device='cuda') -> AbsDecoder:
     if isinstance(device, int):
         device = f'cuda:{device}'
 
-    with open(f_config, 'r') as fi:
-        configures = json.load(fi)
-    model = lm_builder(None, configures, dist=False)
+    model = lm_builder(coreutils.readjson(f_config), dist=False)
     if not isinstance(model.lm, NGram):
-        model = utils.load_checkpoint(model.to(device), f_check)
+        model = coreutils.load_checkpoint(model.to(device), f_check)
     model = model.lm
     model.eval()
     return model
 
 
 def RescoreParser():
-    parser = utils.BasicDDPParser(
-        istraining=False, prog="Rescore with give n-best list and LM")
+    parser = coreutils.basic_trainer_parser(
+        prog="Rescore with give n-best list and LM",
+        training=False,
+        isddp=False
+    )
 
     parser.add_argument("nbestlist", type=str,
                         help="Path to N-best list files.")

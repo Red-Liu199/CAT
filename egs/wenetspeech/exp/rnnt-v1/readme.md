@@ -17,7 +17,13 @@ dev             %SER 71.07 | %CER 11.16 [ 36887 / 330498, 1279 ins, 16227 del, 1
 test_net        %SER 65.49 | %CER 12.76 [ 53035 / 415746, 1943 ins, 12961 del, 38131 sub ]
 test_meeting    %SER 91.77 | %CER 20.97 [ 46214 / 220385, 1224 ins, 22925 del, 22065 sub ]
 aishell-test    %SER 49.99 | %CER 7.22 [ 7560 / 104765, 249 ins, 201 del, 7110 sub ]
- 
+
+SF + lm-trans 0.25 3.0
+dev     %SER 66.51 | %CER 9.33 [ 30828 / 330498, 3351 ins, 8563 del, 18914 sub ]
+test_net        %SER 63.38 | %CER 12.22 [ 50795 / 415746, 5734 ins, 7268 del, 37793 sub ]
+test_meeting    %SER 90.82 | %CER 18.42 [ 40596 / 220385, 5272 ins, 11091 del, 24233 sub ]
+aishell-test    %SER 46.46 | %CER 6.83 [ 7156 / 104765, 831 ins, 99 del, 6226 sub ]
+
 128 beam
 dev             %SER 71.10 | %CER 11.14 [ 36833 / 330498, 1284 ins, 16210 del, 19339 sub ]
 test_net        %SER 65.51 | %CER 12.75 [ 52991 / 415746, 1942 ins, 12914 del, 38135 sub ]

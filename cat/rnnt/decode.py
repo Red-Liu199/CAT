@@ -8,8 +8,8 @@ Parallel decode with distributed GPU/CPU support
 
 from ..lm import lm_builder
 from . import rnnt_builder
+from ..shared import coreutils
 from .beam_search_transducer import TransducerBeamSearcher
-from ..shared import coreutils as utils
 from ..shared import tokenizer as tknz
 from ..shared.data import (
     ScpDataset,
@@ -17,7 +17,6 @@ from ..shared.data import (
 )
 
 import os
-import json
 import time
 import pickle
 import argparse
@@ -242,24 +241,23 @@ def build_model(args, device) -> Tuple[torch.nn.Module, Union[torch.nn.Module, N
     if isinstance(device, int):
         device = f'cuda:{device}'
 
-    with open(args.config, 'r') as fi:
-        configures = json.load(fi)
-
-    model = rnnt_builder(args, configures, dist=False, verbose=False)
+    model = rnnt_builder(
+        coreutils.readjson(args.config),
+        args, dist=False, verbose=False
+    )
     model = model.to(device)
     assert args.resume is not None, "Trying to decode with uninitialized parameters. Add --resume"
 
-    model = utils.load_checkpoint(model, args.resume)
+    model = coreutils.load_checkpoint(model, args.resume)
     model.eval()
 
     if args.lm_config is None:
         return model, None
     else:
-        with open(args.lm_config, 'r') as fi:
-            lm_configures = json.load(fi)
-        ext_lm_model = lm_builder(args, lm_configures, dist=False)
+        lm_configures = coreutils.readjson(args.lm_config)
+        ext_lm_model = lm_builder(lm_configures, args, dist=False)
         if lm_configures['decoder']['type'] != "NGram":
-            ext_lm_model = utils.load_checkpoint(
+            ext_lm_model = coreutils.load_checkpoint(
                 ext_lm_model.to(device), args.lm_check)
         ext_lm_model = ext_lm_model.lm
         ext_lm_model.eval()
@@ -268,8 +266,10 @@ def build_model(args, device) -> Tuple[torch.nn.Module, Union[torch.nn.Module, N
 
 def DecoderParser():
 
-    parser = utils.BasicDDPParser(
-        istraining=False, prog='RNN-Transducer decoder.')
+    parser = coreutils.basic_trainer_parser(
+        prog='RNN-Transducer decoder.',
+        training=False
+    )
 
     parser.add_argument("--lm-config", type=str, default=None,
                         help="Config of external LM.")

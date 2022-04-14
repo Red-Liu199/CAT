@@ -5,6 +5,7 @@
 """basic functions impl"""
 
 import os
+import json
 import heapq
 import uuid
 import argparse
@@ -30,6 +31,14 @@ def check_parser(args: argparse.Namespace, expected_attrs: List[str]):
             f"Expect parser to have these arguments, but not found:\n    {' '.join(unseen)}")
     else:
         return None
+
+
+def readjson(file_like_object: str) -> dict:
+    assert os.path.isfile(
+        file_like_object), f"File: '{file_like_object}' not found."
+    with open(file_like_object, 'r') as fit:
+        data = json.load(fit)
+    return data
 
 
 def pad_list(xs: torch.Tensor, pad_value=0, dim=0) -> torch.Tensor:
@@ -184,24 +193,52 @@ def highlight_msg(msg: Union[Sequence[str], str]):
 '''
 NOTE (Huahuan):
     with --databalance, batch size on each device might be different,
-    however, torch DDP automatically make a allreduce on gradients
-    then average them by world size during backward.
+    however, torch DDP automatically makes the allreduce on gradients
+    then averages them by world size during backward.
     which assumes the batch sizes across devices are the same.
     To address this, we re-calculate the loss in a hack way:
-        loss_normalized = sum(loss) / global_batch_size * world_size
-    Currently the loss is:
-        loss_current_normalized = mean_on_device(loss) / world_size
-    Substitute `loss_normalized` to replace `mean_on_device(loss)`, here is
-        loss_current_normalized' = sum(loss) / global_batch_size
+        local_loss_new = sum_over_local_batches(local_loss) / global_batch_size * world_size
+
+    Here we prove the new hacked-loss is equivalent to the standard one:
+    Currently the loss is (in standard DDP):
+        loss_normalized = sum_over_devices(mean_over_local_batches(local_loss)) / world_size
+                        = sum_over_devices(sum_over_local_batches(local_loss) / (global_batch_size / world_size))  / world_size
+                        = sum_over_devices(sum_over_local_batches(local_loss)) / global_batch_size
+
+
+    With re-defining the local_loss, we substitute `local_loss_new` to replace `mean_over_local_batches(local_loss)`, here is
+        loss_normalized_new' = sum_over_devices(sum_over_local_batches(local_loss) / global_batch_size)
+                             = loss_normalized
+
     such that the gradient is properly computed. Be aware that this
-    might cause numerical difference with float point given the fact that
-        probably: (f * N) / N != f
+    might cause numerical difference given the fact that probably: (f * N) / N != f
 '''
 
 
-def BasicDDPParser(istraining: bool = True, prog: str = '') -> argparse.ArgumentParser:
+def basic_ddp_parser(prog: str = '') -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog=prog)
-    if istraining:
+    parser.add_argument('-j', '--workers', default=1, type=int, metavar='N',
+                        help='number of data loading workers (default: 1)')
+    parser.add_argument('--rank', default=0, type=int,
+                        help='node rank for distributed training')
+    parser.add_argument('--dist-url', default='tcp://localhost:13457', type=str,
+                        help='url used to set up distributed training')
+    parser.add_argument('--dist-backend', default='nccl', type=str,
+                        help='distributed backend')
+    parser.add_argument('--world-size', default=1, type=int,
+                        help='number of nodes for distributed training')
+    parser.add_argument('--gpu', default=None, type=int,
+                        help='GPU id to use.')
+    return parser
+
+
+def basic_trainer_parser(prog: str = '', training: bool = True,  isddp: bool = True) -> argparse.ArgumentParser:
+    if isddp:
+        parser = basic_ddp_parser(prog=prog)
+    else:
+        parser = argparse.ArgumentParser(prog=prog)
+
+    if training:
         parser.add_argument('-p', '--print-freq', default=10, type=int,
                             metavar='N', help='print frequency (default: 10)')
         parser.add_argument('--batch-size', default=256, type=int, metavar='N',
@@ -242,23 +279,10 @@ def BasicDDPParser(istraining: bool = True, prog: str = '') -> argparse.Argument
     parser.add_argument("--init-model", type=str, default=None,
                         help="Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself (w/o optimizer)")
 
-    parser.add_argument('-j', '--workers', default=1, type=int, metavar='N',
-                        help='number of data loading workers (default: 1)')
-    parser.add_argument('--rank', default=0, type=int,
-                        help='node rank for distributed training')
-    parser.add_argument('--dist-url', default='tcp://localhost:13457', type=str,
-                        help='url used to set up distributed training')
-    parser.add_argument('--dist-backend', default='nccl', type=str,
-                        help='distributed backend')
-    parser.add_argument('--world-size', default=1, type=int,
-                        help='number of nodes for distributed training')
-    parser.add_argument('--gpu', default=None, type=int,
-                        help='GPU id to use.')
-
     return parser
 
 
-def SetRandomSeed(seed: int = 0):
+def set_random_seed(seed: int = 0):
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
     np.random.seed(seed)
@@ -385,11 +409,11 @@ def main_spawner(args, _main_worker: Callable[[int, int, argparse.Namespace], No
 
     ngpus_per_node = torch.cuda.device_count()
     args.world_size = ngpus_per_node * args.world_size
-    print(f"Global number of GPUs: {args.world_size}")
+    print(f"Total number of GPUs: {args.world_size}")
     mp.spawn(_main_worker, nprocs=ngpus_per_node, args=(ngpus_per_node, args))
 
 
-def setPath(args: argparse.Namespace):
+def setup_path(args: argparse.Namespace):
     """
     Set args.checksdir and args.logsdir
     """
@@ -443,5 +467,5 @@ def load_checkpoint(model: Union[torch.nn.Module, torch.nn.parallel.DistributedD
     return model
 
 
-def gen_random_string():
+def randstr():
     return str(uuid.uuid4())

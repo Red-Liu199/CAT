@@ -7,12 +7,11 @@ Transducer trainer.
 """
 
 from ..shared import Manager
-from ..shared import coreutils as utils
+from ..shared import coreutils
 from ..shared import encoder as tn_zoo
 from ..shared import decoder as pn_zoo
 from ..shared.layer import TimeReduction
 from ..shared import SpecAug
-from ..shared.decoder import AbsDecoder
 from ..shared.data import (
     KaldiSpeechDataset,
     sortedPadCollateTransducer
@@ -32,7 +31,7 @@ from warp_rnnt import rnnt_loss as RNNTLoss
 import warp_rnnt
 if warp_rnnt.__version__ >= '0.7.1':
     from warp_rnnt import fused_rnnt_loss_ as RNNTFusedLoss
-from typing import Union, Optional
+from typing import Union, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -41,7 +40,7 @@ from torch.cuda.amp import autocast
 
 
 def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
-    utils.SetRandomSeed(args.seed)
+    coreutils.set_random_seed(args.seed)
     args.gpu = gpu
     args.rank = args.rank * ngpus_per_node + gpu
     torch.cuda.set_device(args.gpu)
@@ -59,8 +58,8 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
 
 class TransducerTrainer(nn.Module):
     def __init__(self,
-                 encoder: nn.Module = None,
-                 decoder: AbsDecoder = None,
+                 encoder: tn_zoo.AbsEncoder = None,
+                 decoder: pn_zoo.AbsDecoder = None,
                  jointnet: AbsJointNet = None,
                  # enable compact layout, would consume less memory and fasten the computation of RNN-T loss.
                  compact: bool = False,
@@ -212,7 +211,19 @@ class TransducerTrainer(nn.Module):
 
 
 @torch.no_grad()
-def build_model(args, configuration: dict, dist: bool = True, verbose: bool = True, wrapped: bool = True) -> Union[nn.Module, nn.parallel.DistributedDataParallel]:
+def build_model(
+        configuration: dict,
+        args: Optional[Union[argparse.Namespace, dict]] = None,
+        dist: bool = True,
+        wrapped: bool = True,
+        verbose: bool = True) -> Union[nn.parallel.DistributedDataParallel, TransducerTrainer, Tuple[tn_zoo.AbsEncoder, pn_zoo.AbsDecoder, AbsJointNet]]:
+
+    if args is not None:
+        if isinstance(args, argparse.Namespace):
+            args = vars(args)
+        elif not isinstance(args, dict):
+            raise ValueError(f"unsupport type of args: {type(args)}")
+
     def _load_and_immigrate(orin_dict_path: str, str_src: str, str_dst: str) -> OrderedDict:
         if not os.path.isfile(orin_dict_path):
             raise FileNotFoundError(f"{orin_dict_path} is not a valid file.")
@@ -264,7 +275,7 @@ def build_model(args, configuration: dict, dist: bool = True, verbose: bool = Tr
                 config['pretrained'], prefix, '')
             _model.load_state_dict(state_dict, strict=False)
             if sum(param.data.sum()for param in _model.parameters()) == init_sum:
-                utils.highlight_msg(
+                coreutils.highlight_msg(
                     f"WARNING: It seems {module} pretrained model is not properly loaded.")
 
         if 'freeze' in config and config['freeze']:
@@ -279,7 +290,7 @@ def build_model(args, configuration: dict, dist: bool = True, verbose: bool = Tr
         else:
             setattr(_model, 'freeze', False)
 
-        if verbose and args.rank == 0:
+        if verbose and args['rank'] == 0:
             if 'pretrained' not in config:
                 _path = ''
             else:
@@ -292,6 +303,7 @@ def build_model(args, configuration: dict, dist: bool = True, verbose: bool = Tr
     assert 'encoder' in configuration
     assert 'decoder' in configuration
     assert 'joint' in configuration
+    verbose = False if args is None else verbose
 
     encoder = _build(configuration['encoder'], 'encoder')
     decoder = _build(configuration['decoder'], 'decoder')
@@ -319,19 +331,21 @@ def build_model(args, configuration: dict, dist: bool = True, verbose: bool = Tr
             setattr(model, 'requires_slice', True)
         return model
 
-    # make batchnorm synced across all processes
-    model = utils.convert_syncBatchNorm(model)
+    assert args is not None, f"You must tell the GPU id to build a DDP model."
 
-    model.cuda(args.gpu)
+    # make batchnorm synced across all processes
+    model = coreutils.convert_syncBatchNorm(model)
+
+    model.cuda(args['gpu'])
     model = torch.nn.parallel.DistributedDataParallel(
-        model, device_ids=[args.gpu])
+        model, device_ids=[args['gpu']])
     if is_part_freeze:
         setattr(model, 'requires_slice', True)
     return model
 
 
 def RNNTParser():
-    parser = utils.BasicDDPParser("RNN-Transducer training")
+    parser = coreutils.basic_trainer_parser("RNN-Transducer training")
     parser.add_argument("--tokenizer", type=str,
                         help="Specify tokenizer. Currently, only used with --large-dataset.")
     parser.add_argument("--large-dataset", action="store_true",
@@ -344,5 +358,5 @@ def main(args: argparse.Namespace = None):
         parser = RNNTParser()
         args = parser.parse_args()
 
-    utils.setPath(args)
-    utils.main_spawner(args, main_worker)
+    coreutils.setup_path(args)
+    coreutils.main_spawner(args, main_worker)

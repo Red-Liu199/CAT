@@ -2,7 +2,7 @@
 # Author: Huahuan Zheng (maxwellzh@outlook.com)
 
 from ..shared import Manager
-from ..shared import coreutils as utils
+from ..shared import coreutils
 from ..shared.decoder import AbsDecoder
 from ..shared.encoder import AbsEncoder
 from .train import build_model as rnnt_builder
@@ -20,7 +20,6 @@ import warp_rnnt
 
 import math
 import os
-import json
 import gather
 import argparse
 from tqdm import tqdm
@@ -33,7 +32,7 @@ from torch.cuda.amp import autocast, GradScaler
 
 
 def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
-    utils.SetRandomSeed(args.seed)
+    coreutils.set_random_seed(args.seed)
     args.gpu = gpu
     args.rank = args.rank * ngpus_per_node + gpu
     torch.cuda.set_device(args.gpu)
@@ -224,8 +223,8 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
 
         return detach_loss, n_batch
 
-    utils.check_parser(args, ['grad_accum_fold', 'n_steps',
-                              'print_freq', 'rank', 'gpu', 'debug', 'amp', 'grad_norm'])
+    coreutils.check_parser(args, ['grad_accum_fold', 'n_steps',
+                                  'print_freq', 'rank', 'gpu', 'debug', 'amp', 'grad_norm'])
 
     model = manager.model
     scheduler = manager.scheduler
@@ -324,9 +323,11 @@ def build_model(args, configuration: dict, dist: bool = True) -> DiscTransducerT
     ctc_config = configuration['ctc-sampler']
     assert 'pretrain-config' in ctc_config
     assert 'pretrain-check' in ctc_config
-    with open(ctc_config['pretrain-config'], 'r') as fi:
-        ctc_setting = json.load(fi)
-    ctc_model = ctc_builder(None, ctc_setting, dist=False, wrapper=False)
+    ctc_model = ctc_builder(
+        coreutils.readjson(ctc_config['pretrain-config']),
+        dist=False,
+        wrapper=False
+    )
     ctc_model.load_state_dict(_load_and_immigrate(
         ctc_config['pretrain-check'], 'module.am.', ''))
     ctc_model.eval()
@@ -335,7 +336,7 @@ def build_model(args, configuration: dict, dist: bool = True) -> DiscTransducerT
 
     assert 'searcher' in configuration
     encoder, decoder, joint = rnnt_builder(
-        args, configuration, dist=False, verbose=True, wrapped=False)
+        configuration, args,  dist=False, wrapped=False)
 
     labels = [str(i) for i in range(ctc_model.classifier.out_features)]
     searcher = CTCBeamDecoder(
@@ -349,7 +350,7 @@ def build_model(args, configuration: dict, dist: bool = True) -> DiscTransducerT
         return model
 
     # make batchnorm synced across all processes
-    model = utils.convert_syncBatchNorm(model)
+    model = coreutils.convert_syncBatchNorm(model)
 
     model.cuda(args.gpu)
     model = torch.nn.parallel.DistributedDataParallel(
@@ -360,12 +361,12 @@ def build_model(args, configuration: dict, dist: bool = True) -> DiscTransducerT
 
 
 if __name__ == "__main__":
-    parser = utils.BasicDDPParser()
+    parser = coreutils.basic_trainer_parser()
     parser.add_argument("--gen", action="store_true",
                         help="Generate noise samples, used with --sample_path")
     parser.add_argument("--sample_path", type=str,
                         help="Path to generated samples.")
     args = parser.parse_args()
 
-    utils.setPath(args)
-    utils.main_spawner(args, main_worker)
+    coreutils.setup_path(args)
+    coreutils.main_spawner(args, main_worker)
