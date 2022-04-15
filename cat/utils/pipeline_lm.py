@@ -134,8 +134,10 @@ if __name__ == "__main__":
 
         hyper_settings = readfromjson(f_hyper_settings)
         assert 'data' in hyper_settings, f"missing 'data': {f_hyper_settings}"
-        assert 'test' in hyper_settings[
-            'data'], "missing 'test' in ['data']: {f_hyper_settings}"
+        if 'test' not in hyper_settings['data']:
+            sys.stderr.write(
+                "missing 'test' in field:['data'], skip evaluation.\n")
+            sys.exit(0)
 
         if 'inference' not in hyper_settings:
             hyper_settings['inference'] = {}

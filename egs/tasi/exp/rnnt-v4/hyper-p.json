@@ -1,0 +1,72 @@
+{
+    "data": {
+        "train": [
+            "tasi-reset-train-clean",
+            "tasi-reset-train-noised"
+        ],
+        "dev": [
+            "tasi-reset-dev"
+        ],
+        "test": [
+            "cntv-test",
+            "kingline-test",
+            "aishell-test",
+            "hunan-test",
+            "yys-test",
+            "speechio_asr_zh00000",
+            "speechio_asr_zh00001",
+            "speechio_asr_zh00002",
+            "speechio_asr_zh00003",
+            "speechio_asr_zh00004",
+            "speechio_asr_zh00005",
+            "speechio_asr_zh00006",
+            "speechio_asr_zh00007"
+        ],
+        "filter": "10:1500",
+        "lang": "zh-cn"
+    },
+    "tokenizer": {
+        "type": "SentencePieceTokenizer",
+        "property": {
+            "model_type": "char",
+            "add_dummy_prefix": false,
+            "use_all_vocab": true,
+            "model_prefix": "sentencepiece/tasi_char/spm",
+            "vocab_size": 5956
+        },
+        "location": "exp/rnnt-v2/tokenizer.tknz"
+    },
+    "train": {
+        "batch_size": 360,
+        "grad-norm": 5.0,
+        "databalance": false,
+        "grad-accum-fold": 8,
+        "checkall": true,
+        "amp": true,
+        "trset": "/mnt/nvme_workspace/zhenghh/tasi-train-*/tasi-*.tar",
+        "tokenizer": "exp/rnnt-v2/tokenizer.tknz",
+        "large-dataset": true,
+        "world-size": 2,
+        "rank": 0,
+        "dist-url": "tcp://192.168.0.15:13245"
+    },
+    "inference": {
+        "avgmodel": {
+            "mode": "best",
+            "num": 10
+        },
+        "decode": {
+            "algo": "rna",
+            "nj": 32,
+            "beam-size": 16,
+            "cpu": true,
+            "batchfly": true,
+            "resume": "exp/rnnt-v4/checks/best-10.pt"
+        },
+        "er": {
+            "mode": "cer",
+            "oracle": false
+        }
+    },
+    "commit": "6e0d7d7cd5c0bf28422426a2dcfe6120fdd1b4ca"
+}

@@ -82,7 +82,7 @@ def main(args: argparse):
                 'one-best': True
             }, InterpolateParser(), [cache_file]
         ))
-        print('tunning: ' +
+        print('tuning: ' +
               ' | '.join([f"{x:4.2f}" for x in tuned_metric]) + '  ', end='')
         wer = WERMain(updateNamespaceFromDict(
             {

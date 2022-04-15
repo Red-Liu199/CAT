@@ -135,7 +135,7 @@ if __name__ == "__main__":
         total_lines = sum(len(CorpusDataset(dataset))
                           for dataset in args.input)
 
-    num_process = 48
+    num_process = os.cpu_count()//2
     allargs = dispatch_jobs(total_lines, num_process)
     with Pool(processes=len(allargs)) as pool:
         files_list = pool.map(unpack, [(args,)+d_arg for d_arg in allargs])

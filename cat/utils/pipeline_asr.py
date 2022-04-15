@@ -488,7 +488,6 @@ def TrainTokenizer(f_hyper: str):
             sys.stderr.write(
                 "TrainTokenizer(): for Asian language, it's your duty to remove the segment spaces up to your requirement.\n")
 
-    f_corpus_tmp = combineText(hyper_settings['data']['train'])
     tokenizer_type = hyper_settings['tokenizer']['type']
     if 'property' not in hyper_settings['tokenizer']:
         hyper_settings['tokenizer']['property'] = {}
@@ -499,12 +498,15 @@ def TrainTokenizer(f_hyper: str):
         sys.path.append(os.getcwd())
     from cat.shared import tokenizer as tknz
     if tokenizer_type == 'SentencePieceTokenizer':
+        f_corpus_tmp = combineText(hyper_settings['data']['train'])
         sp_settings, (f_tokenizer, _) = resolve_sp_path(
             hyper_settings['tokenizer']['property'], os.path.basename(os.getcwd()), allow_making=True)
         sentencepiece_train(f_corpus_tmp, **sp_settings)
         hyper_settings['tokenizer']['property'] = sp_settings
         tokenizer = tknz.SentencePieceTokenizer(spmodel=f_tokenizer)
         hyper_settings['tokenizer']['property']['vocab_size'] = tokenizer.vocab_size
+
+        os.remove(f_corpus_tmp)
     elif tokenizer_type == 'JiebaTokenizer':
         # jieba tokenizer doesn't need training
         tokenizer = tknz.JiebaTokenizer(
@@ -515,7 +517,6 @@ def TrainTokenizer(f_hyper: str):
     tknz.save(tokenizer, hyper_settings['tokenizer']['location'])
 
     dumpjson(hyper_settings, f_hyper)
-    os.remove(f_corpus_tmp)
 
 
 def model_average(
@@ -566,7 +567,6 @@ def model_average(
     for k in list(params.keys()):
         if k != 'model':
             del params[k]
-
     torch.save(params, checkpoint)
     return checkpoint, suffix_avgmodel
 
@@ -918,7 +918,7 @@ if __name__ == "__main__":
             decode_settings['output_prefix'] = decode_out_prefix+f'_{_set}'
             decode_settings['input_scp'] = scp
             sys.stdout.write(fmt.format(
-                f"{scp} -> {decode_settings['output_prefix']}"))
+                f"{_set} -> {decode_settings['output_prefix']}"))
 
             # FIXME: this canonot be spawned via mp_spawn, otherwise error would be raised
             #        possibly due to the usage of mp.Queue
