@@ -16,8 +16,9 @@ import webdataset as wds
 def parsingData(
         f_scps: Union[List[str], str],
         f_labels: Union[List[str], str],
-        f_out_fmt: str,
-        filter: str = None,
+        d_out: str,      # output directory
+        fmt: str = "data-%05d.tar",       # tar file name format
+        filter_group: List[str] = None,
         iszh: bool = False):
     """Parsing audio feature and text label into pickle file.
 
@@ -29,23 +30,27 @@ def parsingData(
             such as '100:2000' means remove those whose length is shorter than 100 or longer than 2000. Default: None
     """
 
-    os.makedirs(os.path.dirname(f_out_fmt), exist_ok=True)
+    os.makedirs(d_out, exist_ok=True)
 
     if isinstance(f_scps, str):
         f_scps = [f_scps]
     if isinstance(f_labels, str):
         f_labels = [f_labels]
 
-    l_min = 1
-    l_max = float('inf')
-    if filter is not None:
-        assert ':' in filter, f"parsingData: invalid filter format {filter}"
-        l_bound, u_bound = (i for i in filter.split(':'))
-        if l_bound != '':
-            l_min = int(l_bound)
-        if u_bound != '':
-            l_max = int(u_bound)
+    # initialize filter bounds
+    if filter_group is None:
+        filter_group = [':']
 
+    filter_bound = []   # type: List[Tuple[int, int]]
+    for filt in filter_group:
+        assert ':' in filt, f"parsingData: invalid filter format {filt}"
+        l_bound, u_bound = (i for i in filt.split(':'))
+        l_bound = 1 if l_bound == '' else int(l_bound)
+        u_bound = 2**32-1 if u_bound == '' else int(u_bound)
+        filter_bound.append((l_bound, u_bound))
+    # it's your duty to ensure the intervals are not overlap
+    filter_bound = sorted(filter_bound, key=lambda item: item[0])
+    del filter_group
     # process label files
     labels = []
     for _f_lb in f_labels:
@@ -74,45 +79,53 @@ def parsingData(
         f"instead {num_utts} != {num_labels}"
 
     f_opened = {}
-    with wds.ShardWriter(f_out_fmt, maxcount=2000) as sink:
-        for n, _f_scp in enumerate(f_scps):
-            with open(_f_scp, 'r') as fi_scp:
-                for line in tqdm(fi_scp, total=num_utts_individual[n]):
-                    key, loc_ark = line.split()
-                    tag = label_dict[key]
-                    feature = kaldiio.load_mat(
-                        loc_ark, fd_dict=f_opened)   # type:np.ndarray
+    if len(filter_bound) > 1:
+        sinks = []
+        for l, u in filter_bound:
+            suffix = '' if u == (2**32-1) else str(u)
+            subdir = os.path.join(d_out, f"{l}_{u}")
+            os.makedirs(subdir, exist_ok=True)
+            sinks.append(
+                wds.ShardWriter(os.path.join(subdir, fmt), maxcount=2000)
+            )
+    else:
+        sinks = [wds.ShardWriter(os.path.join(d_out, fmt), maxcount=2000)]
 
-                    if feature.shape[0] < l_min or feature.shape[0] > l_max:
-                        continue
+    for n, _f_scp in enumerate(f_scps):
+        with open(_f_scp, 'r') as fi_scp:
+            for line in tqdm(fi_scp, total=num_utts_individual[n]):
+                key, loc_ark = line.split()
+                tag = label_dict[key]
+                feature = kaldiio.load_mat(
+                    loc_ark, fd_dict=f_opened)   # type:np.ndarray
 
-                    sink.write({
-                        '__key__': key,
-                        "mat.npy": np.asarray(feature, dtype=np.float32),
-                        "label.txt": tag
-                    })
+                L = feature.shape[0]
+                for (l, u), _sink in zip(filter_bound, sinks):
+                    if l <= L and L < u:
+                        _sink.write({
+                            '__key__': key,
+                            "mat.npy": np.asarray(feature, dtype=np.float32),
+                            "label.txt": tag
+                        })
+                        break
 
     for f in f_opened.values():
         f.close()
 
-
-def trans_kaldi2tar(f_scp, f_text, fmt_dest):
-
-    # train set
-    parsingData(
-        f_scp,
-        f_text,
-        fmt_dest,
-        filter="10:1500",
-        iszh=True)
+    for s in sinks:
+        s.close()
 
 
 if __name__ == "__main__":
     with open('data/.CATDATA.info', 'r') as fi:
         srcdata = json.load(fi)
 
-    trans_kaldi2tar(
-        f_scp=srcdata["train_l"]['scp'],
-        f_text=srcdata["train_l"]['trans'],
-        fmt_dest="./wenet-train-l-len1201_1500/wenetspeech-%05d.tar",
-    )
+    for subset in ['dev']:
+        parsingData(
+            f_scps=srcdata[subset]['scp'],
+            f_labels=srcdata[subset]['trans'],
+            d_out="./debug-wds",
+            fmt=f"wenet-{subset}-%05d.tar",
+            filter_group=["10:1500"],
+            iszh=True
+        )

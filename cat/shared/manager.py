@@ -20,6 +20,7 @@ import time
 import shutil
 import glob
 import webdataset as wds
+from braceexpand import braceexpand
 from collections import OrderedDict
 from typing import Callable, Union, Iterable, Optional, List, Any
 from datetime import datetime
@@ -77,7 +78,10 @@ class Manager(object):
             os.environ['RANK'] = str(dist.get_rank())
             os.environ['WORLD_SIZE'] = str(dist.get_world_size())
             tr_set = (wds.WebDataset(
-                glob.glob(args.trset),
+                # expand expression first with braceexpand, then glob, e.g.
+                # "{a,b,c}/*.tar" -> ["a/*.tar", "b/*.tar", "c/*.tar"] -> ["a/1.tar", "a/2.tar", ...]
+                [f for p_expanded in braceexpand(args.trset)
+                 for f in glob.glob(p_expanded)],
                 shardshuffle=True,
                 nodesplitter=wds.shardlists.split_by_node)
                 # buffer size of shuffling
