@@ -56,10 +56,10 @@ def main(args):
         world_size = torch.cuda.device_count()
     args.world_size = world_size
 
-    if args.rescore and args.alpha is None:
+    if args.rescore and args.alpha == 0.:
         if not args.silience:
             print("WARNING: "
-                  f"trying to rescore with alpha not specified.\n"
+                  f"trying to rescore with alpha=0.0.\n"
                   "set rescore=False")
         args.rescore = False
 
@@ -275,9 +275,9 @@ def DecoderParser():
                         help="Config of external LM.")
     parser.add_argument("--lm-check", type=str, default=None,
                         help="Checkpoint of external LM.")
-    parser.add_argument("--alpha", type=float, default=None,
+    parser.add_argument("--alpha", type=float, default=0.,
                         help="Weight of external LM.")
-    parser.add_argument("--beta", type=float, default=None,
+    parser.add_argument("--beta", type=float, default=0.,
                         help="Penalty value of external LM.")
 
     parser.add_argument("--input_scp", type=str, default=None)

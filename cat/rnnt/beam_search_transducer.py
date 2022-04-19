@@ -314,8 +314,8 @@ class TransducerBeamSearcher():
         umax_portion: float = 0.35,  # for alsd, librispeech
         prefix_merge: bool = True,
         lm_module: Optional[AbsDecoder] = None,
-        alpha: Optional[float] = None,
-        beta: Optional[float] = 0.6,
+        alpha: Optional[float] = 0.,
+        beta: Optional[float] = 0.,
         state_beam: float = 2.3,
         expand_beam: float = 2.3,
         temperature: float = 1.0,
@@ -336,6 +336,10 @@ class TransducerBeamSearcher():
             alpha = None
             lm_module = None
 
+        if lm_module is None:
+            alpha = 0.0
+            beta = 0.0
+
         self.decoder = decoder
         self.joint = joint
         self.blank_id = blank_id
@@ -344,9 +348,6 @@ class TransducerBeamSearcher():
         self.nbest = min(nbest, beam_size)
         self.lm = lm_module
         self.alpha_ = alpha
-
-        if lm_module is None and alpha is not None:
-            raise ValueError("Language model is not provided.")
 
         self.is_latency_control = False
         self.is_prefix = prefix_merge
@@ -442,7 +443,7 @@ class TransducerBeamSearcher():
             Output from transcription network with shape
             [1, time_len, hiddens].
         """
-        use_lm = self.alpha_ is not None
+        use_lm = self.lm is not None
         # min between beam and max_target_lent
         tn_i = tn_output[0]
         dummy_tensor = torch.empty(
@@ -549,7 +550,7 @@ class TransducerBeamSearcher():
         tn_output: [1, T, D]
         """
 
-        use_lm = self.alpha_ is not None
+        use_lm = self.lm is not None
 
         tn_out = tn_out[0]
         dummy_tensor = tn_out.new_empty(1, dtype=torch.long)
@@ -705,7 +706,7 @@ class TransducerBeamSearcher():
         tn_output: [N, T, D]
         """
 
-        use_lm = self.alpha_ is not None
+        use_lm = self.lm is not None
 
         dummy_tensor = tn_out.new_empty(1, dtype=torch.long)
         N = tn_out.size(0)
@@ -875,7 +876,7 @@ class TransducerBeamSearcher():
 
         tn_output: [1, T, D]        
         """
-        use_lm = self.alpha_ is not None
+        use_lm = self.lm is not None
 
         dummy_tensor = tn_out.new_empty(1, dtype=torch.long)
         B = [Hypothesis(
@@ -1003,7 +1004,7 @@ class TransducerBeamSearcher():
 
         encoder_out: (N, T, V)
         """
-        use_lm = self.alpha_ is not None
+        use_lm = self.lm is not None
 
         n_batches, n_max_frame_length = encoder_out.shape[:2]
         dummy_token = encoder_out.new_empty(1, dtype=torch.long)
