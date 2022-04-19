@@ -272,6 +272,11 @@ def basic_trainer_parser(prog: str = '', training: bool = True,  isddp: bool = T
         parser.add_argument("--len-norm", type=str, default=None,
                             help="Normal expression to seq len. Useful with --databalance. E.g. 'L**1.3'")
 
+        parser.add_argument("--tokenizer", type=str,
+                            help="Specify tokenizer. Currently, only used with --large-dataset.")
+        parser.add_argument("--large-dataset", action="store_true",
+                            help="Use webdataset to load data in POSIX tar format. Be careful with this option, it would change many things than you might think.")
+
     parser.add_argument("--config", type=str, default=None, metavar='PATH',
                         help="Path to configuration file of backbone.")
     parser.add_argument("--resume", type=str, default=None,

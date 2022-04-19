@@ -346,10 +346,6 @@ def build_model(
 
 def RNNTParser():
     parser = coreutils.basic_trainer_parser("RNN-Transducer training")
-    parser.add_argument("--tokenizer", type=str,
-                        help="Specify tokenizer. Currently, only used with --large-dataset.")
-    parser.add_argument("--large-dataset", action="store_true",
-                        help="Use webdataset to load data in POSIX tar format. Be careful with this option, it would change many things than you might think.")
     return parser
 
 

@@ -450,7 +450,7 @@ def combineText(datasets: Union[str, List[str]], f_out: Optional[str] = None) ->
                 for line in fi:
                     # rm the seq id in first column
                     _, utt = line.split(maxsplit=1)
-                    fo.write(utt + '\n')
+                    fo.write(utt)
     return f_out
 
 
