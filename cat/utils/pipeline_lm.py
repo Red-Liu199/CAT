@@ -5,7 +5,6 @@ from pipeline_asr import *
 
 import os
 import sys
-import json
 import argparse
 
 
@@ -170,16 +169,24 @@ if __name__ == "__main__":
             sys.stderr.write(fmt.format(f"set 'resume' to {checkpoint}"))
             infer_setting['ppl']['resume'] = checkpoint
 
-        text_local, text_resolved = resolve_in_priority(
-            hyper_settings['data']['test'])
+        text_local, text_resolved = [], []
+        for subset in hyper_settings['data']['test']:
+            if os.path.isfile(subset):
+                text_local.append(subset)
+            else:
+                text_resolved.append(subset)
 
-        f_normalized = text_local + \
-            [combineText(t_r, t_r+'.tmp') for t_r in text_resolved]
+        # we need to remove the uid in the transcript text
+        # but for text resovled from local path, we assume it's raw text w/o uid.
+        text_resolved = [combineText(t_r, t_r+'.tmp') for t_r in text_resolved]
+
         os.system(" ".join([
             sys.executable,
             "-m cat.lm.ppl_compute",
             os.path.join(args.expdir, 'config.json'),
-            "-e {}".format(' '.join(f_normalized)),
+            "-e {}".format(' '.join(text_local + text_resolved)),
             " ".join(f"--{opt} {val}" for opt,
                      val in infer_setting['ppl'].items())
         ]))
+        for t_r in text_resolved:
+            os.remove(t_r)

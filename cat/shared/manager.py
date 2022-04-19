@@ -403,6 +403,8 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
 
         dist.all_reduce(quit_flag, op=dist.ReduceOp.MAX)
         if quit_flag:
+            # update n_steps, since we don't know how many steps there are with large dataset mode.
+            args.n_steps = (i + 1) // fold
             break
 
         features, input_lengths, labels, label_lengths = minibatch
@@ -463,10 +465,6 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
                     args.gpu)
                 t_data = 0.0
                 t_last_step = time.time()
-
-            if n_time == args.n_steps:
-                dist.barrier()
-                break
 
             # reset accumulated loss
             detach_loss -= detach_loss
