@@ -1,0 +1,62 @@
+{
+    "data": {
+        "train": "train_l",
+        "dev": [
+            "dev"
+        ],
+        "test": [
+            "dev",
+            "test_net",
+            "test_meeting",
+            "aishell-test"
+        ],
+        "filter": "10:1000",
+        "lang": "zh-cn"
+    },
+    "tokenizer": {
+        "type": "SentencePieceTokenizer",
+        "property": {
+            "model_type": "char",
+            "add_dummy_prefix": false,
+            "use_all_vocab": true,
+            "model_prefix": "sentencepiece/wenetspeech_l_char/spm",
+            "vocab_size": 5536
+        },
+        "location": "exp/rnnt-v4/tokenizer.tknz"
+    },
+    "train": {
+        "batch_size": 480,
+        "grad-norm": 5.0,
+        "grad-accum-fold": 6,
+        "checkall": true,
+        "amp": true,
+        "trset": "/mnt/nvme_workspace/zhenghh/speechdata/wenet-train-l/10_1000/*.tar",
+        "tokenizer": "exp/rnnt-v4/tokenizer.tknz",
+        "large-dataset": true,
+        "world-size": 2,
+        "rank": 0,
+        "dist-url": "tcp://192.168.0.15:13245"
+    },
+    "inference": {
+        "avgmodel": {
+            "mode": "best",
+            "num": 5
+        },
+        "lmdir": "exp/lm-trans-l",
+        "decode": {
+            "algo": "rna",
+            "beam-size": 16,
+            "alpha": 0.125,
+            "beta": 2.375,
+            "cpu": true,
+            "batchfly": true,
+            "nj": 40,
+            "resume": "exp/rnnt-v4/checks/best-5.pt"
+        },
+        "er": {
+            "mode": "cer",
+            "oracle": false
+        }
+    },
+    "commit": "fe4bcea50b8cc277d8f527330c3281b6606af7b4"
+}

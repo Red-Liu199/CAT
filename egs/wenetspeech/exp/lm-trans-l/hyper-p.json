@@ -1,0 +1,25 @@
+{
+    "data": {
+        "train": "train_l",
+        "dev": [
+            "dev"
+        ],
+        "test": [
+            "test_meeting",
+            "test_net"
+        ],
+        "lang": "zh-cn"
+    },
+    "tokenizer": {
+        "type": "SentencePieceTokenizer",
+        "property": {
+            "model_type": "char",
+            "add_dummy_prefix": false,
+            "use_all_vocab": true,
+            "model_prefix": "sentencepiece/wenetspeech_l_char/spm",
+            "vocab_size": 5536
+        },
+        "location": "exp/rnnt-v4/tokenizer.tknz"
+    },
+    "commit": "e1b5a63b4e7ee6f01953b9ed23717690845f7b10"
+}
