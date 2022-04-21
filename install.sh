@@ -13,12 +13,22 @@ set -e
         exit 1
 )
 
-python -m pip install -r requirements.txt || exit 1
+$(python -c "import cat") || (
+    python -m pip install -r requirements.txt || exit 1
+)
+echo "install module:cat and its requirements done."
 
-# ctcdecode requires to download many archives
-# so I upload the package to Tsinghua Cloud to accelarate downloading
-wget --no-verbose https://cloud.tsinghua.edu.cn/f/c6503c27828d43daafed/?dl=1 -O transducer_install_ctcdecode.tar.gz
-python -m pip install transducer_install_ctcdecode.tar.gz && rm transducer_install_ctcdecode.tar.gz
+# install ctcdecode is annoying...
+$(python -c "import ctcdecode") || (
+    [ ! -d src/ctcdecode ] && git clone --recursive https://github.com/parlance/ctcdecode.git src/ctcdecode
+    wget http://www.openfst.org/twiki/pub/FST/FstDownload/openfst-1.6.7.tar.gz \
+        -O src/ctcdecode/third_party/openfst-1.6.7.tar.gz
+    wget https://boostorg.jfrog.io/artifactory/main/release/1.67.0/source/boost_1_67_0.tar.gz \
+        -O src/ctcdecode/third_party/boost_1_67_0.tar.gz
+
+    # ctcdecode doesn't support -e
+    python -m pip install src/ctcdecode || exit 1
+)
 echo "install module:ctcdecode done."
 
 # install kenlm
