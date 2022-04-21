@@ -463,7 +463,7 @@
                         "AbsDecoder",
                         "CausalTransformer",
                         "ILM",
-                        "LSTMPredictNet",
+                        "LSTM",
                         "NGram",
                         "PlainPN",
                         "ZeroDecoder"
@@ -589,7 +589,7 @@
                     "if": {
                         "properties": {
                             "type": {
-                                "const": "LSTMPredictNet"
+                                "const": "LSTM"
                             }
                         }
                     },

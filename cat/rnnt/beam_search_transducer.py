@@ -321,17 +321,13 @@ class TransducerBeamSearcher():
         temperature: float = 1.0,
         word_prefix_tree: Optional[str] = None,
         rescore: bool = False,
-        est_ilm: bool = False,
-        verbose: bool = True
+        est_ilm: bool = False
     ):
         super(TransducerBeamSearcher, self).__init__()
         assert blank_id == bos_id
 
         if alpha == 0.0:
-            # disable lm fusion/rescore
-            if verbose:
-                print(f"WARNING: "
-                      f"alpha = 0 will disable LM interation whatever beta is.")
+            # NOTE: alpha = 0 will disable LM interation whatever beta is.
             beta = None
             alpha = None
             lm_module = None

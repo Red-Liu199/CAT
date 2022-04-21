@@ -97,7 +97,7 @@ class AbsStates():
         return self._state
 
 
-class LSTMPredictNet(AbsDecoder):
+class LSTM(AbsDecoder):
     """
     RNN Decoder of Transducer
     Args:
@@ -203,7 +203,7 @@ class LSTMPredictNet(AbsDecoder):
     def batching_states(states: List[AbsStates]) -> AbsStates:
         h_0 = torch.cat([_state()[0] for _state in states], dim=1)
         c_0 = torch.cat([_state()[1] for _state in states], dim=1)
-        return AbsStates((h_0, c_0), LSTMPredictNet)
+        return AbsStates((h_0, c_0), LSTM)
 
     @staticmethod
     def get_state_from_batch(raw_batched_states, index: Union[int, List[int]]) -> Union[AbsStates, List[AbsStates]]:
@@ -218,7 +218,7 @@ class LSTMPredictNet(AbsDecoder):
         for _i in index:
             h_0 = raw_batched_states[0][:, _i:_i+1, :]
             c_0 = raw_batched_states[1][:, _i:_i+1, :]
-            o_states.append(AbsStates((h_0, c_0), LSTMPredictNet))
+            o_states.append(AbsStates((h_0, c_0), LSTM))
         if flag_squeeze:
             return o_states[0]
         else:

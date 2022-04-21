@@ -33,7 +33,7 @@ def main(args):
     if args.batchfly:
         if args.estimate_ILM:
             raise NotImplementedError(
-                "ILM estimation has not implemented for batch-decoding yet.")
+                "ILM estimation has not been implemented for batch-decoding yet.")
 
         if args.rescore:
             raise NotImplementedError(
@@ -197,7 +197,7 @@ def main_worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_nbest: m
         blank_id=0, bos_id=model.bos_id, beam_size=args.beam_size,
         nbest=args.beam_size, algo=args.algo, umax_portion=args.umax_portion,
         prefix_merge=True, lm_module=ext_lm, alpha=args.alpha, beta=args.beta,
-        word_prefix_tree=args.word_tree, rescore=args.rescore, est_ilm=est_ilm, verbose=(pid == 0))
+        word_prefix_tree=args.word_tree, rescore=args.rescore, est_ilm=est_ilm)
 
     tokenizer = tknz.load(args.tokenizer)
     nbest = {}
