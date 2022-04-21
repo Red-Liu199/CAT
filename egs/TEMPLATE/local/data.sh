@@ -30,4 +30,9 @@ cd $cwd
 )
 
 python local/compute_fbank.py data/local/waves_yesno/
-python utils/resolvedata.py
+echo "FBank spectrum generate done."
+
+python utils/data/resolvedata.py
+
+echo "$0 done"
+exit 0

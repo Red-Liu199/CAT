@@ -73,14 +73,8 @@ if __name__ == "__main__":
             sys.stderr.write(
                 f"warning: found {len(audios[_set])} audios in {_set} subset, but expected {expect_len[_set]}\n")
 
-    try:
-        import cat
-    except ModuleNotFoundError:
-        import sys
-        import os
-        sys.path.append(os.getcwd())
-    from cat.utils.data_prep_kaldi import prepare_kaldi_feat
-    prepare_kaldi_feat(
+    from cat.utils.data import data_prep_kaldi
+    data_prep_kaldi.prepare_kaldi_feat(
         subsets=prepare_sets,
         trans=subtrans,
         audios=audios,

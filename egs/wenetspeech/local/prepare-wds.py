@@ -117,7 +117,8 @@ def parsingData(
 
 
 if __name__ == "__main__":
-    with open('data/.CATDATA.info', 'r') as fi:
+    from cat.utils.data.resolvedata import F_DATAINFO
+    with open(F_DATAINFO, 'r') as fi:
         srcdata = json.load(fi)
 
     for subset in ['dev']:

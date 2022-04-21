@@ -39,20 +39,4 @@
 
 - Repository: https://github.com/kpu/kenlm
 - **kenlm** is a tool for training n-gram language model.
-- install: you must first ensure your platform satisfies the building requirements of kenlm. See [kenlm/BUILDING](https://github.com/kpu/kenlm/blob/master/BUILDING)
-    ```bash
-    cd tools/
-    git clone git@github.com:kpu/kenlm.git
-    cd kenlm/
-    mkdir -p build
-    cd build
-    cmake ..
-    make -j 4
-    cd ../
-    # install python module kenlm==0.0.0
-    python setup.py install
-    # link executable binary files
-    cd ../../src/
-    mkdir -p bin/ && cd bin/
-    ln -s ../../tools/kenlm/build/bin/* ./ && cd ../../
-    ```
+- dependencies: you must first ensure your platform satisfies the building requirements of kenlm. See [kenlm/BUILDING](https://github.com/kpu/kenlm/blob/master/BUILDING)

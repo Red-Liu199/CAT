@@ -8,3 +8,15 @@ jiwer>=2.2.0
 pyyaml>=6.0
 transformers>=4.12.3
 jieba>=0.42.1
+
+# gather
+-e git+ssh://git@github.com/maxwellzh/torch-gather.git#egg=gather
+# warp-rnnt
+-e git+ssh://git@github.com/maxwellzh/warp-rnnt.git#egg=warp-rnnt&subdirectory=pytorch_binding
+# webdataset do not use 'pip install webdataset', that's outdated
+-e git+ssh://git@github.com/webdataset/webdataset.git@d7334016f44a03c4a385971aa835c4f460d3f30a#egg=webdataset
+# kenlm
+-e git+ssh://git@github.com/kpu/kenlm.git#egg=kenlm
+
+# cat
+-e .

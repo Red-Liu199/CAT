@@ -25,7 +25,7 @@ export PATH=$PATH:../../src/bin/
 [ ! -d $dir ] && echo "No such directory: $dir" && exit 1
 
 # train sentence piece tokenizer
-[ $start_stage -le 1 ] && python utils/pipeline_lm.py $dir --sta 1 --sto 1
+[ $start_stage -le 1 ] && python utils/pipeline/lm.py $dir --sta 1 --sto 1
 [ ! -f $dir/hyper-p.json ] && echo "No hyper-setting file: $dir/hyper-p.json" && exit 1
 [ ! -f $dir/config.json ] && echo "No model config file: $dir/config.json" && exit 1
 
@@ -44,7 +44,7 @@ export arpa_out="/tmp/$(
 
 # we need to manually rm the bos/eos/unk since lmplz tool would add them
 # and kenlm not support <unk> in corpus,
-# ...so in the `utils/readtextbin.py` script we convert 0(<bos>, <eos>) and 1 (<unk>) to white space
+# ...so in the `utils/data/readtextbin.py` script we convert 0(<bos>, <eos>) and 1 (<unk>) to white space
 # ...if your tokenizer set different bos/eos/unk id, you should make that mapping too.
 export tokenizer="$(cat $dir/hyper-p.json |
     python -c "import sys,json;print(json.load(sys.stdin)['tokenizer']['location'])")"
@@ -58,35 +58,32 @@ if [ $text_corpus == "True" ]; then
         [ ! -f $x ] && echo "No such training corpus: '$x'" && exit 1
     done
 
-    python utils/readtextbin.py $f_text -o $text_out \
+    python utils/data/readtextbin.py $f_text -o $text_out \
         -t --tokenizer $tokenizer --map 0: 1:
 else
     textbin=$dir/lmbin/train.pkl
     if [ ! -f $textbin ]; then
-        python utils/pipeline_lm.py $dir --sta 2 --sto 2 || exit 1
+        python utils/pipeline/lm.py $dir --sta 2 --sto 2 || exit 1
     else
         echo "$textbin found, skip generating."
     fi
 
     [ ! -f $textbin ] && echo "No binary text file: '$textbin'" && exit 1
-    python utils/readtextbin.py $textbin \
+    python utils/data/readtextbin.py $textbin \
         -o $text_out --map 0: 1:
 fi
+
+train_cmd="lmplz <$text_out -o $order $prune -S 20%"
+[ $arpa == "True" ] && train_cmd="$train_cmd >$output"
 
 # NOTE: if lmplz raises error telling the counts of n-grams are not enough,
 # you should probably duplicate your text corpus or add the option --discount_fallback
 # Error msg sample:
 # "ERROR: 3-gram discount out of range for adjusted count 3: -5.2525253."
-(lmplz <$text_out -o $order $prune -S 20% >$arpa_out) ||
-    (lmplz <$text_out -o $order $prune -S 20% --discount_fallback >$arpa_out)
-rm $text_out
+train_cmd="$train_cmd || $train_cmd --discount_fallback"
 
-if [ $arpa == "True" ]; then
-    mv $arpa_out $output
-else
-    build_binary $type $arpa_out $output
-    rm $arpa_out
-fi
+[ $arpa == "False" ] && train_cmd="($train_cmd) | build_binary $type /dev/stdin $output"
+eval $train_cmd
 
 if [ -f $dir/config.json ]; then
     cat $dir/config.json | python -c "
@@ -103,5 +100,14 @@ fi
 
 echo "LM saved at $output."
 
-python utils/pipeline_lm.py $dir --start_stage 4 --ngpu 1
+[ ! -f $dir/readme.md ] && (
+    echo -e "\nproperty:\n" >>$dir/readme.md
+    echo "- prune: $prune" >>$dir/readme.md
+    echo "- type:  $type" >>$dir/readme.md
+    echo "- size:  $(ls -lh $output | awk '{print $5}')B" >>$dir/readme.md
+    echo -e "\nperplexity:\n" >>$dir/readme.md
+    echo -e "\`\`\`\n\n\`\`\`" >>$dir/readme.md
+)
+
+python utils/pipeline/lm.py $dir --start_stage 4
 exit 0

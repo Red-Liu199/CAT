@@ -1,6 +1,8 @@
 # TEMPLATE
 
-## Transducer (RNN-T)
+## Run templates
+
+### Transducer (RNN-T)
 
 1. Prepare data.
 
@@ -11,10 +13,10 @@
 2. Train Transducer
 
    ```bash
-   python utils/pipeline_asr.py exp/template-rnnt --ngpu 1
+   python utils/pipeline/asr.py exp/template-rnnt --ngpu 1
    ```
 
-## CTC
+### CTC
 
 1. Prepare data.
 
@@ -25,10 +27,10 @@
 2. Train CTC
 
    ```bash
-   python utils/pipeline_asr.py exp/template-ctc --ngpu 1
+   python utils/pipeline/asr.py exp/template-ctc --ngpu 1
    ```
 
-## Neural language model (NN LM)
+### Neural language model (NN LM)
 
 1. Prepare data.
 
@@ -39,11 +41,11 @@
 2. Train a Transformer LM
 
    ```bash
-   python utils/pipeline_lm.py exp/template-lm-nn --ngpu 1
+   python utils/pipeline/lm.py exp/template-lm-nn --ngpu 1
    ```
 
 
-## N-gram LM
+### N-gram LM
 
 1. Prepare data.
 
@@ -54,5 +56,38 @@
 2. Train a 3-gram word LM
 
    ```bash
-   bash utils/pipeline_ngram.sh exp/template-lm-ngram --text-corpus -o 3
+   bash utils/pipeline/ngram.sh exp/template-lm-ngram --text-corpus -o 3
    ```
+
+
+## Training pipeline
+
+Both ASR (RNN-T/CTC) and LM pipelines include 4 stages:
+
+```
+(data prepare) ->
+tokenizer training -> data packing -> nn training -> inference
+```
+
+Where for ASR pipeline, the inference is the stage of decoding, and that for LM is the stage of calculating perplexity. Pipeline for n-gram training is kind of special, since there is no NN model and all operations are conduct in CPU. Therefore, the "nn training" stage for n-gram pipeline is replaced by KenLM (the n-gram training tool) `lmplz` trainining.
+
+Note that data prepare is not included in standard pipelines. It's your duty to prepare the data in proper format in my design. I recommend to implement this part in the file `local/data.sh` (in fact, I've already made that for several recipes), so others can easily reproduce your experiments.
+
+**What is done at each stage**
+
+1. tokenizer training: we train the tokenizer according to the training corpus (what you specified in `hyper['data']['train']`, `hyper` is the content in hyper-parameter setting file, which is defaultly `hyper-p.json`) and the tokenizer setting (in `hyper['tokenizer']`). The trained tokenizer would be stored as `.../tokenizer.tknz` if you don't specify the path, and that can be loaded directly via
+
+   ```python3
+   from cat.shared import tokenizer as tknz
+   tokenizer = tknz.load('path/to/the/tokenizer.tknz')
+   ```
+
+2. data packing: in short, at this stage, we parse the raw data into python readable objects (audio spectrum to numpy array, raw text to tokenized indices...). It basically just *transforms* the data, but not modify them.
+
+3. nn training: this is the most important (and most time-consuming, generally) stage. At this stage, we fit the data with the neural network, where the `hyper['data']['train']` data is (are) used for training, the `hyper['data']['dev']` data is (are) used as held out set for evaluating the performance and control the early-stop (if required). The neural network are configured based on the file `exp/<my-exp>/config.json`. Apart from the model itself, training pipeline is configured by setting `hyper['train']`, where we specify properties like batch size, multi-node DDP training, automatic mixed precision training, etc.
+
+4. inference: at this stage, we evaluate the model by specific means and metrics. It's highly recommended to do model averaging by setting `hyper['inference']['avgmodel']`, for which could bring significant improve over singular models without introducing any extra computation overhead. The model will be evaluated based on your configuration at the `hyper['data']['test']` data.
+
+   4.1. For ASR (RNN-T/CTC) task, this is when decoding (tranform speech to text) happens. The decoding is configured by `hyper['inference']['decode']`. We usually use word-error rate (WER) or character-error rate (CER) to measure the performance of ASR model, so there is a `hyper['inference']['er']` setting to configure how to compute the error rate.
+
+   4.2 For LM task (whatever NNLM or n-gram LM), we use perplexity (PPL, or ppl) on the testsets to tell the performance of trained LMs. To make that, you should configure the ppl calculation setting in `hyper['inference']['ppl']`. You may have seen one of the templates, [lm-nn/hyper-p.json](exp/template-lm-nn/hyper-p.json) not including 'ppl' setting. This is because the script `pipeline/lm.py` could automatically configure it in some simple cases. If you have custom requirements, you still need to configure it yourself.

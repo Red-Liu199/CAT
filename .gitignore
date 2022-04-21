@@ -1,3 +1,8 @@
+
+# settings
+src/
+test_*
+tmp_*
 egs/**/data/
 egs/**/exp/
 egs/**/sentencepiece
@@ -10,9 +15,6 @@ tools/CAT
 *.tmp
 tmp/
 
-# settings
-src/bin/
-test_*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

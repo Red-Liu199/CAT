@@ -21,7 +21,7 @@ egs/<task>/exp/template
         "test": ...,
         // "filter" is for ASR task only, filter out utterances shorter than 10 and longer than 2000 (frames)
         "filter": "10:2000",
-        // "text_processing" is for LM task only. code: utils/transText2Bin.py
+        // "text_processing" is for LM task only. code: utils/data/transText2Bin.py
         "text_processing": {
             // truncate the utterances by 128 (tokens)
             "truncate": 128

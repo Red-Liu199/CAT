@@ -3,7 +3,7 @@ Resolve the data location from CAT.
 
 e.g.
 
-path_to_transducer/egs/wsj$ python utils/resolvedata.py
+path_to_transducer/egs/wsj$ python utils/data/resolvedata.py
 
 'wsj' will be recognized as the name of the recipe
 if data/src/ does not exist:
@@ -14,7 +14,7 @@ find datasets in data/src, which should satisfy:
     1. data/src/SET and data/src/SET/text exist
     2. data/src/all_ark/SET.scp exist
 
-the found datasets info would be stored at data/.CATDATA.info in JSON format
+the found datasets info would be stored at data/metainfo.json in JSON format
     {
         "set-0":{
             "scp": "path/to/scp-0",
@@ -23,7 +23,7 @@ the found datasets info would be stored at data/.CATDATA.info in JSON format
         ...
     }
 
-all following pipeline would depend on data/.CATDATA.info, you can modify it manually for flexible usage
+all following pipeline would depend on data/metainfo.json, you can modify it manually for flexible usage
 """
 
 import os
@@ -32,7 +32,7 @@ import glob
 import json
 from typing import Dict, List
 
-F_DATAINFO = 'data/.CATDATA.info'
+F_DATAINFO = 'data/metainfo.json'
 D_SRCDATA = 'data/src'
 
 

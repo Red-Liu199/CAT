@@ -1,7 +1,7 @@
 """Process of LM training
 """
 
-from pipeline_asr import *
+from asr import *
 
 import os
 import sys
@@ -55,8 +55,7 @@ if __name__ == "__main__":
         if not args.silent:
             print("{0} {1} {0}".format("="*20, "Stage 2 Pickle data"))
         fmt = "# Pickle data # {}\n" if not args.silent else ""
-        from transText2Bin import TextProcessingParser
-        from transText2Bin import main as ProcessingMain
+        from cat.utils.data import transText2Bin as t2b
 
         hyper_settings = readfromjson(f_hyper_settings)
         assert 'data' in hyper_settings, f"missing 'data' in hyper-setting file {f_hyper_settings}"
@@ -104,8 +103,8 @@ if __name__ == "__main__":
                 setting = processing_settings
 
             f_pkl = os.path.join(pkldir, part+'.pkl')
-            mp_spawn(ProcessingMain, updateNamespaceFromDict(
-                setting, TextProcessingParser(), [part_text, f_pkl]))
+            mp_spawn(t2b.main, updateNamespaceFromDict(
+                setting, t2b.TextProcessingParser(), [part_text, f_pkl]))
             os.remove(part_text)
 
     ############ Stage 3  NN training ############
@@ -113,11 +112,7 @@ if __name__ == "__main__":
         if not args.silent:
             print("{0} {1} {0}".format("="*20, "Stage 3 NN training"))
         fmt = "# NN training # {}\n" if not args.silent else ""
-        try:
-            import cat
-        except ModuleNotFoundError:
-            import sys
-            sys.path.append(cwd)
+
         from cat.lm.train import LMParser
         from cat.lm.train import main as LMMain
 

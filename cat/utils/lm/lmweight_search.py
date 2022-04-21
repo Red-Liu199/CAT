@@ -11,13 +11,13 @@ from typing import Union, Dict
 
 from interpolate_nbests import GetParser as InterpolateParser
 from interpolate_nbests import main as interpolate_main
-from pipeline_asr import updateNamespaceFromDict
 
 from wer import WERParser
 from wer import main as WERMain
 
 
 def main(args: argparse):
+    from cat.utils.pipeline.asr import updateNamespaceFromDict
     assert args.ground_truth is not None and os.path.isfile(args.ground_truth)
     assert len(args.nbestlist) == len(args.search), (
         "\n"

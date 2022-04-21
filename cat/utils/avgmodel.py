@@ -9,18 +9,13 @@ usage:
     python utils/avgmodel.py -h
 """
 
+from cat.shared.monitor import MonitorWriter
+
 import argparse
 import collections
 import os
 
 import torch
-
-try:
-    from cat.shared.monitor import MonitorWriter
-except ModuleNotFoundError:
-    import sys
-    sys.path.append(os.getcwd())
-    from cat.shared.monitor import MonitorWriter
 
 
 def average_checkpoints(inputs):

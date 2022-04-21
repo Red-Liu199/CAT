@@ -27,8 +27,9 @@
         "decode": {
             "beam-size": 4,
             "algo": "rna",
-            "nj": 8,
-            "cpu": true
+            "nj": 1,
+            "cpu": true,
+            "batchfly": true
         },
         "er": {
             "mode": "wer",

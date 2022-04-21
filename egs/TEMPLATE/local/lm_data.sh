@@ -24,5 +24,5 @@ else
 fi
 cd $cwd
 
-echo "Text corpus prepared."
+echo "$0 done"
 exit 0
