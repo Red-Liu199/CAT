@@ -1,5 +1,8 @@
 # Author: Huahuan Zheng (maxwellzh@outlook.com)
 
+from cat.shared.data import CorpusDataset
+from cat.shared import tokenizer as tknz
+
 import os
 import sys
 import argparse
@@ -55,15 +58,9 @@ def process_line(args: argparse.Namespace, idx_beg: int, idx_end: int):
         else:
             return str(x)
 
-    try:
-        import cat
-    except ModuleNotFoundError:
-        sys.path.append(os.getcwd())
-
     cachefile = os.path.join('/tmp', str(uuid.uuid4())+'.tmp')
     rm_empty = not args.keep_empty_line
     if args.istext:
-        from cat.shared import tokenizer as tknz
         assert args.tokenizer is not None
         tokenizer = tknz.load(args.tokenizer)
         offset = 0
@@ -83,7 +80,6 @@ def process_line(args: argparse.Namespace, idx_beg: int, idx_end: int):
                 if offset >= idx_end:
                     break
     else:
-        from cat.shared.data import CorpusDataset
         offset = 0
         with open(cachefile, 'w') as fo:
             for file in args.input:
@@ -127,11 +123,6 @@ if __name__ == "__main__":
     if args.istext:
         total_lines = countlines(args.input)
     else:
-        try:
-            import cat
-        except ModuleNotFoundError:
-            sys.path.append(os.getcwd())
-        from cat.shared.data import CorpusDataset
         total_lines = sum(len(CorpusDataset(dataset))
                           for dataset in args.input)
 

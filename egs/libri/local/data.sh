@@ -11,4 +11,7 @@ srcdata="/mnt/nas_workspace2/spmiData/librispeech"
 )
 
 python local/extract_fbank.py $srcdata/LibriSpeech
-python utils/resolvedata.py
+python utils/data/resolvedata.py
+
+echo "$0 done."
+exit 0

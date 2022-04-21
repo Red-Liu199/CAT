@@ -3,6 +3,9 @@
     Author: Huahuan Zheng (maxwellzh@outlook.com)
 """
 
+from cat.rnnt.beam_search_transducer import PrefixTree
+from cat.shared import tokenizer as tknz
+
 import argparse
 import sys
 import os
@@ -10,12 +13,6 @@ from typing import List, Tuple
 
 
 def main(args: argparse.Namespace = None):
-    try:
-        import cat
-    except ModuleNotFoundError:
-        sys.path.append(os.getcwd())
-    from cat.rnnt.beam_search_transducer import PrefixTree
-    from cat.shared import tokenizer as tknz
 
     f_raw_text = args.intext
     tokenizer = tknz.load(args.tokenizer)

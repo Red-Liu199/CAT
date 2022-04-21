@@ -2,17 +2,11 @@
 Implementation of tokenizer
 """
 import os
-import sys
 import io
 import pickle
 import sentencepiece as sp
-try:
-    import jieba
-except ModuleNotFoundError:
-    sys.stderr.write("Chinese segmentation tool `jieba` seems not installed.\n"
-                     "Install with\n"
-                     "python -m pip install jieba\n")
-    sys.exit(1)
+import jieba
+
 from collections import OrderedDict
 from typing import List, Union, Iterable, Optional, Dict
 from ..shared.coreutils import randstr

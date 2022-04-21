@@ -1,14 +1,12 @@
 """Ported from run_rnnt.sh, rewrote with python
 
 Uage:
-    python utils/pipeline_asr.py
+    python utils/pipeline/asr.py
 """
 
-try:
-    from resolvedata import main as resolve_srcdata
-    from resolvedata import F_DATAINFO
-except ModuleNotFoundError:
-    print("seems you're trying to import module from pipeline_asr. ensure you know what you're doing.")
+from cat.utils.data.resolvedata import F_DATAINFO
+from cat.utils.data import resolvedata
+
 
 import os
 import sys
@@ -21,8 +19,8 @@ from multiprocessing import Process
 
 
 def initial_datainfo():
-    if not os.path.isfile(F_DATAINFO):
-        resolve_srcdata()
+    if not os.path.isfile(resolvedata.F_DATAINFO):
+        resolvedata.main()
 
 
 def mp_spawn(target: Callable, args: Union[tuple, argparse.Namespace]):
@@ -348,10 +346,6 @@ def TrainNNModel(
         sys.stderr.write(
             f"warning: missing 'tokenizer': {f_hyper_p}\n")
     else:
-        try:
-            import cat
-        except ModuleNotFoundError:
-            sys.path.append(cwd)
         from cat.shared import tokenizer as tknz
         checkExist('f', settings['tokenizer']['location'])
         tokenizer = tknz.load(settings['tokenizer']['location'])
@@ -492,10 +486,6 @@ def TrainTokenizer(f_hyper: str):
     if 'property' not in hyper_settings['tokenizer']:
         hyper_settings['tokenizer']['property'] = {}
 
-    try:
-        import cat
-    except ModuleNotFoundError:
-        sys.path.append(os.getcwd())
     from cat.shared import tokenizer as tknz
     if tokenizer_type == 'SentencePieceTokenizer':
         f_corpus_tmp = combineText(hyper_settings['data']['train'])
@@ -532,7 +522,7 @@ def model_average(
 
     import re
     import torch
-    from avgmodel import find_n_best, average_checkpoints
+    from cat.utils.avgmodel import find_n_best, average_checkpoints
 
     suffix_avgmodel = f"{avg_mode}-{avg_num}"
     checkpoint = os.path.join(checkdir, suffix_avgmodel)
@@ -623,10 +613,6 @@ if __name__ == "__main__":
         hyper_settings = readfromjson(f_hyper_settings)
         assert 'data' in hyper_settings, f"missing 'data': {f_hyper_settings}"
 
-        try:
-            import cat
-        except ModuleNotFoundError:
-            sys.path.append(os.getcwd())
         from cat.shared import tokenizer as tknz
         if 'tokenizer' not in hyper_settings:
             sys.stderr.write(
@@ -682,10 +668,6 @@ if __name__ == "__main__":
         if not args.silent:
             print("{0} {1} {0}".format("="*20, "Stage 3 NN training"))
         fmt = "# NN training # {}\n" if not args.silent else ""
-        try:
-            import cat
-        except ModuleNotFoundError:
-            sys.path.append(cwd)
 
         hyper_settings = readfromjson(f_hyper_settings)
         if 'topo' not in hyper_settings:
@@ -725,10 +707,6 @@ if __name__ == "__main__":
         if not args.silent:
             print("{0} {1} {0}".format("="*20, "Stage 4 Decode"))
         fmt = "# Decode # {}\n" if not args.silent else ""
-        try:
-            import cat
-        except ModuleNotFoundError:
-            sys.path.append(cwd)
 
         hyper_settings = readfromjson(f_hyper_settings)
         assert 'inference' in hyper_settings, f"missing 'inference': {f_hyper_settings}"
@@ -931,8 +909,7 @@ if __name__ == "__main__":
                 decode_settings, DecoderParser()))
 
         # compute wer/cer
-        from wer import WERParser
-        from wer import main as WERMain
+        from cat.utils import wer as wercal
         assert 'er' in inference_settings, "missing 'er' in field:['inference']"
         err_settings = inference_settings['er']
         assert 'mode' in err_settings, "missing 'mode' in field:['inference']['er']"
@@ -963,11 +940,11 @@ if __name__ == "__main__":
                 err_settings['oracle'] = False
                 # compute non-oracle WER/CER
                 print(_set, end='\t')
-                mp_spawn(WERMain, updateNamespaceFromDict(err_settings, WERParser(), [
+                mp_spawn(wercal.main, updateNamespaceFromDict(err_settings, wercal.WERParser(), [
                     err_settings['gt'], err_settings['hy']]))
                 err_settings['oracle'] = True
                 err_settings['hy'] += '.nbest'
 
             print(_set, end='\t')
-            mp_spawn(WERMain, updateNamespaceFromDict(err_settings, WERParser(), [
+            mp_spawn(wercal.main, updateNamespaceFromDict(err_settings, wercal.WERParser(), [
                 err_settings['gt'], err_settings['hy']]))

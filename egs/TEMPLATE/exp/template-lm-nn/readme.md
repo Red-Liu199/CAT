@@ -12,7 +12,8 @@
 
 ### Result
 ```
-PPL over test set: 121.10
+Test file: data/local-lm/ptb.test.txt -> ppl: 113.66
+Test file: data/local-lm/ptb.valid.txt -> ppl: 119.55
 ```
 
 ### Monitor figure

@@ -19,6 +19,8 @@ How to get the parsed data:
         data = pickle.load(fi)
 """
 
+from cat.shared import tokenizer as tknz
+
 import argparse
 import pickle
 import os
@@ -49,12 +51,6 @@ def text2bin(arguments: Tuple[argparse.Namespace, str, int, int]):
     if args.raw_tokenizer:
         def processor(line): return [int(x) for x in line.split()]
     else:
-        try:
-            import cat
-        except ModuleNotFoundError:
-            import sys
-            sys.path.append(os.getcwd())
-        from cat.shared import tokenizer as tknz
         tokenizer = tknz.load(args.tokenizer)
         processor = tokenizer.encode
 

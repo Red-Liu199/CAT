@@ -1,5 +1,6 @@
 # Author: Zheng Huahuan (maxwellzh@outlook.com)
 # This script includes the processing of librispeech extra corpus text
+set -e
 set -u
 
 d_out=data

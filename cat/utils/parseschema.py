@@ -3,12 +3,6 @@ This script is used for parsing the json schema for experiment settings.
 '''
 # %%
 
-try:
-    import cat
-except ModuleNotFoundError:
-    import os
-    import sys
-    sys.path.append(os.getcwd())
 from cat.shared import decoder as pn_zoo
 from cat.shared import encoder as tn_zoo
 from cat.shared import scheduler, SpecAug

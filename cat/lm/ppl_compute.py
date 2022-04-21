@@ -176,16 +176,14 @@ def consumer(wsize: int, q: mp.Queue, args):
 
 
 def text2corpusbin(f_text: str, f_bin: str, tokenizer):
-    from ..utils.pipeline_asr import updateNamespaceFromDict
-    from ..utils.transText2Bin import main as t2bmain
-    from ..utils.transText2Bin import TextProcessingParser as t2bparser
-
-    t2bmain(
+    from ..utils.pipeline.asr import updateNamespaceFromDict
+    from ..utils.data import transText2Bin as t2b
+    t2b.main(
         updateNamespaceFromDict(
             {
                 'tokenizer': tokenizer,
                 'quiet': True
-            }, t2bparser(), [f_text, f_bin]))
+            }, t2b.TextProcessingParser(), [f_text, f_bin]))
 
     return
 
