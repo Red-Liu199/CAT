@@ -6,15 +6,15 @@
 Parallel decode with distributed GPU/CPU support 
 """
 
-from ..lm import lm_builder
-from . import rnnt_builder
 from ..shared import coreutils
-from .beam_search_transducer import TransducerBeamSearcher
 from ..shared import tokenizer as tknz
 from ..shared.data import (
     ScpDataset,
     sortedScpPadCollate
 )
+from ..lm import lm_builder
+from . import rnnt_builder
+from .beam_search import BeamSearcher
 
 import os
 import time
@@ -30,15 +30,6 @@ from torch.cuda.amp import autocast
 
 
 def main(args):
-    if args.batchfly:
-        if args.estimate_ILM:
-            raise NotImplementedError(
-                "ILM estimation has not been implemented for batch-decoding yet.")
-
-        if args.rescore:
-            raise NotImplementedError(
-                "Rescoring has not implemented for batch-decoding yet.")
-
     if args.tokenizer is None or not os.path.isfile(args.tokenizer):
         raise FileNotFoundError(
             "Invalid tokenizer model location: {}".format(args.tokenizer))
@@ -55,13 +46,6 @@ def main(args):
     else:
         world_size = torch.cuda.device_count()
     args.world_size = world_size
-
-    if args.rescore and args.alpha == 0.:
-        if not args.silience:
-            print("WARNING: "
-                  f"trying to rescore with alpha=0.0.\n"
-                  "set rescore=False")
-        args.rescore = False
 
     try:
         mp.set_start_method('spawn')
@@ -97,7 +81,7 @@ def dataserver(args, q: mp.Queue):
     del len_match, testset_ls
     testloader = DataLoader(
         testset,
-        batch_size=(8 if args.batchfly else 1),
+        batch_size=8,
         shuffle=False,
         num_workers=1,
         collate_fn=sortedScpPadCollate())
@@ -192,12 +176,17 @@ def main_worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_nbest: m
         model, ext_lm = build_model(args, device)
 
     est_ilm = args.estimate_ILM
-    searcher = TransducerBeamSearcher(
-        decoder=model.decoder, joint=model.joint,
-        blank_id=0, bos_id=model.bos_id, beam_size=args.beam_size,
-        nbest=args.beam_size, algo=args.algo, umax_portion=args.umax_portion,
-        prefix_merge=True, lm_module=ext_lm, alpha=args.alpha, beta=args.beta,
-        word_prefix_tree=args.word_tree, rescore=args.rescore, est_ilm=est_ilm)
+    searcher = BeamSearcher(
+        decoder=model.decoder,
+        joint=model.joint,
+        blank_id=0,
+        bos_id=model.bos_id,
+        beam_size=args.beam_size,
+        nbest=args.beam_size,
+        lm_module=ext_lm,
+        alpha=args.alpha,
+        beta=args.beta,
+        est_ilm=est_ilm)
 
     tokenizer = tknz.load(args.tokenizer)
     nbest = {}
@@ -208,27 +197,17 @@ def main_worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_nbest: m
                 break
             key, x, x_lens = batch
             x = x.to(device)
-            if args.batchfly:
-                enc_out, frame_lens = model.encoder(x, x_lens)
-                list_hypos = searcher.batched_rna_decode(enc_out, frame_lens)
-                for k, hypos in zip(key, list_hypos):
-                    nbest[k] = {
-                        bid: (hyp.score.item(), tokenizer.decode(
-                            hyp.get_pred_token().tolist()[1:]))
-                        for bid, hyp in enumerate(hypos)
-                    }
-            else:
-                key = key[0]
-                nbest_list, scores_nbest = searcher(
-                    model.encoder(x, x_lens)[0])
-                nbest[key] = {
-                    bid: (score.item(), tokenizer.decode(hypo.cpu().tolist()))
-                    for bid, (score, hypo) in enumerate(zip(scores_nbest, nbest_list))
+            batched_output = searcher(*(model.encoder(x, x_lens)))
+            for k, (hypos, scores, ilm_scores) in zip(key, batched_output):
+                nbest[k] = {
+                    nid: (scores[nid], tokenizer.decode(hypos[nid]))
+                    for nid in range(len(hypos))
                 }
                 if est_ilm:
-                    nbest[key+'-ilm'] = {
-                        bid: (searcher.ilm_score[bid].item(), trans) for bid, (_, trans) in nbest[key].items()
+                    nbest[k+'-ilm'] = {
+                        nid: (ilm_scores[nid], trans) for nid, (_, trans) in nbest[k].items()
                     }
+
             q_nbest.put(nbest, block=True)
             nbest = {}
             del batch
@@ -282,25 +261,16 @@ def DecoderParser():
 
     parser.add_argument("--input_scp", type=str, default=None)
     parser.add_argument("--output_prefix", type=str, default='./decode')
-    parser.add_argument("--algo", type=str,
-                        choices=['default', 'lc', 'alsd', 'rna'], default='default')
     parser.add_argument("--beam_size", type=int, default=3)
     parser.add_argument("--tokenizer", type=str,
                         help="Tokenizer model location. See cat/shared/tokenizer.py for details.")
     parser.add_argument("--nj", type=int, default=-1)
     parser.add_argument("--thread-per-woker", type=int, default=1)
-    parser.add_argument("--umax-portion", type=float,
-                        default=0.35, help="Umax/T for ALSD decoding.")
     parser.add_argument("--estimate-ILM", action="store_true",
                         help="Enable internal language model estimation. "
                         "This would slightly slow down the decoding. "
                         "With this option, the N-best list file would contains ILM scores too. See utils/dispatch_ilm.py")
-    parser.add_argument("--word-tree", type=str, default=None,
-                        help="Path to word prefix tree file.")
-    parser.add_argument("--batchfly", action='store_true',
-                        default=False, help="Enable batch-decoding.")
     parser.add_argument("--cpu", action='store_true', default=False)
-    parser.add_argument("--rescore", action='store_true', default=False)
     parser.add_argument("--silience", action='store_true', default=False)
     return parser
 

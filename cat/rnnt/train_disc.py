@@ -5,30 +5,30 @@ from ..shared import Manager
 from ..shared import coreutils
 from ..shared.decoder import AbsDecoder
 from ..shared.encoder import AbsEncoder
-from .train import build_model as rnnt_builder
-from ..ctc.train import build_model as ctc_builder
-from .joint import (
-    PackedSequence,
-    AbsJointNet
-)
+from ..shared.manager import train as default_train_func
 from ..shared.data import (
     KaldiSpeechDataset,
     sortedPadCollateTransducer
 )
+from ..ctc.train import build_model as ctc_builder
+from .train import build_model as rnnt_builder
+from .joint import (
+    PackedSequence,
+    AbsJointNet
+)
 from ctcdecode import CTCBeamDecoder
 import warp_rnnt
 
-import math
 import os
+import math
 import gather
 import argparse
-from tqdm import tqdm
 from collections import OrderedDict
 
 import torch
 import torch.nn as nn
 import torch.distributed as dist
-from torch.cuda.amp import autocast, GradScaler
+from torch.cuda.amp import autocast
 
 
 def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
@@ -41,10 +41,11 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         backend=args.dist_backend, init_method=args.dist_url,
         world_size=args.world_size, rank=args.rank)
 
-    manager = Manager(KaldiSpeechDataset,
-                      sortedPadCollateTransducer(),
-                      args, build_model,
-                      func_train=train, extra_tracks=['Pos Acc', 'Noise Acc'])
+    manager = Manager(
+        KaldiSpeechDataset,
+        sortedPadCollateTransducer(),
+        args, build_model,
+        func_train=train, extra_tracks=['pos acc', 'noise acc'])
 
     # training
     manager.run(args)
@@ -168,7 +169,7 @@ class DiscTransducerTrainer(nn.Module):
             noise_sampler_out, noise_sampler_lens,
             noise_samples, l_hypos, K, True)
 
-        return -(pos_logp.mean() + K*noise_logp.mean()), inputs.size(0), \
+        return (-(pos_logp.mean() + K*noise_logp.mean()), inputs.size(0)), \
             pos_logp.detach().exp_() > 0.5, noise_logp.detach().exp_() > 0.5
 
     def train(self, mode: bool = True):
@@ -177,131 +178,30 @@ class DiscTransducerTrainer(nn.Module):
         return
 
 
-def train(trainloader, args: argparse.Namespace, manager: Manager):
+def custom_hook(
+        manager: Manager,
+        model: DiscTransducerTrainer,
+        args: argparse.Namespace,
+        n_step: int,
+        nnforward_args: tuple):
 
-    def _go_step(detach_loss, n_batch):
-        # we divide loss with fold since we want the gradients to be divided by fold
-        with autocast(enabled=enableAMP):
-            loss, norm_size, TP, FP = model(
-                features, labels, input_lengths, label_lengths)
+    loss, TP, FP = model(*nnforward_args)
 
-        if args.rank == 0:
-            # FIXME: not exact global accuracy
-            pos_acc = (TP.sum()/TP.size(0)).item()
-            noise_acc = (FP.sum()/FP.size(0)).item()
-            manager.monitor.update('Pos Acc', pos_acc)
-            manager.monitor.update('Noise Acc', noise_acc)
-            manager.writer.add_scalar(
-                'Acc/positive', pos_acc, manager.step + (i+1) % fold)
-            manager.writer.add_scalar(
-                'Acc/noise', noise_acc, manager.step + (i+1) % fold)
+    if args.rank == 0:
+        # FIXME: not exact global accuracy
+        pos_acc = (TP.sum()/TP.size(0)).item()
+        noise_acc = (FP.sum()/FP.size(0)).item()
+        manager.monitor.update('pos acc', pos_acc)
+        manager.monitor.update('noise acc', noise_acc)
+        manager.writer.add_scalar(
+            'acc/positive', pos_acc, manager.step + n_step)
+        manager.writer.add_scalar(
+            'acc/noise', noise_acc, manager.step + n_step)
+    return loss
 
-        loss = loss / fold
-        if not isinstance(norm_size, torch.Tensor):
-            norm_size = input_lengths.new_tensor(
-                int(norm_size), device=args.gpu)
-        else:
-            norm_size = norm_size.to(device=args.gpu, dtype=torch.long)
 
-        normalized_loss = loss.detach() * norm_size
-        if 'databalance' in args and args.databalance:
-            '''
-            get current global size
-            efficiently, we can set t_batch_size=args.batch_size, 
-            but current impl is more robust
-            '''
-            dist.all_reduce(norm_size)
-            loss.data = normalized_loss * (world_size / norm_size)
-        else:
-            norm_size *= world_size
-
-        scaler.scale(loss).backward()
-
-        dist.all_reduce(normalized_loss)
-        detach_loss += normalized_loss.float()
-        n_batch += norm_size
-
-        return detach_loss, n_batch
-
-    coreutils.check_parser(args, ['grad_accum_fold', 'n_steps',
-                                  'print_freq', 'rank', 'gpu', 'debug', 'amp', 'grad_norm'])
-
-    model = manager.model
-    scheduler = manager.scheduler
-    optimizer = scheduler.optimizer
-    optimizer.zero_grad()
-    enableAMP = args.amp
-    scaler = GradScaler(enabled=enableAMP)
-    grad_norm = args.grad_norm
-
-    world_size = dist.get_world_size()
-    fold = args.grad_accum_fold
-    assert fold >= 1
-    detach_loss = 0.0
-    n_batch = 0
-    for i, minibatch in tqdm(enumerate(trainloader), desc=f'Epoch {manager.epoch} | train',
-                             unit='batch', total=fold*args.n_steps, disable=(args.gpu != 0), leave=False):
-
-        features, input_lengths, labels, label_lengths = minibatch
-        features, labels, input_lengths, label_lengths = features.cuda(
-            args.gpu, non_blocking=True), labels, input_lengths, label_lengths
-
-        if manager.specaug is not None:
-            features, input_lengths = manager.specaug(features, input_lengths)
-
-        # update every fold times and drop the last few batches (number of which <= fold)
-        if fold == 1 or (i+1) % fold == 0:
-            detach_loss, n_batch = _go_step(detach_loss, n_batch)
-
-            if grad_norm > 0.0:
-                if enableAMP:
-                    scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(
-                    model.parameters(), grad_norm, error_if_nonfinite=False)
-
-            scaler.step(optimizer)
-            scaler.update()
-            optimizer.zero_grad()
-
-            manager.step += 1
-            global_step = manager.step
-            scheduler.update_lr(global_step)
-
-            # average for logging
-            dist.all_reduce(detach_loss)
-            detach_loss /= n_batch
-            # measure accuracy and record loss; item() can sync all processes.
-            tolog = {
-                'loss': detach_loss.item(),
-                'lr': scheduler.lr_cur
-            }
-
-            # update tensorboard
-            if args.rank == 0:
-                manager.writer.add_scalar(
-                    'loss/train_loss', tolog['loss'], global_step)
-                manager.writer.add_scalar(
-                    'lr', tolog['lr'], global_step)
-
-            # update monitor
-            manager.monitor.update({
-                'train:loss': tolog['loss'],
-                'train:lr': tolog['lr']
-            })
-
-            n_time = (i+1)//fold
-
-            if n_time == args.n_steps or (args.debug and n_time >= 20):
-                dist.barrier()
-                break
-
-            # reset accumulated loss
-            detach_loss -= detach_loss
-            n_batch -= n_batch
-        else:
-            # gradient accumulation w/o sync
-            with model.no_sync():
-                detach_loss, n_batch = _go_step(detach_loss, n_batch)
+def train(*args):
+    return default_train_func(*args, _trainer_hook=custom_hook)
 
 
 def build_model(args, cfg: dict, dist: bool = True) -> DiscTransducerTrainer:
@@ -361,10 +261,6 @@ def build_model(args, cfg: dict, dist: bool = True) -> DiscTransducerTrainer:
 
 if __name__ == "__main__":
     parser = coreutils.basic_trainer_parser()
-    parser.add_argument("--gen", action="store_true",
-                        help="Generate noise samples, used with --sample_path")
-    parser.add_argument("--sample_path", type=str,
-                        help="Path to generated samples.")
     args = parser.parse_args()
 
     coreutils.setup_path(args)

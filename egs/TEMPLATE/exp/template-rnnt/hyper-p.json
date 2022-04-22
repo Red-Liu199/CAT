@@ -26,10 +26,8 @@
     "inference": {
         "decode": {
             "beam-size": 4,
-            "algo": "rna",
             "nj": 1,
-            "cpu": true,
-            "batchfly": true
+            "cpu": true
         },
         "er": {
             "mode": "wer",

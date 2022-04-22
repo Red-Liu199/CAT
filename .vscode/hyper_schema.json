@@ -309,9 +309,6 @@
                         }
                     }
                 },
-                "subsample": {
-                    "type": "number"
-                },
                 "lmdir": {
                     "type": "string"
                 },

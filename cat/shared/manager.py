@@ -334,12 +334,28 @@ NOTE (Huahuan):
 '''
 
 
-def train(trainloader, args: argparse.Namespace, manager: Manager):
+def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook: Callable = None):
+    """
+    The default train function.
+
+    Args:
+        trainloader (Dataloader)
+        args (Namespace) : configurations
+        manager (Manager) : the manager for pipeline control
+        _trainer_hook (optional, callable function) : custom hook function, check source code for usage.
+    """
 
     def _go_step(detach_loss, n_batch):
         # we divide loss with fold since we want the gradients to be divided by fold
         with autocast(enabled=enableAMP):
-            loss = model(features, labels, input_lengths, label_lengths)
+            if _trainer_hook is None:
+                loss = model(features, labels, input_lengths, label_lengths)
+            else:
+                # you could custom model forward, tracks logging and metric calculation in the hook
+                loss = _trainer_hook(
+                    manager, model, args, (i+1) % fold,
+                    (features, labels, input_lengths, label_lengths)
+                )
 
         if isinstance(loss, tuple):
             assert len(loss) == 2

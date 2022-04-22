@@ -780,8 +780,7 @@ if __name__ == "__main__":
             decode_settings['nj'] = os.cpu_count()
             sys.stdout.write(fmt.format(
                 f"set 'nj' to {decode_settings['nj']}"))
-        if hyper_settings['topo'] == 'rnnt' and (
-                'alpha' in decode_settings and decode_settings['alpha'] is not None):
+        if hyper_settings['topo'] == 'rnnt' and 'alpha' in decode_settings:
 
             if 'lmdir' not in inference_settings and \
                     ('lm-config' not in decode_settings or 'lm-check' not in decode_settings):
@@ -809,10 +808,7 @@ if __name__ == "__main__":
                 sys.stdout.write(fmt.format(
                     f"set 'lm-check' to {decode_settings['lm-check']}"))
 
-            if 'rescore' in decode_settings and decode_settings['rescore']:
-                suffix_lm = f"lm-rescore-{decode_settings['alpha']}{beta_suffix}"
-            else:
-                suffix_lm = f"lm-fusion-{decode_settings['alpha']}{beta_suffix}"
+            suffix_lm = f"fusion-{decode_settings['alpha']}{beta_suffix}"
 
         elif hyper_settings['topo'] == 'ctc' and 'lm-path' in decode_settings:
             checkExist('f', decode_settings['lm-path'])
@@ -832,7 +828,7 @@ if __name__ == "__main__":
             decodedir = os.path.join(args.expdir, 'decode')
             os.makedirs(decodedir, exist_ok=True)
             if hyper_settings['topo'] == 'rnnt':
-                f_text = f"rnnt-{decode_settings['beam-size']}_algo-{decode_settings['algo']}_{suffix_lm}_{suffix_avgmodel}"
+                f_text = f"rnnt-{decode_settings['beam-size']}_{suffix_lm}_{suffix_avgmodel}"
             else:
                 f_text = f"ctc-{decode_settings['beam-size']}_{suffix_lm}_{suffix_avgmodel}"
             decode_out_prefix = os.path.join(decodedir, f_text)
@@ -840,42 +836,7 @@ if __name__ == "__main__":
                 f"set 'output_prefix' to {decode_out_prefix}"))
         else:
             decode_out_prefix = decode_settings['output_prefix']
-        if hyper_settings['topo'] == 'rnnt' and 'algo' in decode_settings \
-                and decode_settings['algo'] == 'alsd' and 'umax-portion' not in decode_settings:
-            # trying to compute a reasonable portion value from trainset
-            from cat.shared.data import KaldiSpeechDataset
-            import numpy as np
-            f_pkl = os.path.join(args.expdir, f'pkl/train.pkl')
-            if os.path.isfile(f_pkl):
-                # since we using conformer, there's a 1/4 subsapling, if it's not, modify that
-                if "subsample" in inference_settings:
-                    sub_factor = inference_settings['subsample']
-                    assert sub_factor > 1, f"can't deal with 'subsample'={sub_factor} in field:inference"
-                    sys.stdout.write(fmt.format(
-                        f"resolving portion data from train set, might takes a while."))
-                    dataset = KaldiSpeechDataset(f_pkl)
-                    lt = np.asarray(dataset.get_seq_len()).astype(np.float64)
-                    # get label lengths
-                    ly = np.zeros_like(lt)
-                    for i in range(len(dataset)):
-                        _, label = dataset[i]
-                        ly[i] = label.size(0)
 
-                    lt /= sub_factor
-                    normal_ly = ly/lt
-                    portion = np.mean(normal_ly) + 5 * np.std(normal_ly)
-                    del lt
-                    del ly
-                    del normal_ly
-                    decode_settings['umax-portion'] = portion
-                    orin_hyper_setting = readfromjson(f_hyper_settings)
-                    orin_hyper_setting['inference']['decode']['umax-portion'] = portion
-                    dumpjson(orin_hyper_setting, f_hyper_settings)
-                    sys.stdout.write(fmt.format(
-                        f"set 'umax-portion' to {portion}"))
-            else:
-                sys.stderr.write(
-                    f"warning: no training set found in {args.expdir}. Skip counting 'umax-portion'")
         testsets = hyper_settings['data']['test']
         if isinstance(testsets, str):
             testsets = [testsets]

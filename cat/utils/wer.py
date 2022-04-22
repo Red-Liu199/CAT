@@ -52,12 +52,9 @@ def WER(l_gt: List[str], l_hy: List[str]) -> Tuple[int, int, int, int, int]:
     assert len(l_gt) == len(l_hy)
     measures = jiwer.compute_measures(l_gt, l_hy)
 
-    cnt_s = 0
-    for i in range(len(l_gt)):
-        if l_gt[i] != l_hy[i]:
-            cnt_s += 1
+    cnt_err_utt = sum(1 for gt, hy in zip(l_gt, l_hy) if gt != hy)
 
-    return measures['substitutions'], measures['deletions'], measures['insertions'], measures['hits'], cnt_s
+    return measures['substitutions'], measures['deletions'], measures['insertions'], measures['hits'], cnt_err_utt
 
 
 def oracleWER(l_gt: List[Tuple[str, str]], l_hy: List[Tuple[str, List[str]]]) -> Tuple[int, int, int, int, int]:
