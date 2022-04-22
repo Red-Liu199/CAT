@@ -49,7 +49,7 @@ def main(args: argparse.Namespace):
         if usegpu:
             world_size = torch.cuda.device_count()
         else:
-            world_size = os.cpu_count() // 2
+            world_size = min(1, os.cpu_count() // 2)
     else:
         world_size = args.nj
     assert world_size > 0

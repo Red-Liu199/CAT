@@ -8,8 +8,9 @@ Language model trainer.
 
 from ..shared import Manager
 from ..shared import coreutils
+from ..shared import decoder as model_zoo
+from ..shared.decoder import AbsDecoder
 from ..shared.manager import evaluate as default_eval
-from ..shared.decoder import *
 from ..shared.data import (
     CorpusDataset,
     sortedPadCollateLM
@@ -18,6 +19,7 @@ from ..shared.data import (
 import gather
 import math
 import argparse
+from typing import Optional, Union
 
 import torch
 import torch.nn as nn
@@ -77,18 +79,19 @@ def evaluate(*args) -> float:
 
 
 def build_model(
-        configuration: dict,
+        cfg: dict,
         args: Optional[Union[argparse.Namespace, dict]] = None,
         dist=True, wrapper=True) -> Union[nn.parallel.DistributedDataParallel, LMTrainer, AbsDecoder]:
 
-    def _build_decoder(config) -> nn.Module:
-        LMNet = eval(config['type'])    # type: AbsDecoder
-        NetKwargs = config['kwargs']
-        return LMNet(**NetKwargs)
+    assert 'decoder' in cfg
+    # when immigrate configure from RNN-T to CTC,
+    # one usually forget to set the `with_head=True`
+    if not cfg['decoder']['kwargs'].get('with_head', False):
+        print("warning: 'with_head' in field:decoder:kwargs is False/not set. "
+              "If you don't know what this means, set it to True.")
 
-    assert 'decoder' in configuration
-
-    decoder = _build_decoder(configuration['decoder'])
+    LMNet = getattr(model_zoo, cfg['decoder']['type'])  # type: AbsDecoder
+    decoder = LMNet(**cfg['decoder']['kwargs'])
 
     if wrapper:
         model = LMTrainer(decoder)

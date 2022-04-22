@@ -77,31 +77,37 @@ class AMTrainer(nn.Module):
         else:
             # [N, T, C] -> [T, N, C]
             netout = netout.transpose(0, 1)
-            lens_o = lens_o.to(torch.long)
-            loss = self.criterion(netout, labels, lens_o, label_lengths)
+            loss = self.criterion(netout, labels.to(torch.int), lens_o.to(
+                torch.int), label_lengths.to(torch.int))
 
         return loss.mean()
 
 
 def build_model(
-        configuration: dict,
+        cfg: dict,
         args: Optional[Union[argparse.Namespace, dict]] = None,
         dist: bool = True,
         wrapper: bool = True) -> Union[nn.parallel.DistributedDataParallel, AMTrainer, model_zoo.AbsEncoder]:
 
-    if 'ctc-trainer' not in configuration:
-        configuration['ctc-trainer'] = {}
+    if 'ctc-trainer' not in cfg:
+        cfg['ctc-trainer'] = {}
 
-    assert 'encoder' in configuration
-    netconfigs = configuration['encoder']
+    assert 'encoder' in cfg
+    netconfigs = cfg['encoder']
     net_kwargs = netconfigs['kwargs']   # type:dict
+
+    # when immigrate configure from RNN-T to CTC,
+    # one usually forget to set the `with_head=True`
+    if not net_kwargs.get('with_head', False):
+        print("warning: 'with_head' in field:encoder:kwargs is False/not set. "
+              "If you don't know what this means, set it to True.")
 
     am_model = getattr(model_zoo, netconfigs['type'])(
         **net_kwargs)  # type: model_zoo.AbsEncoder
     if not wrapper:
         return am_model
 
-    model = AMTrainer(am_model, **configuration['ctc-trainer'])
+    model = AMTrainer(am_model, **cfg['ctc-trainer'])
     if not dist:
         return model
 
@@ -115,9 +121,9 @@ def build_model(
     model = coreutils.convert_syncBatchNorm(model)
 
     model.cuda(args['gpu'])
-    if 'use_crf' in configuration['ctc-trainer'] and configuration['ctc-trainer']['use_crf']:
-        assert 'den-lm' in configuration['ctc-trainer']
-        model.register_crf_ctx(configuration['ctc-trainer']['den-lm'])
+    if 'use_crf' in cfg['ctc-trainer'] and cfg['ctc-trainer']['use_crf']:
+        assert 'den-lm' in cfg['ctc-trainer']
+        model.register_crf_ctx(cfg['ctc-trainer']['den-lm'])
     model = torch.nn.parallel.DistributedDataParallel(
         model, device_ids=[args['gpu']])
     return model

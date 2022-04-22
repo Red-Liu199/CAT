@@ -676,7 +676,7 @@ class CausalConv2d(nn.Module):
                 # 'conv': nn.Conv2d(in_channels, out_channels, kernel_size)
             ]))
         else:
-            # FIXME (Huahuan): I think a normalization is helpful so that the padding won't change the distribution of features.
+            # NOTE (Huahuan): I think a normalization is helpful so that the padding won't change the distribution of features.
             self.causal_conv = nn.Sequential(OrderedDict([
                 # seperate convlution
                 ('depth_conv', nn.Conv2d(in_channels, in_channels,

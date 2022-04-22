@@ -269,8 +269,6 @@ def basic_trainer_parser(prog: str = '', training: bool = True,  isddp: bool = T
                             help="Directory to save the log and model files.")
         parser.add_argument("--databalance", action="store_true",
                             help="Load data batches according to sequence lenth.")
-        parser.add_argument("--len-norm", type=str, default=None,
-                            help="Normal expression to seq len. Useful with --databalance. E.g. 'L**1.3'")
 
         parser.add_argument("--tokenizer", type=str,
                             help="Specify tokenizer. Currently, only used with --large-dataset.")
@@ -320,7 +318,7 @@ def divide_almost_equally(arr_l, arr_idx, num_chunks):
     return groups.values()
 
 
-def group_by_lens(src_l: List[Any], linfo: List[int], N: int, _norm: Union[None, str] = None, consider_padding: bool = True) -> List[List[Any]]:
+def group_by_lens(src_l: List[Any], linfo: List[int], N: int, consider_padding: bool = True) -> List[List[Any]]:
     """Split `src_l` by `linfo` into `N` parts.
     The split is done by a kind of greedy method, considering
     balancing the sum of lengths in each part and their paddings.
@@ -336,10 +334,9 @@ def group_by_lens(src_l: List[Any], linfo: List[int], N: int, _norm: Union[None,
     if N == len_src:
         return [[x] for x in src_l]
 
-    if _norm is not None:
-        # such as 'L**1.5'
-        def norm_func(L): return eval(_norm)   # type: Callable[[int], float]
-        linfo = [norm_func(x) for x in linfo]
+    # NOTE (huahuan):
+    # I deprecated the support for custom length norm, since eval() function could be dangerous
+    # In most of the cases, normalization is not required.
 
     if not consider_padding:
         return list(divide_almost_equally(linfo, src_l, N))

@@ -258,10 +258,10 @@ class CausalTransformer(AbsDecoder):
                  padding_idx: int = -1) -> None:
         super().__init__(n_emb=dim_hid, num_classes=num_classes,
                          padding_idx=padding_idx, with_head=with_head)
-        configuration = GPT2Config(
+        cfg = GPT2Config(
             vocab_size=num_classes, n_embd=dim_hid,
             n_layer=num_layers, n_head=num_head, attn_pdrop=attn_dropout)
-        self.trans = GPT2Model(configuration)
+        self.trans = GPT2Model(cfg)
         # FIXME (huahun):
         # hacked fix of the issue related to Huggingface,
         # ... see https://github.com/huggingface/transformers/issues/14859
@@ -495,12 +495,12 @@ class ILM(AbsDecoder):
         del self.classifier
         from cat.rnnt import rnnt_builder
         from cat.shared import coreutils
-        configuration = coreutils.readjson(f_rnnt_config)
-        rnntmodel = rnnt_builder(configuration, dist=False)
+        cfg = coreutils.readjson(f_rnnt_config)
+        rnntmodel = rnnt_builder(cfg, dist=False)
         coreutils.load_checkpoint(rnntmodel, f_check)
         self._stem = rnntmodel.decoder
         self._head = rnntmodel.joint
-        self._dim_enc_out = configuration['joint']['kwargs']['odim_encoder']
+        self._dim_enc_out = cfg['joint']['kwargs']['odim_encoder']
         del rnntmodel
 
     def forward(self, x, input_lengths):

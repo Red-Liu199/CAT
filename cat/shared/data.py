@@ -411,7 +411,6 @@ class BalancedDistributedSampler(DistributedSampler):
     def __init__(self,
                  dataset: torch.utils.data.Dataset,
                  global_batch_size: int,
-                 length_norm: Optional[str] = None,
                  num_replicas: Optional[int] = None,
                  rank: Optional[int] = None,
                  local_rank: int = None,
@@ -423,7 +422,7 @@ class BalancedDistributedSampler(DistributedSampler):
 
         if global_batch_size < self.num_replicas or global_batch_size > len(self.dataset):
             raise RuntimeError(
-                "Invalid global batch size: ", global_batch_size)
+                f"Invalid global batch size: {global_batch_size} for given n_wokers: {self.num_replicas} and len of dataset: {len(self.dataset)}")
 
         if not hasattr(dataset, 'get_seq_len'):
             raise RuntimeError(
@@ -447,7 +446,6 @@ class BalancedDistributedSampler(DistributedSampler):
         self._lens = seq_lens
 
         self.g_batch = int(global_batch_size)
-        self._l_norm = length_norm
 
     def __iter__(self):
         # DistributedSampler.__iter__()
@@ -481,19 +479,19 @@ class BalancedDistributedSampler(DistributedSampler):
             batched_indices.pop()
 
         partial_indices, _ = group_indices(
-            (batched_indices, self._lens, self._l_norm, self.num_replicas, 0))
+            (batched_indices, self._lens, self.num_replicas, 0))
 
         local_indices = [x[self.rank] for x in partial_indices]
         return iter(local_indices)
 
 
-def group_indices(args: Tuple[List[List[int]], List[int], Union[str, None], int, int]):
-    idx_groups, global_ls, l_norm, n_replicas, p_id = args
+def group_indices(args: Tuple[List[List[int]], List[int], int, int]):
+    idx_groups, global_ls, n_replicas, p_id = args
     for k, g in enumerate(idx_groups):
         g_sorted = sorted(g, key=lambda i: global_ls[i], reverse=True)
 
         g_grouped = coreutils.group_by_lens(
-            g_sorted, [global_ls[i] for i in g_sorted], n_replicas, l_norm)
+            g_sorted, [global_ls[i] for i in g_sorted], n_replicas)
         idx_groups[k] = g_grouped
 
     return idx_groups, p_id

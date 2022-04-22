@@ -115,7 +115,7 @@ class Manager(object):
                     "> Enable data balanced loading\n"
                     "  this takes a while for large dataset.", args.gpu)
                 train_sampler = BalancedDistributedSampler(
-                    tr_set, args.batch_size, args.len_norm, local_rank=args.gpu)
+                    tr_set, args.batch_size, local_rank=args.gpu)
                 trainloader = DataLoader(
                     tr_set, batch_sampler=train_sampler,
                     num_workers=args.workers, collate_fn=collate_fn,

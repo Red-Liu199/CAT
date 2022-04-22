@@ -212,7 +212,7 @@ class TransducerTrainer(nn.Module):
 
 @torch.no_grad()
 def build_model(
-        configuration: dict,
+        cfg: dict,
         args: Optional[Union[argparse.Namespace, dict]] = None,
         dist: bool = True,
         wrapped: bool = True,
@@ -242,18 +242,8 @@ def build_model(
             zoo = tn_zoo
         elif module == 'decoder':
             zoo = pn_zoo
-            if "type" not in config:
-                # compatibility to older config
-                config["type"] = "LSTMPredictNet"
         elif module == 'joint':
-            """
-                The joint network accept the concatence of outputs of the 
-                encoder and decoder. So the input dimensions MUST match that.
-            """
             zoo = joint_zoo
-            if 'type' not in config:
-                config['type'] = 'JointNet'
-
         else:
             raise ValueError(f"Unknow module: {module}")
 
@@ -269,23 +259,16 @@ def build_model(
                 raise RuntimeError(
                     "Unknown module with 'pretrained' option: {}".format(module))
 
-            init_sum = sum(param.data.sum()
-                           for param in _model.parameters())
-            state_dict = _load_and_immigrate(
-                config['pretrained'], prefix, '')
-            _model.load_state_dict(state_dict, strict=False)
-            if sum(param.data.sum()for param in _model.parameters()) == init_sum:
-                coreutils.highlight_msg(
-                    f"WARNING: It seems {module} pretrained model is not properly loaded.")
+            _model.load_state_dict(
+                _load_and_immigrate(
+                    config['pretrained'],
+                    prefix, ''), strict=False)
 
         if 'freeze' in config and config['freeze']:
             if 'pretrained' not in config:
                 raise RuntimeError(
                     "freeze=True while 'pretrained' is empty is not allowed. In {} init".format(module))
-
-            for param in _model.parameters():
-                param.requires_grad = False
-
+            _model.requires_grad_(False)
             setattr(_model, 'freeze', True)
         else:
             setattr(_model, 'freeze', False)
@@ -300,14 +283,14 @@ def build_model(
             del _path
         return _model
 
-    assert 'encoder' in configuration
-    assert 'decoder' in configuration
-    assert 'joint' in configuration
+    assert 'encoder' in cfg
+    assert 'decoder' in cfg
+    assert 'joint' in cfg
     verbose = False if args is None else verbose
 
-    encoder = _build(configuration['encoder'], 'encoder')
-    decoder = _build(configuration['decoder'], 'decoder')
-    jointnet = _build(configuration['joint'], 'joint')
+    encoder = _build(cfg['encoder'], 'encoder')
+    decoder = _build(cfg['decoder'], 'decoder')
+    jointnet = _build(cfg['joint'], 'joint')
     if all(_model.freeze for _model in [encoder, decoder, jointnet]):
         raise RuntimeError("It's illegal to freeze all parts of Transducer.")
 
@@ -318,8 +301,8 @@ def build_model(
         return encoder, decoder, jointnet
 
     # for compatible of old settings
-    if 'transducer' in configuration:
-        transducer_kwargs = configuration["transducer"]     # type: dict
+    if 'transducer' in cfg:
+        transducer_kwargs = cfg["transducer"]     # type: dict
     else:
         transducer_kwargs = {}
 

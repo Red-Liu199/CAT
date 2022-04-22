@@ -119,7 +119,7 @@ def sentencepiece_train(intext: str, **kwargs):
     spm.SentencePieceTrainer.Train(**DEFAULT_SETTINGS)
 
 
-def parsingData(
+def pack_data(
         f_scps: Union[List[str], str],
         f_labels: Union[List[str], str],
         f_out: str,
@@ -141,7 +141,7 @@ def parsingData(
     from tqdm import tqdm
 
     if os.path.isfile(f_out):
-        sys.stderr.write("warning: parsingData() "
+        sys.stderr.write("warning: pack_data() "
                          f"file exists: {f_out}, "
                          "rm it if you want to update the data.\n\n")
         return
@@ -157,7 +157,7 @@ def parsingData(
     l_min = 1
     l_max = float('inf')
     if filter is not None:
-        assert ':' in filter, f"parsingData: invalid filter format {filter}"
+        assert ':' in filter, f"pack_data: invalid filter format {filter}"
         l_bound, u_bound = (i for i in filter.split(':'))
         if l_bound != '':
             l_min = int(l_bound)
@@ -195,7 +195,7 @@ def parsingData(
     num_utts = [sum(1 for _ in open(_f_scp, 'r')) for _f_scp in f_scps]
     total_utts = sum(num_utts)
     assert total_utts == num_label_lines, \
-        "parsingData: f_scp and f_label should match on the # lines, " \
+        "pack_data: f_scp and f_label should match on the # lines, " \
         f"instead {total_utts} != {len(labels)}"
 
     f_opened = {}
@@ -254,7 +254,7 @@ def parsingData(
             'key': np.array(_keys)}, fo)
 
     if cnt_rm > 0:
-        print(f"parsingData: remove {cnt_rm} unqualified sequences.")
+        print(f"pack_data: remove {cnt_rm} unqualified sequences.")
     print(
         f"...# frames: {cnt_frames} | # tokens: {cnt_tokens} | # seqs: {idx}")
 
@@ -656,7 +656,7 @@ if __name__ == "__main__":
                         f"'{_set}' not found. you can configure it manually in {F_DATAINFO}")
                 f_data.append(datainfo[_set])
 
-            parsingData(
+            pack_data(
                 [_data['scp'] for _data in f_data],
                 [_data['trans'] for _data in f_data],
                 f_out=os.path.join(d_pkl, dataset+'.pkl'),
@@ -725,7 +725,7 @@ if __name__ == "__main__":
         checkdir = os.path.join(args.expdir, 'checks')
 
         # decode
-        assert 'decode' in inference_settings, "missing 'decode' in field:['inference']"
+        assert 'decode' in inference_settings, "missing 'decode' in field:inference"
         decode_settings = inference_settings['decode']
 
         if 'resume' in decode_settings:
@@ -788,8 +788,8 @@ if __name__ == "__main__":
                 sys.stderr.write(
                     "\n"
                     "To use external LM with RNN-T topo, at least one option is required:\n"
-                    "  1 (higer priority): set 'lmdir' in field:['inference'];\n"
-                    "  2: set both 'lm-config' and 'lm-check' in field:['inference']['decode']\n\n")
+                    "  1 (higer priority): set 'lmdir' in field:inference ;\n"
+                    "  2: set both 'lm-config' and 'lm-check' in field:inference:decode\n\n")
                 exit(1)
 
             if 'beta' in decode_settings:
@@ -850,7 +850,7 @@ if __name__ == "__main__":
                 # since we using conformer, there's a 1/4 subsapling, if it's not, modify that
                 if "subsample" in inference_settings:
                     sub_factor = inference_settings['subsample']
-                    assert sub_factor > 1, f"can't deal with 'subsample'={sub_factor} in field:['inference']"
+                    assert sub_factor > 1, f"can't deal with 'subsample'={sub_factor} in field:inference"
                     sys.stdout.write(fmt.format(
                         f"resolving portion data from train set, might takes a while."))
                     dataset = KaldiSpeechDataset(f_pkl)
@@ -910,9 +910,9 @@ if __name__ == "__main__":
 
         # compute wer/cer
         from cat.utils import wer as wercal
-        assert 'er' in inference_settings, "missing 'er' in field:['inference']"
+        assert 'er' in inference_settings, "missing 'er' in field:inference"
         err_settings = inference_settings['er']
-        assert 'mode' in err_settings, "missing 'mode' in field:['inference']['er']"
+        assert 'mode' in err_settings, "missing 'mode' in field:inference:er"
 
         f_texts = [datainfo[_set]['trans'] for _set in testsets]
         checkExist('f', f_texts)

@@ -52,6 +52,8 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(prog=script)
     for arg in match:
+        # NOTE: 
+        # This is potential dangerous. It's your duty to ensure the safety.
         eval(f"parser.add_argument({arg})")
 
     try:

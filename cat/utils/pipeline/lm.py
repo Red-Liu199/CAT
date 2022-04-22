@@ -90,7 +90,7 @@ if __name__ == "__main__":
         for part in ['train', 'dev']:
             if part not in data_settings:
                 sys.stderr.write(
-                    f"warining: missing '{part}' in field:['data'], skip\n")
+                    f"warining: missing '{part}' in field:data, skip\n")
                 continue
             part_text = combineText(data_settings[part])
             if part != 'train':
@@ -130,7 +130,7 @@ if __name__ == "__main__":
         assert 'data' in hyper_settings, f"missing 'data': {f_hyper_settings}"
         if 'test' not in hyper_settings['data']:
             sys.stderr.write(
-                "missing 'test' in field:['data'], skip evaluation.\n")
+                "missing 'test' in field:data, skip evaluation.\n")
             sys.exit(0)
 
         if 'inference' not in hyper_settings:
@@ -152,14 +152,14 @@ if __name__ == "__main__":
 
         if 'tokenizer' not in infer_setting['ppl']:
             assert 'tokenizer' in hyper_settings, f"missing 'tokenizer' in field:"
-            assert 'location' in hyper_settings['tokenizer'], "missing 'tokenizer' in field:['tokenizer']"
+            assert 'location' in hyper_settings['tokenizer'], "missing 'tokenizer' in field:tokenizer"
             f_tokenizer = hyper_settings['tokenizer']['location']
             checkExist('f', f_tokenizer)
             infer_setting['ppl']['tokenizer'] = f_tokenizer
 
         if 'resume' in infer_setting['ppl']:
             sys.stdout.write(fmt.format(
-                "setting 'resume' in field:['inference']['ppl'] would overwrite field:['inference']['avgmodel']"))
+                "setting 'resume' in field:inference:ppl would overwrite field:inference:avgmodel"))
         elif checkpoint is not None:
             sys.stderr.write(fmt.format(f"set 'resume' to {checkpoint}"))
             infer_setting['ppl']['resume'] = checkpoint

@@ -304,7 +304,7 @@ def train(trainloader, args: argparse.Namespace, manager: Manager):
                 detach_loss, n_batch = _go_step(detach_loss, n_batch)
 
 
-def build_model(args, configuration: dict, dist: bool = True) -> DiscTransducerTrainer:
+def build_model(args, cfg: dict, dist: bool = True) -> DiscTransducerTrainer:
     def _load_and_immigrate(orin_dict_path: str, str_src: str, str_dst: str) -> OrderedDict:
         if not os.path.isfile(orin_dict_path):
             raise FileNotFoundError(f"{orin_dict_path} is not a valid file.")
@@ -316,11 +316,11 @@ def build_model(args, configuration: dict, dist: bool = True) -> DiscTransducerT
         del checkpoint
         return new_state_dict
 
-    if 'DiscTransducerTrainer' not in configuration:
-        configuration['DiscTransducerTrainer'] = {}
+    if 'DiscTransducerTrainer' not in cfg:
+        cfg['DiscTransducerTrainer'] = {}
 
-    assert 'ctc-sampler' in configuration
-    ctc_config = configuration['ctc-sampler']
+    assert 'ctc-sampler' in cfg
+    ctc_config = cfg['ctc-sampler']
     assert 'pretrain-config' in ctc_config
     assert 'pretrain-check' in ctc_config
     ctc_model = ctc_builder(
@@ -331,19 +331,18 @@ def build_model(args, configuration: dict, dist: bool = True) -> DiscTransducerT
     ctc_model.load_state_dict(_load_and_immigrate(
         ctc_config['pretrain-check'], 'module.am.', ''))
     ctc_model.eval()
-    for param in ctc_model.parameters():
-        param.requires_grad = False
+    ctc_model.requires_grad_(False)
 
-    assert 'searcher' in configuration
+    assert 'searcher' in cfg
     encoder, decoder, joint = rnnt_builder(
-        configuration, args,  dist=False, wrapped=False)
+        cfg, args,  dist=False, wrapped=False)
 
     labels = [str(i) for i in range(ctc_model.classifier.out_features)]
     searcher = CTCBeamDecoder(
-        labels, log_probs_input=True, **configuration['searcher'])
+        labels, log_probs_input=True, **cfg['searcher'])
 
     model = DiscTransducerTrainer(
-        encoder, decoder, joint, ctc_model, searcher, **configuration['DiscTransducerTrainer'])
+        encoder, decoder, joint, ctc_model, searcher, **cfg['DiscTransducerTrainer'])
 
     if not dist:
         setattr(model, 'requires_slice', True)
