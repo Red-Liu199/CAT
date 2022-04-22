@@ -28,9 +28,7 @@ import gather
 import argparse
 from collections import OrderedDict
 from warp_rnnt import rnnt_loss as RNNTLoss
-import warp_rnnt
-if warp_rnnt.__version__ >= '0.7.1':
-    from warp_rnnt import fused_rnnt_loss_ as RNNTFusedLoss
+from warp_rnnt import fused_rnnt_loss_ as RNNTFusedLoss
 from typing import Union, Optional, Tuple
 
 import torch
@@ -57,23 +55,24 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
 
 
 class TransducerTrainer(nn.Module):
-    def __init__(self,
-                 encoder: tn_zoo.AbsEncoder = None,
-                 decoder: pn_zoo.AbsDecoder = None,
-                 jointnet: AbsJointNet = None,
-                 # enable compact layout, would consume less memory and fasten the computation of RNN-T loss.
-                 compact: bool = False,
-                 # enable fused mode for RNN-T loss computation, which would consume less memory but take a little more time
-                 fused: bool = False,
-                 # weight of ILME loss to conduct joint-training
-                 ilme_loss: Optional[float] = None,
-                 # insert sub-sampling layer between encoder and joint net
-                 time_reduction: int = 1,
-                 # add mask to decoder output, this specifies the range of mask
-                 decoder_mask_range: float = 0.1,
-                 # add mask to decoder output, this specifies the # mask
-                 num_decoder_mask: int = -1,
-                 bos_id: int = 0):
+    def __init__(
+        self,
+        encoder: tn_zoo.AbsEncoder = None,
+        decoder: pn_zoo.AbsDecoder = None,
+        jointnet: AbsJointNet = None,
+        # enable compact layout, would consume less memory and fasten the computation of RNN-T loss.
+        compact: bool = False,
+        # enable fused mode for RNN-T loss computation, which would consume less memory but take a little more time
+        fused: bool = False,
+        # weight of ILME loss to conduct joint-training
+        ilme_loss: Optional[float] = None,
+        # insert sub-sampling layer between encoder and joint net
+        time_reduction: int = 1,
+        # add mask to decoder output, this specifies the range of mask
+        decoder_mask_range: float = 0.1,
+        # add mask to decoder output, this specifies the # mask
+        num_decoder_mask: int = -1,
+            bos_id: int = 0):
         super().__init__()
 
         if fused and not jointnet.is_normalize_separated:
@@ -157,10 +156,7 @@ class TransducerTrainer(nn.Module):
         else:
             joint_out = self.joint(output_encoder, output_decoder)
 
-        if self.ilme_weight != 0.0:
-            return joint_out, targets, o_lens, target_lengths, output_decoder
-        else:
-            return joint_out, targets, o_lens, target_lengths
+        return joint_out, targets, o_lens, target_lengths, output_encoder, output_decoder
 
     def forward(self, inputs: torch.FloatTensor, targets: torch.LongTensor, input_lengths: torch.LongTensor, target_lengths: torch.LongTensor) -> torch.FloatTensor:
 
@@ -173,7 +169,7 @@ class TransducerTrainer(nn.Module):
         if self.ilme_weight != 0.0:
             # calculate the ILME ILM loss
             # h_decoder_out: (N, U+1, H)
-            h_decoder_out = tupled_jointout[4]
+            h_decoder_out = tupled_jointout[5]
             # ilm_log_probs: (N, 1, U, V) -> (N, U, V)
             ilm_log_probs = self.joint(
                 self._dummy_h_enc_ilme_loss.expand(

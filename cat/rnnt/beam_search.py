@@ -192,7 +192,7 @@ class BeamSearcher():
         blank_id: int = 0,
         bos_id: int = 0,
         beam_size: int = 5,
-        nbest: int = 1,
+        nbest: int = -1,
         lm_module: Optional[AbsDecoder] = None,
         alpha: Optional[float] = 0.,
         beta: Optional[float] = 0.,
@@ -216,6 +216,8 @@ class BeamSearcher():
         self.blank_id = blank_id
         self.bos_id = bos_id
         self.beam_size = beam_size
+        if nbest == -1:
+            nbest = beam_size
         self.nbest = min(nbest, beam_size)
         self.lm = lm_module
         self.alpha_ = alpha
@@ -226,8 +228,6 @@ class BeamSearcher():
         self.searcher = self.batching_rna
 
     def __call__(self, enc_out: torch.Tensor, frame_lens: Optional[torch.Tensor] = None) -> List[Tuple[List[List[int]], List[float], Union[None, List[float]]]]:
-
-        # type: List[List[Hypothesis]]
         hypos = self.searcher(enc_out, frame_lens)
 
         return [
@@ -259,6 +259,8 @@ class BeamSearcher():
         if frame_lengths is None:
             frame_lengths = dummy_token.new_full(
                 n_batches, fill_value=n_max_frame_length)
+        else:
+            frame_lengths = frame_lengths.clone()
 
         Beams = [[Hypothesis(
             pred=dummy_token.new_tensor([self.bos_id]),

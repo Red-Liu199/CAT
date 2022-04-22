@@ -96,6 +96,7 @@ class AbsJointNet(nn.Module):
         return True
 
     def impl_forward(self, *args, **kwargs):
+        """forward without log_softmax"""
         raise NotImplementedError
 
     def forward(self, *args, **kwargs):
