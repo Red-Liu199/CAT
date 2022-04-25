@@ -360,6 +360,30 @@ class sortedPadCollateLM():
         return xs, input_lengths, target, torch.empty(1)
 
 
+class sortedScpPadCollate():
+    """Collect data into batch and add padding.
+    Args:
+        batch   : list of (key, feature)
+        key     : str
+        feature : torch.FloatTensor
+    Return:
+        (keys, logits, lengths)
+    """
+
+    def __call__(self, batch: Sequence[Tuple[str, torch.FloatTensor]]) -> Tuple[Sequence[str], torch.FloatTensor, torch.LongTensor]:
+
+        if len(batch) > 1:
+            batch = sorted(
+                batch, key=lambda item: item[1].size(0), reverse=True)
+        keys = [key for key, _ in batch]
+
+        mats = coreutils.pad_list([feature for _, feature in batch])
+
+        lengths = torch.LongTensor([feature.size(0) for _, feature in batch])
+
+        return keys, mats, lengths
+
+
 class BalancedDistributedSampler(DistributedSampler):
     def __init__(self,
                  dataset: torch.utils.data.Dataset,
