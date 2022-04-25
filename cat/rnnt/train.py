@@ -14,7 +14,7 @@ from ..shared.layer import TimeReduction
 from ..shared import SpecAug
 from ..shared.data import (
     KaldiSpeechDataset,
-    sortedPadCollateTransducer
+    sortedPadCollateASR
 )
 from . import joint as joint_zoo
 from .joint import (
@@ -48,7 +48,7 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         world_size=args.world_size, rank=args.rank)
 
     manager = Manager(KaldiSpeechDataset,
-                      sortedPadCollateTransducer(), args, build_model)
+                      sortedPadCollateASR(), args, build_model)
 
     # training
     manager.run(args)

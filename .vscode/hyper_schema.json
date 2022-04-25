@@ -76,6 +76,7 @@
                     "type": "string",
                     "examples": [
                         "JiebaTokenizer",
+                        "JiebaComposePhoneTokenizer",
                         "SentencePieceTokenizer"
                     ],
                     "default": "SentencePieceTokenizer"
@@ -218,6 +219,30 @@
                                     "train_extremely_large_corpus": {
                                         "type": "boolean",
                                         "default": false
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "type": {
+                                "const": "JiebaComposePhoneTokenizer"
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "property": {
+                                "type": "object",
+                                "properties": {
+                                    "w2p_map": {
+                                        "type": "string"
+                                    },
+                                    "userdict": {
+                                        "type": "string"
                                     }
                                 }
                             }

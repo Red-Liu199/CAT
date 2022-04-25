@@ -5,7 +5,10 @@
 from ..shared import Manager
 from ..shared import coreutils
 from ..shared import encoder as model_zoo
-from ..shared.data import KaldiSpeechDataset, sortedPadCollate
+from ..shared.data import (
+    KaldiSpeechDataset,
+    sortedPadCollateASR
+)
 
 import os
 import argparse
@@ -28,18 +31,23 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         backend=args.dist_backend, init_method=args.dist_url,
         world_size=args.world_size, rank=args.rank)
 
-    manager = Manager(KaldiSpeechDataset,
-                      sortedPadCollate(), args, build_model)
+    manager = Manager(
+        KaldiSpeechDataset,
+        sortedPadCollateASR(flatten_target=True),
+        args, build_model
+    )
 
     # training
     manager.run(args)
 
 
 class AMTrainer(nn.Module):
-    def __init__(self,
-                 am: model_zoo.AbsEncoder,
-                 use_crf: bool = False,
-                 lamb: Optional[float] = 0.01, **kwargs):
+    def __init__(
+            self,
+            am: model_zoo.AbsEncoder,
+            use_crf: bool = False,
+            lamb: Optional[float] = 0.01,
+            **kwargs):
         super().__init__()
 
         self.am = am
@@ -97,10 +105,14 @@ def build_model(
     net_kwargs = netconfigs['kwargs']   # type:dict
 
     # when immigrate configure from RNN-T to CTC,
-    # one usually forget to set the `with_head=True`
+    # one usually forget to set the `with_head=True` and 'num_classes'
     if not net_kwargs.get('with_head', False):
         print("warning: 'with_head' in field:encoder:kwargs is False/not set. "
               "If you don't know what this means, set it to True.")
+
+    if 'num_classes' not in net_kwargs:
+        raise Exception("error: 'num_classes' in field:encoder:kwargs is not set. "
+                        "You should specify it according to your vocab size.")
 
     am_model = getattr(model_zoo, netconfigs['type'])(
         **net_kwargs)  # type: model_zoo.AbsEncoder

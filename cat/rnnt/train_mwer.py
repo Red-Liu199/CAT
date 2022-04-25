@@ -8,7 +8,7 @@ from ..shared.decoder import AbsDecoder
 from ..shared.encoder import AbsEncoder
 from ..shared.data import (
     KaldiSpeechDataset,
-    sortedPadCollateTransducer
+    sortedPadCollateASR
 )
 from .beam_search import BeamSearcher as RNNTDecoder
 from .train import build_model as rnnt_builder
@@ -43,7 +43,7 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
 
     manager = Manager(
         KaldiSpeechDataset,
-        sortedPadCollateTransducer(),
+        sortedPadCollateASR(),
         args, build_model
     )
 

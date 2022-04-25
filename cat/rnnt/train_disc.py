@@ -8,7 +8,7 @@ from ..shared.encoder import AbsEncoder
 from ..shared.manager import train as default_train_func
 from ..shared.data import (
     KaldiSpeechDataset,
-    sortedPadCollateTransducer
+    sortedPadCollateASR
 )
 from ..ctc.train import build_model as ctc_builder
 from .train import build_model as rnnt_builder
@@ -43,7 +43,7 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
 
     manager = Manager(
         KaldiSpeechDataset,
-        sortedPadCollateTransducer(),
+        sortedPadCollateASR(),
         args, build_model,
         func_train=train, extra_tracks=['pos acc', 'noise acc'])
 

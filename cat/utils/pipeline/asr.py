@@ -495,8 +495,10 @@ def TrainTokenizer(f_hyper: str):
         hyper_settings['tokenizer']['property'] = sp_settings
         tokenizer = tknz.SentencePieceTokenizer(spmodel=f_tokenizer)
         hyper_settings['tokenizer']['property']['vocab_size'] = tokenizer.vocab_size
-
         os.remove(f_corpus_tmp)
+    elif tokenizer_type == 'JiebaComposePhoneTokenizer':
+        tokenizer = tknz.JiebaComposePhoneTokenizer(
+            **hyper_settings['tokenizer']['property'])
     elif tokenizer_type == 'JiebaTokenizer':
         # jieba tokenizer doesn't need training
         tokenizer = tknz.JiebaTokenizer(

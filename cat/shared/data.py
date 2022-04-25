@@ -290,34 +290,7 @@ class NbestListCollate():
         return keys, trans, scores, token_ids, token_mask
 
 
-class sortedPadCollate():
-    def __call__(self, batch):
-        """Collect data into batch by desending order and add padding.
-
-        Args:
-            batch  : list of (mat, label)
-            mat    : torch.FloatTensor
-            label  : torch.IntTensor
-
-        Return:
-            (logits, input_lengths, labels, label_lengths)
-        """
-        batches = [(mat, label, mat.size(0))
-                   for mat, label in batch]
-        batch_sorted = sorted(batches, key=lambda item: item[2], reverse=True)
-
-        mats = coreutils.pad_list([x[0] for x in batch_sorted])
-
-        labels = torch.cat([x[1] for x in batch_sorted])
-
-        input_lengths = torch.LongTensor([x[2] for x in batch_sorted])
-
-        label_lengths = torch.IntTensor([x[1].size(0) for x in batch_sorted])
-
-        return mats, input_lengths, labels, label_lengths
-
-
-class sortedPadCollateTransducer():
+class sortedPadCollateASR():
     """Collect data into batch by desending order according to frame length and add padding.
 
     Args:
@@ -329,6 +302,9 @@ class sortedPadCollateTransducer():
         (logits, input_lengths, labels, label_lengths)
     """
 
+    def __init__(self, flatten_target: bool = False) -> None:
+        self._flatten_target = flatten_target
+
     def __call__(self, batch):
         if isinstance(batch[0][0], np.ndarray):
             batch = [(torch.as_tensor(mat), torch.as_tensor(label))
@@ -339,40 +315,17 @@ class sortedPadCollateTransducer():
 
         mats = coreutils.pad_list([x[0] for x in batch_sorted])
 
-        labels = coreutils.pad_list(
-            [x[1] for x in batch_sorted]).to(torch.long)
+        if self._flatten_target:
+            labels = torch.cat([x[1] for x in batch_sorted], dim=0)
+        else:
+            labels = coreutils.pad_list(
+                [x[1] for x in batch_sorted]).to(torch.long)
 
         input_lengths = torch.LongTensor([x[2] for x in batch_sorted])
 
         label_lengths = torch.LongTensor([x[1].size(0) for x in batch_sorted])
 
         return mats, input_lengths, labels, label_lengths
-
-
-class sortedScpPadCollate():
-    """Collect data into batch and add padding.
-
-    Args:
-        batch   : list of (key, feature)
-        key     : str
-        feature : torch.FloatTensor
-
-    Return:
-        (keys, logits, lengths)
-    """
-
-    def __call__(self, batch: Sequence[Tuple[str, torch.FloatTensor]]) -> Tuple[Sequence[str], torch.FloatTensor, torch.LongTensor]:
-
-        if len(batch) > 1:
-            batch = sorted(
-                batch, key=lambda item: item[1].size(0), reverse=True)
-        keys = [key for key, _ in batch]
-
-        mats = coreutils.pad_list([feature for _, feature in batch])
-
-        lengths = torch.LongTensor([feature.size(0) for _, feature in batch])
-
-        return keys, mats, lengths
 
 
 class sortedPadCollateLM():

@@ -3,12 +3,14 @@ Implementation of tokenizer
 """
 import os
 import io
+import re
+import sys
 import pickle
 import sentencepiece as sp
 import jieba
 
 from collections import OrderedDict
-from typing import List, Union, Iterable, Optional, Dict
+from typing import List, Union, Iterable, Optional, Dict, Tuple
 from ..shared.coreutils import randstr
 
 
@@ -252,6 +254,98 @@ class SentencePieceTokenizer(AbsTokenizer):
             cachefile = bin2file(self.byte_model)
             self._tokenzier = sp.SentencePieceProcessor(model_file=cachefile)
             os.remove(cachefile)
+
+
+class JiebaComposePhoneTokenizer(JiebaTokenizer):
+    """Tokenizer composing jieba segmentation and word2phone mapping for Chinese."""
+
+    def __init__(
+            self,
+            w2p_map: str,
+            userdict: Optional[Union[str, bytes]] = None) -> None:
+        """
+        Args:
+            w2p_map (str) : file contains the mapping of word to phone. Usually annotated as 'lexicon_number.txt'
+                            Each line should be as 
+                            <word> <id0> <id1> ...
+            userdict (str, optional) : custom dictionary file
+        """
+        super().__init__(userdict, bos_id=0)
+        assert os.path.isfile(w2p_map), f"given w2p_map='{w2p_map}' not exist."
+        self.init_w2p(w2p_map)
+
+    def init_w2p(self, f_mapping: Union[str, bytes]):
+        p_rm_consecutive_space = re.compile(r"\s+")
+        self._w2pid = []
+
+        str_mapping = ''
+        if isinstance(f_mapping, str):
+            with open(f_mapping, 'r') as fit:
+                str_mapping = fit.read()
+        elif isinstance(f_mapping, bytes):
+            str_mapping = f_mapping.decode('utf-8')
+        else:
+            raise ValueError(
+                f"{self.__class__.__name__}: unknown type of f_mapping: {type(f_mapping)}")
+
+        max_phnid = -1
+        for line in str_mapping.split('\n'):
+            if line == '':
+                continue
+            indices = re.sub(p_rm_consecutive_space, ' ', line).split()
+            word = indices[0]
+            if word not in self._vocabulary:
+                sys.stderr.write(
+                    f"warning: {self.__class__.__name__} '{word}' not in existing dict, skip.")
+                continue
+            self._w2pid.append((word, tuple(int(x) for x in indices[1:])))
+            max_phnid = max(max_phnid, max(self._w2pid[-1][1]))
+
+        self._w2pid = OrderedDict(self._w2pid)
+        # check whether all word in self.vocab in w2pid
+        special = []
+        if '<s>' not in self._w2pid or '<unk>' not in self._w2pid:
+            raise RuntimeError(
+                f"<s> and(or) <unk> are not found in '{f_mapping}', "
+                "it's your duty to add these special tokens."
+            )
+        if (set(self._vocabulary.keys())) != set(self._w2pid.keys()):
+            raise RuntimeError(
+                "The given w2p mapping cannot cover the full vocab: missing:\n"
+                f"{list(set(self._vocabulary.keys())-set(self._w2pid.keys()))}")
+
+        self.num_phns = max_phnid + 1
+
+    @property
+    def vocab_size(self) -> int:
+        return self.num_phns
+
+    def state_dict(self) -> OrderedDict:
+        parent_state = super().state_dict()
+        parent_state.update({
+            '_w2pid': self._w2pid,
+            'num_phns': self.num_phns
+        })
+        return parent_state
+
+    def load_state_dict(self, state_dict: OrderedDict):
+        super().load_state_dict(state_dict)
+        self._w2pid = state_dict['_w2pid']
+        self.num_phns = state_dict['num_phns']
+
+    def _vocab_to_dict(self) -> Dict[int, str]:
+        raise NotImplementedError
+
+    def _enc(self, s: str) -> List[int]:
+        cut_words = self._tokenizer.cut(s.replace(' ', ''), HMM=False)
+        unkid = self._w2pid['<unk>']
+        rt_indices = [list(self._w2pid.get(w, unkid))
+                      for w in cut_words]     # type: List[List[int]]
+        return sum(rt_indices, [])
+
+    def decode(self, *args, **kwargs):
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support decode() method.")
 
 
 def save(obj: AbsTokenizer, target: str):
