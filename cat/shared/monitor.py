@@ -203,9 +203,9 @@ def draw_time(ax: plt.Axes, summary: BaseSummary, n_epoch: int = -1, prop_box=Tr
 
         ax.plot([1+x for x in range(n_epoch)], epoch_time, '.', markersize=2)
         # plot a dummy marker to set ylim to 0.0
-        ax.scatter(1, 0, alpha=0.0)
+        ax.scatter(1, 0.5*min(epoch_time), alpha=0.0)
         fmt = 'epoch'
-        ylabel = 'Time (h / epoch)'
+        ylabel = 'Time (hour)'
         speed = sum(epoch_time)/n_epoch
 
     if prop_box:
@@ -228,23 +228,28 @@ def draw_time(ax: plt.Axes, summary: BaseSummary, n_epoch: int = -1, prop_box=Tr
 
 
 def draw_tr_loss(ax: plt.Axes, summary: BaseSummary, smooth_value: float = 0.9):
-    assert smooth_value >= 0. and smooth_value < 1.
     scalars = np.asarray(summary.data['val'])
-    running_mean = [scalars[0]]
+
+    assert smooth_value >= 0. and smooth_value < 1.
     res_smooth = 1 - smooth_value
+
+    running_mean = np.zeros_like(scalars)
+    running_mean[0] = scalars[0]
     for i in range(1, len(scalars)):
-        running_mean.append(
-            running_mean[i-1]*smooth_value+res_smooth*scalars[i])
+        running_mean[i] = smooth_value * \
+            running_mean[i-1] + res_smooth * scalars[i]
 
     min_loss = min(running_mean)
-    if min_loss <= 0.:
-        ax.plot(running_mean)
+    if min_loss <= 0. or (max(scalars) / min(scalars) < 10.):
+        ax.plot(scalars, color='C0', alpha=0.25)
+        ax.plot(running_mean, color='C0')
+        ax.ticklabel_format(axis="y", style="sci", scilimits=(0, 0))
     else:
-        ax.semilogy(running_mean)
+        ax.semilogy(scalars, color='C0', alpha=0.25)
+        ax.semilogy(running_mean, color='C0')
 
     ax.ticklabel_format(axis="x", style="sci",
                         scilimits=(0, 0), useMathText=True)
-    # ax.ticklabel_format(axis="y", style="sci", scilimits=(0, 0))
     ax.grid(True, ls='--', which='both')
     ax.set_ylabel('Training loss')
     ax.set_xlabel("Step")
@@ -256,12 +261,11 @@ def draw_dev_loss(ax: plt.Axes, summary: BaseSummary, prop_box=True):
     scalars = np.asarray(summary.data['val'])
     num_epochs = summary.data['cnt']
     min_loss = min(scalars)
-    if min_loss <= 0.:
+    if min_loss <= 0. or (max(scalars)/min_loss < 10.):
         ax.plot([i+1 for i in range(num_epochs)], scalars)
     else:
         ax.semilogy([i+1 for i in range(num_epochs)], scalars)
 
-    # ax.axhline(y=min_loss, ls='--', color='black', alpha=0.5)
     if prop_box:
         props = dict(boxstyle='round', facecolor='wheat', alpha=0.8)
         textstr = '\n'.join([
@@ -278,9 +282,11 @@ def draw_dev_loss(ax: plt.Axes, summary: BaseSummary, prop_box=True):
 
 def draw_lr(ax: plt.Axes, summary: BaseSummary):
 
-    ax.semilogy(summary.data['val'])
+    ax.plot(summary.data['val'])
 
     ax.ticklabel_format(axis="x", style="sci",
+                        scilimits=(0, 0), useMathText=True)
+    ax.ticklabel_format(axis="y", style="sci",
                         scilimits=(0, 0), useMathText=True)
     ax.grid(ls='--', which='both')
     ax.set_ylabel('learning rate')
@@ -322,10 +328,12 @@ def plot_monitor(path: str, o_path: str = None, title: str = None, interactive_s
 
     # Learning rate
     draw_lr(axes[0][0], log_writer['train:lr'])
+    axes[0][0].set_xticklabels([])
 
     # Time
     draw_time(axes[0][1], log_writer['train:loss'],
               log_writer['eval:loss'].data['cnt'], True)
+    axes[0][1].set_xticklabels([])
 
     # Training loss and moving average
     draw_tr_loss(axes[1][0], log_writer['train:loss'])
