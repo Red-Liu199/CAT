@@ -765,11 +765,7 @@ if __name__ == "__main__":
             sys.stdout.write(fmt.format(
                 f"set 'config' to {decode_settings['config']}"))
             checkExist('f', decode_settings['config'])
-        sys.stdout.write(fmt.format(
-            "\n"
-            "Ensure that the tokenizer you specify is correct.\n"
-            "If you're doing rescoring, the tokenizer should be set as the LM one."
-        ))
+
         if 'tokenizer' not in decode_settings:
             assert 'tokenizer' in hyper_settings, (
                 "\nyou should set at least one of:\n"

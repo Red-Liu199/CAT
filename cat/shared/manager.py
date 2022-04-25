@@ -110,20 +110,18 @@ class Manager(object):
         else:
             tr_set = Dataset(args.trset)
 
-            if args.databalance:
+            if args.databalance and dist.get_world_size() > 1:
                 coreutils.distprint(
-                    "> Enable data balanced loading\n"
-                    "  this takes a while for large dataset.", args.gpu)
+                    "> Enable balanced dataloader.", args.gpu)
                 train_sampler = BalancedDistributedSampler(
                     tr_set, args.batch_size, local_rank=args.gpu)
                 trainloader = DataLoader(
                     tr_set, batch_sampler=train_sampler,
                     num_workers=args.workers, collate_fn=collate_fn,
                     prefetch_factor=4, persistent_workers=True)
-                coreutils.distprint(
-                    "> Seq length info for balanced loading generated.", args.gpu)
                 args.n_steps = train_sampler.total_size//args.batch_size//args.grad_accum_fold
             else:
+                args.databalance = False
                 train_sampler = DistributedSampler(tr_set)
                 trainloader = DataLoader(
                     tr_set, batch_size=args.batch_size//dist.get_world_size(), shuffle=False,
@@ -200,7 +198,11 @@ class Manager(object):
         self.epoch = 0      # type:int
         self.step = 0       # type:int
 
-        assert args.resume is None or args.init_model is None, f"Don't specify both --resume and --init-model"
+        if not (args.resume is None or args.init_model is None):
+            coreutils.distprint(
+                "warning: you specify both --resume and --init-model, "
+                "but --init-model will be ignored.", args.rank)
+
         if args.resume is not None:
             coreutils.distprint(
                 f"> Resuming from: {args.resume}", args.gpu)
