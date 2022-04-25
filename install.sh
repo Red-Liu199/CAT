@@ -13,13 +13,14 @@ set -e
         exit 1
 )
 
-$(python -c "import cat") || (
+# change dir to a different one to test whether cat module has been installed.
+$(cd egs && python -c "import cat" >/dev/null 2>&1) || (
     python -m pip install -r requirements.txt || exit 1
 )
 echo "install module:cat and its requirements done."
 
 # install ctcdecode is annoying...
-$(python -c "import ctcdecode") || (
+$(python -c "import ctcdecode" >/dev/null 2>&1) || (
     [ ! -d src/ctcdecode ] && git clone --recursive https://github.com/parlance/ctcdecode.git src/ctcdecode
     wget http://www.openfst.org/twiki/pub/FST/FstDownload/openfst-1.6.7.tar.gz \
         -O src/ctcdecode/third_party/openfst-1.6.7.tar.gz
@@ -32,23 +33,26 @@ $(python -c "import ctcdecode") || (
 echo "install module:ctcdecode done."
 
 # install kenlm
-[ ! -d src/kenlm ] && (
-    echo "No 'src/kenlm' folder found, seems you haven't done previous installation."
-    exit 1
-)
-cd src/kenlm
-mkdir -p build && cd build
-(cmake .. && make -j $(nproc)) || (
-    echo "If you meet building error and have no idea why it is raised, "
-    echo "... please first confirm all requirements are installed. See"
-    echo "... https://github.com/kpu/kenlm/blob/master/BUILDING"
-    exit 1
-)
+! [[ -x "$(command -v src/bin/lmplz)" && -x "$(command -v src/bin/build_binary)" ]] && (
+    [ ! -d src/kenlm ] && (
+        echo "No 'src/kenlm' folder found, seems you haven't done previous installation."
+        echo "... Or you've installed the module somewhere else, then please copy the src/bin to current repo/src/bin"
+        exit 1
+    )
+    cd src/kenlm
+    mkdir -p build && cd build
+    (cmake .. && make -j $(nproc)) || (
+        echo "If you meet building error and have no idea why it is raised, "
+        echo "... please first confirm all requirements are installed. See"
+        echo "... https://github.com/kpu/kenlm/blob/master/BUILDING"
+        exit 1
+    )
 
-# link executable binary files
-cd ../../
-mkdir -p bin && cd bin
-ln -snf ../kenlm/build/bin/* ./ && cd ../../
+    # link executable binary files
+    cd ../../
+    mkdir -p bin && cd bin
+    ln -snf ../kenlm/build/bin/* ./ && cd ../../
+)
 echo "install module:kenlm done."
 
 echo "$0 done"
