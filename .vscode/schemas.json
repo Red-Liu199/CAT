@@ -9,6 +9,10 @@
             "description": "Configuration of Transducer",
             "type": "object",
             "properties": {
+                "sampled_softmax": {
+                    "type": "boolean",
+                    "default": false
+                },
                 "bos_id": {
                     "type": "number",
                     "default": 0

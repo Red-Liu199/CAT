@@ -72,8 +72,14 @@ class TransducerTrainer(nn.Module):
         decoder_mask_range: float = 0.1,
         # add mask to decoder output, this specifies the # mask
         num_decoder_mask: int = -1,
-            bos_id: int = 0):
+        bos_id: int = 0,
+        # conduct sampled softmax
+            sampled_softmax: bool = False):
         super().__init__()
+
+        if sampled_softmax:
+            assert bos_id == 0
+            assert not fused
 
         if fused and not jointnet.is_normalize_separated:
             raise RuntimeError(
@@ -99,6 +105,7 @@ class TransducerTrainer(nn.Module):
 
         self.isfused = fused
         self._compact = compact
+        self._sampled_softmax = sampled_softmax
 
         self.encoder = encoder
         self.decoder = decoder
@@ -136,8 +143,8 @@ class TransducerTrainer(nn.Module):
         if self._t_reduction is not None:
             output_encoder, o_lens = self._t_reduction(output_encoder, o_lens)
 
-        padded_targets = torch.cat(
-            [targets.new_full((targets.size(0), 1), self.bos_id), targets], dim=-1)
+        padded_targets = torch.nn.functional.pad(
+            targets, (1, 0), value=self.bos_id)
         output_decoder, _ = self.decoder(padded_targets)
 
         if self._pn_mask is not None:
@@ -146,13 +153,22 @@ class TransducerTrainer(nn.Module):
         if self._compact:
             packed_enc = PackedSequence(output_encoder, o_lens)
             packed_dec = PackedSequence(output_decoder, target_lengths+1)
+            # squeeze targets to 1-dim
+            targets = PackedSequence(targets, target_lengths).data.squeeze(1)
             if self.isfused:
                 joint_out = self.joint.impl_forward(
                     packed_enc, packed_dec)
+            elif self._sampled_softmax:
+                # try sampled softmax
+                joint_out = self.joint.impl_forward(packed_enc, packed_dec)
+                indices_sampled, targets = torch.unique(
+                    targets, sorted=True, return_inverse=True)
+                targets += 1
+                indices_sampled = torch.nn.functional.pad(
+                    indices_sampled, (1, 0))
+                joint_out = joint_out[:, indices_sampled].log_softmax(dim=-1)
             else:
                 joint_out = self.joint(packed_enc, packed_dec)
-            # squeeze targets to 1-dim
-            targets = PackedSequence(targets, target_lengths).data.squeeze(1)
         else:
             joint_out = self.joint(output_encoder, output_decoder)
 
