@@ -1,0 +1,68 @@
+{
+    "MWER": {
+        "decoder": {
+            "beam_size": 5
+        },
+        "trainer": {
+            "fused": true
+        }
+    },
+    "encoder": {
+        "type": "ConformerNet",
+        "kwargs": {
+            "num_cells": 12,
+            "idim": 80,
+            "hdim": 512,
+            "conv": "vgg2l",
+            "num_heads": 4,
+            "dropout": 0.3,
+            "dropout_attn": 0.3,
+            "kernel_size": 15,
+            "num_classes": 4232,
+            "with_head": false
+        }
+    },
+    "decoder": {
+        "type": "LSTM",
+        "kwargs": {
+            "num_classes": 4232,
+            "hdim": 512,
+            "num_layers": 1,
+            "with_head": false,
+            "variational_noise": [
+                0.0,
+                0.075
+            ]
+        }
+    },
+    "joint": {
+        "type": "JointNet",
+        "kwargs": {
+            "odim_encoder": 512,
+            "odim_decoder": 512,
+            "hdim": 512,
+            "num_classes": 4232
+        }
+    },
+    "scheduler": {
+        "type": "SchedulerTransformer",
+        "optimizer": {
+            "type": "Adam",
+            "use_zero": true,
+            "kwargs": {
+                "lr": 0.0003,
+                "betas": [
+                    0.9,
+                    0.98
+                ],
+                "weight_decay": 1e-06
+            }
+        },
+        "kwargs": {
+            "peak_factor": 0.1,
+            "d_model": 512,
+            "warmup_steps": 5000,
+            "epoch_max": 40
+        }
+    }
+}
