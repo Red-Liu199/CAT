@@ -16,7 +16,7 @@ import uuid
 import shutil
 import argparse
 from multiprocessing import Pool
-from typing import Tuple, List
+from typing import *
 
 import gather
 

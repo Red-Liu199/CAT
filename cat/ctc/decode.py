@@ -20,7 +20,7 @@ import time
 import pickle
 import argparse
 from tqdm import tqdm
-from typing import Dict, Union, List, Tuple
+from typing import *
 
 import torch
 import torch.multiprocessing as mp

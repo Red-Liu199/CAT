@@ -19,7 +19,7 @@ from ..shared.data import (
 import gather
 import math
 import argparse
-from typing import Optional, Union
+from typing import *
 
 import torch
 import torch.nn as nn

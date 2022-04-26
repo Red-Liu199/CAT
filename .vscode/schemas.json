@@ -29,7 +29,7 @@
                     "type": "number",
                     "default": 1
                 },
-                "ilme_loss": {},
+                "ilme_weight": {},
                 "fused": {
                     "type": "boolean",
                     "default": false
@@ -787,8 +787,7 @@
                     "type": "string",
                     "examples": [
                         "AbsJointNet",
-                        "DenormalJointNet",
-                        "HATNet",
+                        "HAT",
                         "JointNet"
                     ]
                 }
@@ -806,35 +805,10 @@
                         "properties": {
                             "kwargs": {
                                 "type": "object",
-                                "properties": {}
-                            }
-                        }
-                    }
-                },
-                {
-                    "if": {
-                        "properties": {
-                            "type": {
-                                "const": "DenormalJointNet"
-                            }
-                        }
-                    },
-                    "then": {
-                        "properties": {
-                            "kwargs": {
-                                "type": "object",
                                 "properties": {
-                                    "local_normalize": {
+                                    "skip_normalize": {
                                         "type": "boolean",
                                         "default": false
-                                    },
-                                    "normalizd_tn": {
-                                        "type": "boolean",
-                                        "default": true
-                                    },
-                                    "normalized_pn": {
-                                        "type": "boolean",
-                                        "default": true
                                     }
                                 }
                             }
@@ -845,7 +819,7 @@
                     "if": {
                         "properties": {
                             "type": {
-                                "const": "HATNet"
+                                "const": "HAT"
                             }
                         }
                     },
@@ -867,10 +841,10 @@
                                     "num_classes": {
                                         "type": "number"
                                     },
-                                    "odim_predictor": {
+                                    "odim_pred": {
                                         "type": "number"
                                     },
-                                    "odim_encoder": {
+                                    "odim_enc": {
                                         "type": "number"
                                     }
                                 }
@@ -891,6 +865,10 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
+                                    "skip_normalize": {
+                                        "type": "boolean",
+                                        "default": false
+                                    },
                                     "act": {
                                         "default": "tanh"
                                     },
@@ -904,10 +882,10 @@
                                     "num_classes": {
                                         "type": "number"
                                     },
-                                    "odim_predictor": {
+                                    "odim_pred": {
                                         "type": "number"
                                     },
-                                    "odim_encoder": {
+                                    "odim_enc": {
                                         "type": "number"
                                     }
                                 }

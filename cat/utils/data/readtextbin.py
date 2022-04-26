@@ -7,7 +7,7 @@ import os
 import sys
 import argparse
 import uuid
-from typing import Union, List, Tuple
+from typing import *
 from multiprocessing import Pool
 
 

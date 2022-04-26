@@ -7,86 +7,20 @@
 
 
 import gather
-from typing import Union, Tuple, Sequence, Literal, List
+from typing import *
 
 import torch
 import torch.nn as nn
-from torch.cuda.amp import autocast
-
-
-class PackedSequence():
-    def __init__(self, xs: Union[Sequence[torch.Tensor], torch.Tensor] = None, xn: torch.LongTensor = None) -> None:
-        self._data = None   # type: torch.Tensor
-        self._lens = None   # type: torch.Tensor
-        if xs is None:
-            return
-
-        if xn is not None:
-            assert isinstance(xs, torch.Tensor)
-            if xs.dim() == 3:
-                V = xs.size(-1)
-            elif xs.dim() == 2:
-                xs = xs.unsqueeze(2)
-                V = 1
-            else:
-                raise NotImplementedError
-
-            if xs.dtype not in [torch.float16, torch.float, torch.float64]:
-                # this might be slow
-                self._data = torch.cat([xs[i, :xn[i]].view(-1, V)
-                                       for i in range(xn.size(0))], dim=0)
-            else:
-                self._data = gather.cat(xs, xn)
-            self._lens = xn
-        else:
-            # identical to torch.nn.utils.rnn.pad_sequence
-            assert all(x.size()[1:] == xs[0].size()[1:] for x in xs)
-
-            _lens = [x.size(0) for x in xs]
-            self._data = xs[0].new_empty(
-                ((sum(_lens),)+xs[0].size()[1:]))
-            pref = 0
-            for x, l in zip(xs, _lens):
-                self._data[pref:pref+l] = x
-                pref += l
-            self._lens = torch.LongTensor(_lens)
-
-    @property
-    def data(self) -> torch.Tensor:
-        return self._data
-
-    @property
-    def batch_sizes(self) -> torch.LongTensor:
-        return self._lens
-
-    def to(self, device):
-        newpack = PackedSequence()
-        newpack._data = self._data.to(device)
-        newpack._lens = self._lens.to(device)
-        return newpack
-
-    def set(self, data: torch.Tensor):
-        assert data.size(0) == self._data.size(0)
-        self._data = data
-        return self
-
-    def unpack(self) -> Tuple[List[torch.Tensor], torch.LongTensor]:
-        out = []
-
-        pref = 0
-        for l in self._lens:
-            out.append(self._data[pref:pref+l])
-            pref += l
-        return out, self._lens
-
-    def __add__(self, _y) -> torch.Tensor:
-        with autocast(enabled=False):
-            return gather.sum(self._data.float(), _y._data.float(), self._lens, _y._lens)
 
 
 class AbsJointNet(nn.Module):
-    def __init__(self) -> None:
+    def __init__(self, skip_normalize: bool = False) -> None:
         super().__init__()
+        if skip_normalize and not self.is_normalize_separated:
+            raise ValueError(
+                f"{self.__class__.__name__} cannot skip the normalization in forward(), please set skip_normalize=False."
+            )
+        self._skip_normalize = skip_normalize
 
     @property
     def is_normalize_separated(self) -> bool:
@@ -102,87 +36,10 @@ class AbsJointNet(nn.Module):
     def forward(self, *args, **kwargs):
         joinout = self.impl_forward(
             *args, **kwargs)  # type: torch.Tensor
-        return joinout.log_softmax(dim=-1)
-
-
-class DenormalJointNet(AbsJointNet):
-    """De-normalized joint network
-
-    Take prediction network as a LM.
-    return log P_pn(Y) * logit_tn (X, Y) w/o softmax
-    """
-
-    def __init__(self, normalized_pn: bool = True, normalizd_tn: bool = True, local_normalize: bool = False) -> None:
-        super().__init__()
-        if normalized_pn:
-            self._pn_normalize = nn.LogSoftmax(dim=-1)
+        if self._skip_normalize:
+            return joinout
         else:
-            self._pn_normalize = nn.Identity()
-
-        if normalizd_tn:
-            self._tn_normalize = nn.LogSoftmax(dim=-1)
-        else:
-            self._tn_normalize = nn.Identity()
-
-        self._local_normalized = local_normalize
-
-    @property
-    def is_normalize_separated(self) -> bool:
-        return self._local_normalized
-
-    def impl_forward(self, tn_out: Union[torch.Tensor, PackedSequence], pn_out: Union[torch.Tensor, PackedSequence]) -> torch.FloatTensor:
-        '''
-        # classes of PN out: V+1 (V tokens + <eos>), suppose <eos>=0
-        # classes of TN out: V+1 (V tokens + <blk>), suppose <blk>=0
-        For PN, <blk> is undefined, and useless.
-        For TN, <eos> could be useful. But in current implementation, 
-        ... <eos> is undefined for TN.
-        Therefore, the joint network sums up the V tokens output of the two networks,
-        ... and takes <blk> as the (V+1)th elements.
-        '''
-        assert not (isinstance(tn_out, PackedSequence) ^
-                    isinstance(pn_out, PackedSequence)), f"TN output and PN output should be of the same type, instead of {type(tn_out)} != {type(pn_out)}"
-
-        if isinstance(tn_out, PackedSequence):
-            assert pn_out.data.size(-1) == tn_out.data.size(-1), \
-                f"pn and tn output should be of the same size at last dimension, instead of {pn_out.data.size(-1)} != {tn_out.data.size(-1)}"
-            pn_out.set(self._pn_normalize(pn_out.data))
-            tn_out.set(self._tn_normalize(tn_out.data))
-            if pn_out.data.requires_grad:
-                # [Su, V-1]
-                _sliced_pn_out = pn_out.data[:, 1:]
-                pn_out.set(torch.cat([_sliced_pn_out.new_zeros(
-                    (_sliced_pn_out.size(0), 1)), _sliced_pn_out], dim=1))
-            else:
-                pn_out.data[:, 0] = 0.0
-            return tn_out + pn_out
-        else:
-            assert pn_out.size(-1) == tn_out.size(-1), \
-                f"pn and tn output should be of the same size at last dimension, instead of {pn_out.size(-1)} != {tn_out.size(-1)}"
-
-            pn_out = self._pn_normalize(pn_out)
-            tn_out = self._tn_normalize(tn_out)
-            if tn_out.dim() == 1 and pn_out.dim() == 1:
-                pn_out[0] = 0.0
-                return tn_out + pn_out
-
-            if pn_out.requires_grad:
-                pn_out = torch.cat(
-                    [pn_out.new_zeros(pn_out.shape[:2]+(1,)), pn_out[:, :, 1:]], dim=-1)
-            else:
-                pn_out[:, :, 0] = 0.0
-
-            # [N, U, V] -> [N, 1, U, V]
-            pn_out = pn_out.unsqueeze(1)
-            # [N, T, V] -> [N, T, 1, V]
-            tn_out = tn_out.unsqueeze(2)
-            return tn_out + pn_out
-
-    def forward(self, *args, **kwargs):
-        if self._local_normalized:
-            return super().forward(*args, **kwargs)
-        else:
-            return self.impl_forward(*args, **kwargs)
+            return joinout.log_softmax(dim=-1)
 
 
 class JointNet(AbsJointNet):
@@ -195,14 +52,16 @@ class JointNet(AbsJointNet):
         outputs (torch.FloatTensor): outputs of joined `encoder_output` and `predictor_output`. `FloatTensor` of size ``(batch, time_steps, label_length, dimensionA + dimensionB)``
     """
 
-    def __init__(self,
-                 odim_encoder: int,
-                 odim_predictor: int,
-                 num_classes: int,
-                 hdim: int = -1,
-                 join_mode: Literal['add', 'cat'] = 'add',
-                 act: Literal['tanh', 'relu'] = 'tanh'):
-        super().__init__()
+    def __init__(
+            self,
+            odim_enc: int,
+            odim_pred: int,
+            num_classes: int,
+            hdim: int = -1,
+            join_mode: Literal['add', 'cat'] = 'add',
+            act: Literal['tanh', 'relu'] = 'tanh',
+            skip_normalize: bool = False):
+        super().__init__(skip_normalize=skip_normalize)
 
         if act == 'tanh':
             act_layer = nn.Tanh()
@@ -213,9 +72,9 @@ class JointNet(AbsJointNet):
 
         if join_mode == 'add':
             if hdim == -1:
-                hdim = max(odim_predictor, odim_encoder)
-            self.fc_enc = nn.Linear(odim_encoder, hdim)
-            self.fc_dec = nn.Linear(odim_predictor, hdim)
+                hdim = max(odim_pred, odim_enc)
+            self.fc_enc = nn.Linear(odim_enc, hdim)
+            self.fc_dec = nn.Linear(odim_pred, hdim)
             self.fc = nn.Sequential(
                 act_layer,
                 nn.Linear(hdim, num_classes)
@@ -225,7 +84,7 @@ class JointNet(AbsJointNet):
             self.fc_dec = None
             self.fc = nn.Sequential(
                 act_layer,
-                nn.Linear(odim_encoder + odim_predictor, num_classes)
+                nn.Linear(odim_enc + odim_pred, num_classes)
             )
         else:
             raise RuntimeError(f"Unknown mode for joint net: {join_mode}")
@@ -233,55 +92,52 @@ class JointNet(AbsJointNet):
         self._mode = join_mode
         self._V = num_classes
 
-    def impl_forward(self, encoder_output: Union[torch.Tensor, PackedSequence], predictor_output: Union[torch.Tensor, PackedSequence]) -> torch.FloatTensor:
+    def impl_forward(self, enc_out: torch.Tensor, pred_out: torch.Tensor, enc_out_lens: Optional[torch.IntTensor] = None, pred_out_lens: Optional[torch.IntTensor] = None) -> torch.FloatTensor:
 
-        if isinstance(encoder_output, PackedSequence) and isinstance(predictor_output, PackedSequence):
-            if self._mode == 'add':
-                # compact memory mode, gather the tensors without padding
-                encoder_output.set(self.fc_enc(encoder_output.data))
-                predictor_output.set(self.fc_dec(predictor_output.data))
-            else:
-                dim_enc, dim_dec = encoder_output.data.size(
-                    -1), predictor_output.data.size(-1)
-                encoder_output.set(torch.nn.functional.pad(
-                    encoder_output.data, (0, dim_dec)))
-                predictor_output.set(torch.nn.functional.pad(
-                    predictor_output.data, (dim_enc, 0)))
+        d_enc = enc_out.dim()
+        assert d_enc == pred_out.dim(), \
+            f"expect encoder output and decoder output to be the same dimentional, " \
+            f"instead {d_enc} != {pred_out.dim()}"
+        assert d_enc <= 3, f"only support input dimension <= 3, instead {d_enc}"
+        if d_enc == 2:
+            assert enc_out_lens is not None and pred_out_lens is not None
 
-            # shape: (\sum_{Ti(Ui+1)}, V)
-            expanded_out = encoder_output + predictor_output
-
-        elif isinstance(encoder_output, torch.Tensor) and isinstance(predictor_output, torch.Tensor):
-
-            assert (encoder_output.dim() == 3 and predictor_output.dim() == 3) or (
-                encoder_output.dim() == 1 and predictor_output.dim() == 1)
-
-            if self._mode == 'add':
-                encoder_output = self.fc_enc(encoder_output)
-                predictor_output = self.fc_dec(predictor_output)
-
-            if encoder_output.dim() == 3:
-                _, T, _ = encoder_output.size()
-                _, Up, _ = predictor_output.size()
-                encoder_output = encoder_output.unsqueeze(2)
-                predictor_output = predictor_output.unsqueeze(1)
-                encoder_output = encoder_output.expand(-1, -1, Up, -1)
-                predictor_output = predictor_output.expand(-1, T, -1, -1)
-
-            if self._mode == 'add':
-                expanded_out = encoder_output + predictor_output
-            else:
-                expanded_out = torch.cat(
-                    [encoder_output, predictor_output], dim=-1)
-
+        if self._mode == 'add':
+            enc_out = self.fc_enc(enc_out)
+            pred_out = self.fc_dec(pred_out)
+            if d_enc == 1:
+                # streaming inference mode
+                expanded_out = enc_out + pred_out
+            elif d_enc == 2:
+                # compact layout
+                expanded_out = gather.sum(
+                    enc_out, pred_out, enc_out_lens, pred_out_lens)
+            else:  # d_enc == 3
+                # normal layout, use broadcast sum
+                expanded_out = enc_out[:, :, None, :] + pred_out[:, None, :, :]
+        elif self._mode == 'cat':
+            if d_enc == 1:
+                expanded_out = torch.cat([enc_out, pred_out], dim=-1)
+            elif d_enc == 2:
+                # this is not efficient, so better avoid using 'cat' mode with compact layout
+                v_enc, v_pred = enc_out.size(-1), pred_out.size(-1)
+                enc_out = torch.nn.functional.pad(enc_out, (0, v_pred))
+                pred_out = torch.nn.functional.pad(pred_out, (v_enc, 0))
+                expanded_out = gather.sum(
+                    enc_out, pred_out, enc_out_lens, pred_out_lens)
+            else:  # d_enc == 3
+                T, Up = enc_out.size(1), pred_out.size(1)
+                enc_out = enc_out[:, :, None, :].expand(-1, -1, Up, -1)
+                pred_out = pred_out[:, None, :, :].expand(-1, T, -1, -1)
+                expanded_out = torch.cat([enc_out, pred_out], dim=-1)
         else:
-            raise NotImplementedError(
-                "Output of encoder and predictor being fed into joint net should be of same type. Expect (Tensor, Tensor) or (PackedSequence, PackedSequence), instead ({}, {})".format(type(encoder_output), type(predictor_output)))
+            raise ValueError(
+                f"Unknown joint mode: {self._mode}, expect one of ['add', 'cat']")
 
         return self.fc(expanded_out)
 
 
-class HATNet(JointNet):
+class HAT(JointNet):
     """ "HYBRID AUTOREGRESSIVE TRANSDUCER (HAT)"
 
     Suppose <blk>=0
@@ -289,13 +145,13 @@ class HATNet(JointNet):
 
     def __init__(
             self,
-            odim_encoder: int,
-            odim_predictor: int,
+            odim_enc: int,
+            odim_pred: int,
             num_classes: int,
             hdim: int = -1,
             join_mode: Literal['add', 'cat'] = 'add',
             act: Literal['tanh', 'relu'] = 'tanh'):
-        super().__init__(odim_encoder, odim_predictor, num_classes,
+        super().__init__(odim_enc, odim_pred, num_classes,
                          hdim=hdim, join_mode=join_mode, act=act)
         self._dist_blank = nn.LogSigmoid()
 
@@ -303,20 +159,13 @@ class HATNet(JointNet):
     def is_normalize_separated(self) -> bool:
         return False
 
-    def ilm_est(self, predictor_output: torch.Tensor):
+    def ilm_est(self, pred_out: torch.Tensor, pred_out_lens: Optional[torch.IntTensor]):
         """ILM score estimation"""
         assert not self.training
-        if isinstance(predictor_output, PackedSequence):
-            predictor_output.set(self.fc_dec(predictor_output.data))
-            fc_out = predictor_output.data
 
-        elif isinstance(predictor_output, torch.Tensor):
-            fc_out = self.fc_dec(predictor_output)
-
-        # compute log softmax over real labels
-        fc_out = self.fc(fc_out)
+        fc_out = self.fc(self.fc_dec(pred_out))
         # suppose blank=0
-        fc_out[..., 0] = float('-inf')
+        # compute log softmax over real labels
         fc_out[..., 1:] = fc_out[..., 1:].log_softmax(dim=-1)
         return fc_out
 
@@ -335,4 +184,4 @@ class HATNet(JointNet):
         return torch.cat([log_prob_blank, log_prob_label], dim=-1)
 
 
-__all__ = [PackedSequence, AbsJointNet, DenormalJointNet, JointNet]
+__all__ = [AbsJointNet, JointNet]

@@ -22,7 +22,7 @@ import glob
 import webdataset as wds
 from braceexpand import braceexpand
 from collections import OrderedDict
-from typing import Callable, Union, Iterable, Optional, List, Any
+from typing import *
 from datetime import datetime
 from tqdm import tqdm
 
@@ -209,6 +209,7 @@ class Manager(object):
             checkpoint = torch.load(
                 args.resume, map_location=f'cuda:{args.gpu}')  # type: OrderedDict
             self.load(checkpoint)
+            del checkpoint
         elif args.init_model is not None:
             coreutils.distprint(
                 f"> Initialize model from: {args.init_model}", args.gpu)
@@ -225,8 +226,7 @@ class Manager(object):
                     )
                 else:
                     raise RuntimeError(str(re))
-
-        del checkpoint
+            del checkpoint
 
     def run(self, args: argparse.Namespace):
 

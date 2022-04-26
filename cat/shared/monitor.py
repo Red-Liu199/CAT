@@ -15,7 +15,7 @@ import os
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
-from typing import Union, Tuple, Any, Dict, List
+from typing import *
 
 FILE_WRITER = r"training.summary"
 BASE_METRIC = ['train:loss', 'train:lr', 'eval:loss']

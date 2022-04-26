@@ -8,7 +8,7 @@ import math
 import torch
 import numpy as np
 from collections import OrderedDict
-from typing import Tuple, Iterable, Union
+from typing import *
 
 if torch.__version__ >= '1.8.0':
     from torch.distributed.optim import ZeroRedundancyOptimizer

@@ -18,9 +18,21 @@ from ..shared.decoder import (
 )
 
 import os
-from typing import Dict, Union, List, Optional, Literal, Tuple, Any, Iterable, Callable
+from typing import *
 
 import torch
+
+
+def logaddexp(a: torch.Tensor, b: torch.Tensor):
+    if a.dtype == torch.float:
+        return torch.logaddexp(a, b)
+    elif a.dtype == torch.half:
+        if a < b:
+            a, b = b, a
+        # a + log(1 + exp(b-a))
+        return a + (1 + (b-a).exp()).log()
+    else:
+        raise ValueError
 
 
 def fclone(fp: Union[float, torch.FloatTensor]):
@@ -84,12 +96,12 @@ class Hypothesis():
 
     def __add__(self, rhypo):
         new_hypo = self.clone()
-        new_hypo.log_prob = torch.logaddexp(new_hypo.log_prob, rhypo.log_prob)
+        new_hypo.log_prob = logaddexp(new_hypo.log_prob, rhypo.log_prob)
         return new_hypo
 
     def add_(self, rhypo):
         '''in-place version of __add__'''
-        self.log_prob = torch.logaddexp(self.log_prob, rhypo.log_prob)
+        self.log_prob = logaddexp(self.log_prob, rhypo.log_prob)
         return self
 
     def add_token(self, tok: torch.LongTensor):

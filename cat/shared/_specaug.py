@@ -7,7 +7,7 @@ Modified into spec aug with masking by ratio by Huahuan Zheng (maxwellzh@outlook
 
 from .layer import StackDelta, UnStackDelta
 from .coreutils import pad_list
-from typing import Union, Sequence
+from typing import *
 
 import torch
 import torch.nn as nn

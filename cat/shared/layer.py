@@ -8,7 +8,7 @@
 
 import math
 from collections import OrderedDict
-from typing import Union, Tuple, Literal
+from typing import *
 
 import torch
 import torch.nn as nn

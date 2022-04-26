@@ -29,7 +29,7 @@ import time
 import pickle
 import argparse
 from tqdm import tqdm
-from typing import Dict, Union, List, Tuple
+from typing import *
 
 
 from torch.cuda.amp import autocast

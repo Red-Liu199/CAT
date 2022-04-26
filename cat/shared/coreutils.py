@@ -11,7 +11,7 @@ import uuid
 import argparse
 import numpy as np
 from collections import OrderedDict
-from typing import Callable, Union, Sequence, List, Any
+from typing import *
 
 import torch
 import torch.nn as nn

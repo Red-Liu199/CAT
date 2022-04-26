@@ -10,7 +10,7 @@ import sentencepiece as sp
 import jieba
 
 from collections import OrderedDict
-from typing import List, Union, Iterable, Optional, Dict, Tuple
+from typing import *
 from ..shared.coreutils import randstr
 
 

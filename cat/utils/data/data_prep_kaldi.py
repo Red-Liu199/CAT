@@ -4,7 +4,7 @@ Prepare kaldi-like transcript and FBank features using torchaudio.
 
 import os
 import sys
-from typing import List, Dict, Any, Tuple, Optional
+from typing import *
 from tqdm import tqdm
 
 import kaldiio

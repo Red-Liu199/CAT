@@ -12,8 +12,8 @@ from ..shared.data import (
 )
 from .beam_search import BeamSearcher as RNNTDecoder
 from .train import build_model as rnnt_builder
+from .train import TransducerTrainer
 from .joiner import (
-    PackedSequence,
     AbsJointNet
 )
 
@@ -23,7 +23,7 @@ from warp_rnnt import fused_rnnt_loss_ as RNNTFusedLoss
 import os
 import jiwer
 import argparse
-from typing import Union, List, Tuple
+from typing import *
 
 import torch
 import torch.nn as nn
@@ -58,22 +58,13 @@ def cnt_we(gt: List[int], hy: List[int]) -> List[int]:
     return [_cnt_error_word(_gt, _hy) for _gt, _hy in zip(gt, hy)]
 
 
-class DiscTransducerTrainer(nn.Module):
-    def __init__(
-            self,
-            beamdecoder: RNNTDecoder,
-            encoder: AbsEncoder,
-            predictor: AbsDecoder,
-            joiner: AbsJointNet,
-            fused: bool = False):
-        super().__init__()
+class MWERTrainer(TransducerTrainer):
+    def __init__(self, beamdecoder: RNNTDecoder, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.searcher = beamdecoder
-        self.encoder = encoder
-        self.predictor = predictor
-        self.joiner = joiner
-        self.isfused = fused
+        assert self._compact
 
-    def werloss(self, encoder_out: torch.Tensor, frame_lens: torch.Tensor, targets: torch.Tensor, target_lens: torch.Tensor):
+    def werloss(self, enc_out: torch.Tensor, frame_lens: torch.Tensor, targets: torch.Tensor, target_lens: torch.Tensor):
         """
         encoder_out : (N, T, V)
         frame_lens  : (N, )
@@ -82,10 +73,11 @@ class DiscTransducerTrainer(nn.Module):
         """
         # batched: (batchsize*beamsize, )
         with torch.no_grad():
-            self.joiner.requires_grad_(False)
-            self.predictor.requires_grad_(False)
-            all_hypos = self.searcher.batching_rna(encoder_out, frame_lens)
-            cnt_hypos = encoder_out.new_tensor(
+            istraining = self.training
+            self.eval()
+            self.requires_grad_(False)
+            all_hypos = self.searcher.batching_rna(enc_out, frame_lens)
+            cnt_hypos = enc_out.new_tensor(
                 [len(list_hypos) for list_hypos in all_hypos], dtype=torch.long
             )
             # tmp_mesh:[
@@ -107,17 +99,17 @@ class DiscTransducerTrainer(nn.Module):
                 for list_hypos in all_hypos
             ]
             del all_hypos
-            self.joiner.requires_grad_(True)
-            self.predictor.requires_grad_(True)
+            self.requires_grad_(True)
+            self.train(istraining)
 
         frame_lens = frame_lens.to(torch.int)
         target_lens = target_lens.to(torch.int)
         targets = targets.to(torch.int)
 
-        bs = encoder_out.size(0)
+        bs = enc_out.size(0)
         enc_out_expand = torch.cat(
             [
-                encoder_out[n:n+1].expand(len(batched_tokens[n]), -1, -1)
+                enc_out[n:n+1].expand(len(batched_tokens[n]), -1, -1)
                 for n in range(bs)
             ], dim=0)
         enc_out_lens = torch.cat(
@@ -135,7 +127,7 @@ class DiscTransducerTrainer(nn.Module):
             ' '.join(str(x) for x in hyps[1:])
             for hyps in batched_tokens
         ]
-        penalty = encoder_out.new_tensor(cnt_we(gt, hy))
+        penalty = enc_out.new_tensor(cnt_we(gt, hy))
         del gt
         del hy
         pred_in = coreutils.pad_list([
@@ -147,29 +139,26 @@ class DiscTransducerTrainer(nn.Module):
         )
         expd_target_lens = target_lens.new_tensor(
             [len(hypo)-1 for hypo in batched_tokens])
-        preditor_out, _ = self.predictor(
+        pred_out, _ = self.predictor(
             pred_in, input_lengths=expd_target_lens+1)
 
-        packed_enc_out = PackedSequence(enc_out_expand, enc_out_lens)
-        packed_pred_out = PackedSequence(preditor_out, expd_target_lens+1)
-        if self.isfused:
-            joinout = self.joiner.impl_forward(
-                packed_enc_out, packed_pred_out)
-        else:
-            joinout = self.joiner(packed_enc_out, packed_pred_out)
+        joinout, squeezed_targets = self.compute_join(
+            enc_out_expand, pred_out, squeezed_targets, enc_out_lens, expd_target_lens)
 
         with autocast(enabled=False):
-            if self.isfused:
+            if self._fused:
                 nll = RNNTFusedLoss(
                     joinout.float(), squeezed_targets,
                     enc_out_lens.to(device=joinout.device),
-                    expd_target_lens.to(device=joinout.device))
+                    expd_target_lens.to(device=joinout.device)
+                )
             else:
                 nll = RNNTLoss(
                     joinout.float(), squeezed_targets,
                     enc_out_lens.to(device=joinout.device),
                     expd_target_lens.to(device=joinout.device),
-                    gather=True, compact=True)
+                    gather=True, compact=True
+                )
 
         # nll: (bs*n_hyps, )
         nll = (-nll).exp()
@@ -191,25 +180,30 @@ class DiscTransducerTrainer(nn.Module):
         )
 
 
-def build_model(cfg: dict, args: argparse.Namespace, dist: bool = True) -> DiscTransducerTrainer:
+def build_model(cfg: dict, args: argparse.Namespace, dist: bool = True) -> MWERTrainer:
+    """
+    cfg:
+        MWER:
+            decoder:
+                ...
 
+    """
     assert 'MWER' in cfg, f"missing 'MWER' in field:"
     assert 'decoder' in cfg['MWER'], f"missing 'decoder' in field:MWER:"
-    cfg['MWER']['trainer'] = cfg['MWER'].get('trainer', {})
 
     encoder, predictor, joiner = rnnt_builder(cfg, dist=False, wrapped=False)
 
     rnnt_decoder = RNNTDecoder(
-        decoder=predictor,
+        predictor=predictor,
         joiner=joiner,
         **cfg['MWER']['decoder']
     )
-    model = DiscTransducerTrainer(
+    model = MWERTrainer(
         rnnt_decoder,
-        encoder,
-        predictor,
-        joiner,
-        **cfg['MWER']['trainer'])
+        encoder=encoder,
+        predictor=predictor,
+        joiner=joiner,
+        **cfg['transducer'])
 
     if not dist:
         return model

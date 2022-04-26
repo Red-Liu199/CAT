@@ -8,20 +8,15 @@ Transducer trainer.
 
 from ..shared import Manager
 from ..shared import coreutils
+from ..shared import SpecAug
 from ..shared import encoder as tn_zoo
 from ..shared import decoder as pn_zoo
 from ..shared.layer import TimeReduction
-from ..shared import SpecAug
 from ..shared.data import (
     KaldiSpeechDataset,
     sortedPadCollateASR
 )
 from . import joiner as joiner_zoo
-from .joiner import (
-    PackedSequence,
-    JointNet,
-    AbsJointNet
-)
 
 import os
 import gather
@@ -29,7 +24,7 @@ import argparse
 from collections import OrderedDict
 from warp_rnnt import rnnt_loss as RNNTLoss
 from warp_rnnt import fused_rnnt_loss_ as RNNTFusedLoss
-from typing import Union, Optional, Tuple, Literal
+from typing import *
 
 import torch
 import torch.nn as nn
@@ -59,13 +54,13 @@ class TransducerTrainer(nn.Module):
         self,
         encoder: tn_zoo.AbsEncoder = None,
         predictor: pn_zoo.AbsDecoder = None,
-        joiner: AbsJointNet = None,
+        joiner: joiner_zoo.AbsJointNet = None,
         # enable compact layout, would consume less memory and fasten the computation of RNN-T loss.
         compact: bool = False,
         # enable fused mode for RNN-T loss computation, which would consume less memory but take a little more time
         fused: bool = False,
         # weight of ILME loss to conduct joiner-training
-        ilme_loss: Optional[float] = None,
+        ilme_weight: Optional[float] = None,
         # insert sub-sampling layer between encoder and joiner net
         time_reduction: int = 1,
         # add mask to predictor output, this specifies the range of mask
@@ -80,30 +75,30 @@ class TransducerTrainer(nn.Module):
         if sampled_softmax:
             assert bos_id == 0
             assert not fused
+            assert joiner.is_normalize_separated
+            joiner._skip_normalize = True
 
-        if fused and not joiner.is_normalize_separated:
-            raise RuntimeError(
-                f"TransducerTrainer: {joiner.__class__.__name__} is conflict with fused=True")
+        if fused:
+            if not joiner.is_normalize_separated:
+                raise RuntimeError(
+                    f"TransducerTrainer: {joiner.__class__.__name__} is conflict with fused=True")
+            joiner._skip_normalize = True
+
         if fused and not compact:
             print(
                 "TransducerTrainer: setting fused=True and compact=False is conflict. Force compact=True")
             compact = True
 
         self.ilme_weight = 0.0
-        if ilme_loss is not None and ilme_loss != 0.0:
-            if not isinstance(joiner, JointNet):
+        if ilme_weight is not None and ilme_weight != 0.0:
+            if not isinstance(joiner, joiner_zoo.JointNet):
                 raise NotImplementedError(
                     f"TransducerTrainer: \n"
                     f"ILME loss joiner training only support joiner network 'JointNet', instead of {joiner.__class__.__name__}")
-            assert joiner.fc_dec is not None, "TransducerTrainer: are you using joiner with \"joiner_mode='cat'\"? This is not supported yet."
-            self.register_buffer(
-                "_dummy_h_enc_ilme_loss",
-                torch.zeros(1, 1, joiner.fc_enc.in_features),
-                persistent=False)
             self._ilme_criterion = nn.CrossEntropyLoss()
-            self.ilme_weight = ilme_loss
+            self.ilme_weight = ilme_weight
 
-        self.isfused = fused
+        self._fused = fused
         self._compact = compact
         self._sampled_softmax = sampled_softmax
 
@@ -118,8 +113,12 @@ class TransducerTrainer(nn.Module):
             self._t_reduction = TimeReduction(time_reduction)
 
         if num_predictor_mask != -1:
-            self._pn_mask = SpecAug(time_mask_width_range=predictor_mask_range,
-                                    num_time_mask=num_predictor_mask, apply_freq_mask=False, apply_time_warp=False)
+            self._pn_mask = SpecAug(
+                time_mask_width_range=predictor_mask_range,
+                num_time_mask=num_predictor_mask,
+                apply_freq_mask=False,
+                apply_time_warp=False
+            )
         else:
             self._pn_mask = None
 
@@ -133,72 +132,58 @@ class TransducerTrainer(nn.Module):
             self.predictor.eval()
         return self
 
-    def impl_forward(self, inputs: torch.FloatTensor, targets: torch.LongTensor, input_lengths: torch.LongTensor, target_lengths: torch.LongTensor) -> torch.FloatTensor:
-
-        targets = targets.to(inputs.device, non_blocking=True)
-
-        output_encoder, o_lens = self.encoder(inputs, input_lengths)
-        o_lens = o_lens.to(torch.long)
-        # introduce time reduction layer
+    def compute_join(self, enc_out: torch.Tensor, pred_out: torch.Tensor, targets: torch.Tensor, enc_out_lens: torch.Tensor, target_lens: torch.Tensor) -> torch.FloatTensor:
+        enc_out_lens = enc_out_lens.to(torch.int)
+        # introduce time reduction layer if required
         if self._t_reduction is not None:
-            output_encoder, o_lens = self._t_reduction(output_encoder, o_lens)
-
-        padded_targets = torch.nn.functional.pad(
-            targets, (1, 0), value=self.bos_id)
-        output_predictor, _ = self.predictor(padded_targets)
+            enc_out, enc_out_lens = self._t_reduction(enc_out, enc_out_lens)
 
         if self._pn_mask is not None:
-            output_predictor, _ = self._pn_mask(
-                output_predictor, target_lengths+1)
+            pred_out = self._pn_mask(pred_out, target_lens+1)[0]
 
         if self._compact:
-            packed_enc = PackedSequence(output_encoder, o_lens)
-            packed_dec = PackedSequence(output_predictor, target_lengths+1)
+            packed_enc = gather.cat(enc_out, enc_out_lens)
+            packed_pred = gather.cat(pred_out, target_lens+1)
             # squeeze targets to 1-dim
-            targets = PackedSequence(targets, target_lengths).data.squeeze(1)
-            if self.isfused:
-                joinout = self.joiner.impl_forward(
-                    packed_enc, packed_dec)
-            elif self._sampled_softmax:
-                # try sampled softmax
-                joinout = self.joiner.impl_forward(packed_enc, packed_dec)
+            targets = targets.to(enc_out.device, non_blocking=True)
+            if targets.dim() == 2:
+                targets = gather.cat(targets, target_lens)
+            joinout = self.joiner(packed_enc, packed_pred,
+                                  enc_out_lens, target_lens+1)
+            if self._sampled_softmax:
                 indices_sampled, targets = torch.unique(
                     targets, sorted=True, return_inverse=True)
+                # leave the first place for <bos>/<blk>
                 targets += 1
                 indices_sampled = torch.nn.functional.pad(
-                    indices_sampled, (1, 0))
+                    indices_sampled, (1, 0), ).to(torch.long)
                 joinout = joinout[:, indices_sampled].log_softmax(dim=-1)
-            else:
-                joinout = self.joiner(packed_enc, packed_dec)
         else:
-            joinout = self.joiner(output_encoder, output_predictor)
+            joinout = self.joiner(enc_out, pred_out)
+        return joinout, targets.to(torch.int)
 
-        return joinout, targets, o_lens, target_lengths, output_encoder, output_predictor
+    def forward(self, inputs: torch.FloatTensor, targets: torch.LongTensor, in_lens: torch.LongTensor, target_lens: torch.LongTensor) -> torch.FloatTensor:
 
-    def forward(self, inputs: torch.FloatTensor, targets: torch.LongTensor, input_lengths: torch.LongTensor, target_lengths: torch.LongTensor) -> torch.FloatTensor:
+        enc_out, enc_out_lens = self.encoder(inputs, in_lens)
+        pred_out = self.predictor(torch.nn.functional.pad(
+            targets, (1, 0), value=self.bos_id))[0]
 
-        tupled_joinerout = self.impl_forward(
-            inputs, targets, input_lengths, target_lengths)
-
-        joinout, targets, o_lens, target_lengths = tupled_joinerout[:4]
-
+        joinout, targets = self.compute_join(
+            enc_out, pred_out, targets, enc_out_lens, target_lens
+        )
         loss = 0.0
         if self.ilme_weight != 0.0:
             # calculate the ILME ILM loss
-            # h_predictor_out: (N, U+1, H)
-            h_predictor_out = tupled_joinerout[5]
-            # ilm_log_probs: (N, 1, U, V) -> (N, U, V)
+            # ilm_log_probs: (N, 1, V) + (N, Up-1, V) -> (N, U, V)
             ilm_log_probs = self.joiner(
-                self._dummy_h_enc_ilme_loss.expand(
-                    h_predictor_out.size(0), -1, -1),
-                h_predictor_out[:, :-1, :]).squeeze(1)
+                pred_out.new_zeros(pred_out.size(0), 1, enc_out.size(-1)),
+                pred_out[:, :-1, :]).squeeze(1)
             # ilm_log_probs: (N, U, V) -> (\sum(U_i), V)
-            ilm_log_probs = gather.cat(ilm_log_probs, target_lengths)
+            ilm_log_probs = gather.cat(ilm_log_probs, target_lens)
             if targets.dim() == 2:
                 # normal layout -> compact layout
                 # ilm_targets: (\sum{U_i}, )
-                ilm_targets = torch.cat(
-                    [targets[n, :target_lengths[n]] for n in range(h_predictor_out.size(0))], dim=0)
+                ilm_targets = gather.cat(targets, target_lens)
             elif targets.dim() == 1:
                 ilm_targets = targets
             else:
@@ -209,16 +194,20 @@ class TransducerTrainer(nn.Module):
                 self._ilme_criterion(ilm_log_probs, ilm_targets)
 
         with autocast(enabled=False):
-            if self.isfused:
-                loss += RNNTFusedLoss(joinout.float(), targets.to(dtype=torch.int32),
-                                      o_lens.to(device=joinout.device,
-                                                dtype=torch.int32),
-                                      target_lengths.to(device=joinout.device, dtype=torch.int32), reduction='mean')
+            if self._fused:
+                loss += RNNTFusedLoss(
+                    joinout.float(), targets.to(dtype=torch.int32),
+                    enc_out_lens.to(device=joinout.device, dtype=torch.int32),
+                    target_lens.to(device=joinout.device, dtype=torch.int32),
+                    reduction='mean'
+                )
             else:
-                loss += RNNTLoss(joinout.float(), targets.to(dtype=torch.int32),
-                                 o_lens.to(device=joinout.device, dtype=torch.int32), target_lengths.to(
-                    device=joinout.device, dtype=torch.int32),
-                    reduction='mean', gather=True, compact=self._compact)
+                loss += RNNTLoss(
+                    joinout.float(), targets.to(dtype=torch.int32),
+                    enc_out_lens.to(device=joinout.device, dtype=torch.int32),
+                    target_lens.to(device=joinout.device, dtype=torch.int32),
+                    reduction='mean', gather=True, compact=self._compact
+                )
 
         return loss
 
@@ -229,7 +218,7 @@ def build_model(
         args: Optional[Union[argparse.Namespace, dict]] = None,
         dist: bool = True,
         wrapped: bool = True,
-        verbose: bool = True) -> Union[nn.parallel.DistributedDataParallel, TransducerTrainer, Tuple[tn_zoo.AbsEncoder, pn_zoo.AbsDecoder, AbsJointNet]]:
+        verbose: bool = True) -> Union[nn.parallel.DistributedDataParallel, TransducerTrainer, Tuple[tn_zoo.AbsEncoder, pn_zoo.AbsDecoder, joiner_zoo.AbsJointNet]]:
 
     if args is not None:
         if isinstance(args, argparse.Namespace):

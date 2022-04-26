@@ -13,7 +13,7 @@ from ..shared.data import (
 import os
 import argparse
 from collections import OrderedDict
-from typing import Union, Optional
+from typing import *
 
 import torch
 import torch.nn as nn

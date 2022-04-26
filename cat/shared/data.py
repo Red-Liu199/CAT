@@ -17,7 +17,7 @@ import pickle
 import math
 import hashlib
 import numpy as np
-from typing import Tuple, Sequence, List, Optional, Union, Dict, Callable
+from typing import *
 
 import torch
 from torch.utils.data import Dataset

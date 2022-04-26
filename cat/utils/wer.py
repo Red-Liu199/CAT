@@ -10,7 +10,7 @@ import sys
 import re
 import pickle
 from multiprocessing import Pool
-from typing import List, Tuple, Callable, Union, Dict
+from typing import *
 
 
 class Processor():
