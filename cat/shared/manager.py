@@ -468,11 +468,11 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
                 manager.writer.add_scalar(
                     'lr', tolog['lr'], global_step)
 
-            # update monitor
-            manager.monitor.update({
-                'train:loss': tolog['loss'],
-                'train:lr': tolog['lr']
-            })
+                # update monitor
+                manager.monitor.update({
+                    'train:loss': tolog['loss'],
+                    'train:lr': tolog['lr']
+                })
 
             n_time = (i+1)//fold
 

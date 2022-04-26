@@ -99,9 +99,9 @@ class FBankProcessor(Processor):
             num_mel_bins=self._num_mel_bins)
 
 
-def process_feat_as_kaldi(raw_audios: List[Tuple[str, str]], f_scp: str, f_ark: str, processor: Processor):
+def process_feat_as_kaldi(raw_audios: List[Tuple[str, str]], f_scp: str, f_ark: str, processor: Processor, desc: str = ''):
     with kaldiio.WriteHelper(f'ark,scp:{f_ark},{f_scp}') as writer:
-        for uid, _audio in tqdm(raw_audios):
+        for uid, _audio in tqdm(raw_audios, desc=desc):
             writer(uid, processor(_audio).numpy())
 
 
@@ -150,7 +150,7 @@ def prepare_kaldi_feat(
             sys.stderr.write(
                 f"warning: scp file {f_scp} exists, skip.\n")
         else:
-            process_fn(audios[_set], f_scp, f_ark, audio2fbank)
+            process_fn(audios[_set], f_scp, f_ark, audio2fbank, desc=_set)
 
     for _factor in speed_perturb:
         if _factor == 1.0:
@@ -177,4 +177,5 @@ def prepare_kaldi_feat(
                 sys.stderr.write(
                     f"warning: scp file {f_scp} exists, skip.\n")
             else:
-                process_fn(audios[_set], f_scp, f_ark,  sp_processor)
+                process_fn(audios[_set], f_scp, f_ark,
+                           sp_processor, desc=f"{_set} sp {_factor}")
