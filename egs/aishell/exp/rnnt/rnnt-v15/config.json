@@ -20,7 +20,6 @@
             "idim": 80,
             "hdim": 512,
             "conv": "vgg2l",
-            "d_head": -1,
             "num_heads": 4,
             "dropout": 0.3,
             "dropout_attn": 0.3,
@@ -30,7 +29,7 @@
         }
     },
     "decoder": {
-        "type": "LSTMPredictNet",
+        "type": "LSTM",
         "kwargs": {
             "num_classes": 4232,
             "hdim": 512,
@@ -69,8 +68,7 @@
             "peak_factor": 1.0,
             "d_model": 512,
             "warmup_steps": 25000,
-            "epoch_max": 100,
-            "reverse_metric_direc": true
+            "epoch_max": 100
         }
     }
 }

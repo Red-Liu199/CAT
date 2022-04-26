@@ -18,7 +18,7 @@
             "use_all_vocab": true,
             "model_prefix": "sentencepiece/aishell_char/spm"
         },
-        "location": "exp/rnnt-v15/tokenizer.tknz"
+        "location": "exp/rnnt/rnnt-v15/tokenizer.tknz"
     },
     "train": {
         "batch_size": 512,
@@ -33,8 +33,7 @@
             "num": 10
         },
         "decode": {
-            "algo": "rna",
-            "beam-size": 128,
+            "beam-size": 16,
             "cpu": true,
             "nj": 40,
             "resume": "best-10.pt"
