@@ -177,8 +177,8 @@ def main_worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_nbest: m
 
     est_ilm = args.estimate_ILM
     searcher = BeamSearcher(
-        decoder=model.decoder,
-        joint=model.joint,
+        predictor=model.predictor,
+        joiner=model.joiner,
         blank_id=0,
         bos_id=model.bos_id,
         beam_size=args.beam_size,

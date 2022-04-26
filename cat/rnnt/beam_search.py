@@ -9,7 +9,7 @@ Support:
 Author: Huahuan Zhengh (maxwellzh@outlook.com)
 """
 
-from .joint import AbsJointNet
+from .joiner import AbsJointNet
 from ..shared import coreutils
 from ..shared.decoder import (
     LSTM,
@@ -177,7 +177,7 @@ def recombine_hypo(redundant_hypos: List[Hypothesis]) -> List[Hypothesis]:
     return list(out_hypos.values())
 
 # TODO:
-# 1. add a interface of absdecoder
+# 1. add a interface of decoder
 # 2. batch-fly the decoding
 # 3. interface for introducing external LM(s)
 # 3. rename tn -> encoder
@@ -187,8 +187,8 @@ class BeamSearcher():
 
     def __init__(
         self,
-        decoder: AbsDecoder,
-        joint: AbsJointNet,
+        predictor: AbsDecoder,
+        joiner: AbsJointNet,
         blank_id: int = 0,
         bos_id: int = 0,
         beam_size: int = 5,
@@ -211,8 +211,8 @@ class BeamSearcher():
             alpha = 0.0
             beta = 0.0
 
-        self.decoder = decoder
-        self.joint = joint
+        self.predictor = predictor
+        self.joiner = joiner
         self.blank_id = blank_id
         self.bos_id = bos_id
         self.beam_size = beam_size
@@ -245,7 +245,7 @@ class BeamSearcher():
         encoder_out: (N, T, V)
         """
         use_lm = self.lm is not None
-        if isinstance(self.decoder, LSTM):
+        if isinstance(self.predictor, LSTM):
             if use_lm and not isinstance(self.lm, LSTM):
                 fixlen_state = False
             else:
@@ -265,7 +265,7 @@ class BeamSearcher():
         Beams = [[Hypothesis(
             pred=dummy_token.new_tensor([self.bos_id]),
             log_prob=0.0,
-            cache={'pn_state': self.decoder.init_states()})]
+            cache={'pn_state': self.predictor.init_states()})]
             for _ in range(n_batches)]
 
         if use_lm:
@@ -293,12 +293,12 @@ class BeamSearcher():
 
             n_group_uncached = len(group_uncached)
             # In following loop, we do:
-            # 1. compute decoder output for beams not in cache
+            # 1. compute predictor output for beams not in cache
             # 2. fetch output in cache for beams in cache
             for i, (g_index, g_tokens, g_states) in enumerate(group_beams):
                 idxbeam2srcidx += g_index
                 if i < n_group_uncached:
-                    pn_out, pn_state = self.decoder(
+                    pn_out, pn_state = self.predictor(
                         g_tokens, g_states['pn_state']())
                     if use_lm:
                         lm_out, lm_state = self._lm_step(
@@ -307,7 +307,7 @@ class BeamSearcher():
                     for bid, absidx in enumerate(g_index):
                         cur_cache = {
                             'pn_out': pn_out[bid:bid+1],
-                            'pn_state': self.decoder.get_state_from_batch(pn_state, bid)
+                            'pn_state': self.predictor.get_state_from_batch(pn_state, bid)
                         }
                         if use_lm:
                             cur_cache.update({
@@ -334,11 +334,11 @@ class BeamSearcher():
                 [encoder_out[b:b+1, t:t+1, :].expand(len(Beams[b]), -1, -1)
                  for b in idx_ongoing_seq], dim=0)[idxbeam2srcidx]
             # log_prob: (n_beams, 1, 1, V) -> (n_beams, V)
-            log_prob = self.joint(
+            log_prob = self.joiner(
                 expand_enc_out, pn_out).squeeze(1).squeeze(1)
 
             if self.est_ilm:
-                ilm_log_prob = self.joint.impl_forward(
+                ilm_log_prob = self.joiner.impl_forward(
                     torch.zeros_like(expand_enc_out), pn_out).squeeze(1).squeeze(1)
                 if self.blank_id == 0:
                     ilm_log_prob[:, 1:] = \
@@ -402,27 +402,11 @@ class BeamSearcher():
         return [sorted(B_, key=lambda item: item.score, reverse=True)[
             :self.nbest] for B_ in Beams]
 
-    def _joint_step(self, tn_out: torch.Tensor, pn_out: torch.Tensor):
-        """Join predictions (TN & PN)."""
-
-        tn_out = tn_out.view(-1)
-        pn_out = pn_out.view(-1)
-
-        if self.temp == 1.0:
-            return self.joint(tn_out, pn_out)
-        else:
-            logits = self.joint.impl_forward(
-                tn_out, pn_out)
-            return torch.log_softmax(logits/self.temp, dim=-1)
-
-    def _lm_step(self, inp_tokens, memory):
-        logits, hs = self.lm(inp_tokens, hidden=memory)
+    def _lm_step(self, inp_tokens, hidden):
+        """Forward a step of LM module, this equals to self.lm.forward() + log_softmax()"""
+        logits, hs = self.lm(inp_tokens, hidden=hidden)
         log_probs = torch.log_softmax(logits, dim=-1)
         return log_probs, hs
-
-    def _pn_step(self, input_PN, hidden=None):
-
-        return self.decoder(input_PN, hidden)
 
 
 def collect_scores(hypos: List[Hypothesis], dummy_tensor: torch.Tensor = None) -> torch.Tensor:

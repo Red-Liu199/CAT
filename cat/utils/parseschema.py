@@ -7,8 +7,8 @@ from cat.shared import decoder as pn_zoo
 from cat.shared import encoder as tn_zoo
 from cat.shared import scheduler, SpecAug
 from cat.shared.scheduler import Scheduler
-from cat.rnnt import joint as joint_zoo
-from cat.rnnt.joint import AbsJointNet
+from cat.rnnt import joiner as joiner_zoo
+from cat.rnnt.joiner import AbsJointNet
 from cat.rnnt.train import TransducerTrainer
 
 import inspect
@@ -186,14 +186,14 @@ schema['properties']['specaug_config'] = processing
 
 processing = gen_object(dict)  # type:OrderedDict
 modules = []
-for m in dir(joint_zoo):
-    _m = getattr(joint_zoo, m)
+for m in dir(joiner_zoo):
+    _m = getattr(joiner_zoo, m)
     if inspect.isclass(_m) and issubclass(_m, AbsJointNet):
         modules.append(_m)
 parse_processing(processing, modules)
 
-processing['description'] = 'Configuration of Transducer joint network'
-schema['properties']['joint'] = processing
+processing['description'] = 'Configuration of Transducer joiner network'
+schema['properties']['joiner'] = processing
 
 # %% [markdown]
 # ## Scheduler

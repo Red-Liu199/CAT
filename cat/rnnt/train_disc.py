@@ -12,7 +12,7 @@ from ..shared.data import (
 )
 from ..ctc.train import build_model as ctc_builder
 from .train import build_model as rnnt_builder
-from .joint import (
+from .joiner import (
     PackedSequence,
     AbsJointNet
 )
@@ -55,14 +55,14 @@ class DiscTransducerTrainer(nn.Module):
     def __init__(self,
                  encoder: AbsEncoder,
                  decoder: AbsDecoder,
-                 joint: AbsJointNet,
+                 joiner: AbsJointNet,
                  ctc_sampler: AbsEncoder,
                  searcher: CTCBeamDecoder,
                  beta: float = 0.0) -> None:
         super().__init__()
         self.encoder = encoder
         self.decoder = decoder
-        self.joint = joint
+        self.joiner = joiner
 
         self.sampler = ctc_sampler
         self.searcher = searcher
@@ -128,12 +128,12 @@ class DiscTransducerTrainer(nn.Module):
             padded_targets = self._pad(targets)
             pos_decoder_out, _ = self.decoder(
                 padded_targets, input_lengths=target_lengths+1)
-        pos_joint_out = self.joint(
+        pos_joinout = self.joiner(
             PackedSequence(output_encoder, encoder_lens),
             PackedSequence(pos_decoder_out, target_lengths+1)
         )
 
-        pos_logp = self.cal_p(pos_joint_out, encoder_lens, sampler_out,
+        pos_logp = self.cal_p(pos_joinout, encoder_lens, sampler_out,
                               sampler_lens, targets, target_lengths, K, False)
         # noise samples
         with torch.no_grad():
@@ -160,12 +160,12 @@ class DiscTransducerTrainer(nn.Module):
                 self._pad(noise_samples), input_lengths=l_hypos+1)
         noise_encoder_out = output_encoder.repeat(K, 1, 1).contiguous()
         noise_encoder_lens = encoder_lens.repeat(K)
-        noise_joint_out = self.joint(
+        noise_joinout = self.joiner(
             PackedSequence(noise_encoder_out, noise_encoder_lens),
             PackedSequence(noise_decoder_out, l_hypos+1))
 
         noise_logp = self.cal_p(
-            noise_joint_out, noise_encoder_lens,
+            noise_joinout, noise_encoder_lens,
             noise_sampler_out, noise_sampler_lens,
             noise_samples, l_hypos, K, True)
 
@@ -234,7 +234,7 @@ def build_model(args, cfg: dict, dist: bool = True) -> DiscTransducerTrainer:
     ctc_model.requires_grad_(False)
 
     assert 'searcher' in cfg
-    encoder, decoder, joint = rnnt_builder(
+    encoder, decoder, joiner = rnnt_builder(
         cfg, args,  dist=False, wrapped=False)
 
     labels = [str(i) for i in range(ctc_model.classifier.out_features)]
@@ -242,7 +242,7 @@ def build_model(args, cfg: dict, dist: bool = True) -> DiscTransducerTrainer:
         labels, log_probs_input=True, **cfg['searcher'])
 
     model = DiscTransducerTrainer(
-        encoder, decoder, joint, ctc_model, searcher, **cfg['DiscTransducerTrainer'])
+        encoder, decoder, joiner, ctc_model, searcher, **cfg['DiscTransducerTrainer'])
 
     if not dist:
         setattr(model, 'requires_slice', True)

@@ -16,8 +16,8 @@ from ..shared.data import (
     KaldiSpeechDataset,
     sortedPadCollateASR
 )
-from . import joint as joint_zoo
-from .joint import (
+from . import joiner as joiner_zoo
+from .joiner import (
     PackedSequence,
     JointNet,
     AbsJointNet
@@ -29,7 +29,7 @@ import argparse
 from collections import OrderedDict
 from warp_rnnt import rnnt_loss as RNNTLoss
 from warp_rnnt import fused_rnnt_loss_ as RNNTFusedLoss
-from typing import Union, Optional, Tuple
+from typing import Union, Optional, Tuple, Literal
 
 import torch
 import torch.nn as nn
@@ -58,20 +58,20 @@ class TransducerTrainer(nn.Module):
     def __init__(
         self,
         encoder: tn_zoo.AbsEncoder = None,
-        decoder: pn_zoo.AbsDecoder = None,
-        jointnet: AbsJointNet = None,
+        predictor: pn_zoo.AbsDecoder = None,
+        joiner: AbsJointNet = None,
         # enable compact layout, would consume less memory and fasten the computation of RNN-T loss.
         compact: bool = False,
         # enable fused mode for RNN-T loss computation, which would consume less memory but take a little more time
         fused: bool = False,
-        # weight of ILME loss to conduct joint-training
+        # weight of ILME loss to conduct joiner-training
         ilme_loss: Optional[float] = None,
-        # insert sub-sampling layer between encoder and joint net
+        # insert sub-sampling layer between encoder and joiner net
         time_reduction: int = 1,
-        # add mask to decoder output, this specifies the range of mask
-        decoder_mask_range: float = 0.1,
-        # add mask to decoder output, this specifies the # mask
-        num_decoder_mask: int = -1,
+        # add mask to predictor output, this specifies the range of mask
+        predictor_mask_range: float = 0.1,
+        # add mask to predictor output, this specifies the # mask
+        num_predictor_mask: int = -1,
         bos_id: int = 0,
         # conduct sampled softmax
             sampled_softmax: bool = False):
@@ -81,9 +81,9 @@ class TransducerTrainer(nn.Module):
             assert bos_id == 0
             assert not fused
 
-        if fused and not jointnet.is_normalize_separated:
+        if fused and not joiner.is_normalize_separated:
             raise RuntimeError(
-                f"TransducerTrainer: {jointnet.__class__.__name__} is conflict with fused=True")
+                f"TransducerTrainer: {joiner.__class__.__name__} is conflict with fused=True")
         if fused and not compact:
             print(
                 "TransducerTrainer: setting fused=True and compact=False is conflict. Force compact=True")
@@ -91,14 +91,14 @@ class TransducerTrainer(nn.Module):
 
         self.ilme_weight = 0.0
         if ilme_loss is not None and ilme_loss != 0.0:
-            if not isinstance(jointnet, JointNet):
+            if not isinstance(joiner, JointNet):
                 raise NotImplementedError(
                     f"TransducerTrainer: \n"
-                    f"ILME loss joint training only support joint network 'JointNet', instead of {jointnet.__class__.__name__}")
-            assert jointnet.fc_dec is not None, "TransducerTrainer: are you using jointnet with \"joint_mode='cat'\"? This is not supported yet."
+                    f"ILME loss joiner training only support joiner network 'JointNet', instead of {joiner.__class__.__name__}")
+            assert joiner.fc_dec is not None, "TransducerTrainer: are you using joiner with \"joiner_mode='cat'\"? This is not supported yet."
             self.register_buffer(
                 "_dummy_h_enc_ilme_loss",
-                torch.zeros(1, 1, jointnet.fc_enc.in_features),
+                torch.zeros(1, 1, joiner.fc_enc.in_features),
                 persistent=False)
             self._ilme_criterion = nn.CrossEntropyLoss()
             self.ilme_weight = ilme_loss
@@ -108,8 +108,8 @@ class TransducerTrainer(nn.Module):
         self._sampled_softmax = sampled_softmax
 
         self.encoder = encoder
-        self.decoder = decoder
-        self.joint = jointnet
+        self.predictor = predictor
+        self.joiner = joiner
 
         assert isinstance(time_reduction, int) and time_reduction >= 1
         if time_reduction == 1:
@@ -117,9 +117,9 @@ class TransducerTrainer(nn.Module):
         else:
             self._t_reduction = TimeReduction(time_reduction)
 
-        if num_decoder_mask != -1:
-            self._pn_mask = SpecAug(time_mask_width_range=decoder_mask_range,
-                                    num_time_mask=num_decoder_mask, apply_freq_mask=False, apply_time_warp=False)
+        if num_predictor_mask != -1:
+            self._pn_mask = SpecAug(time_mask_width_range=predictor_mask_range,
+                                    num_time_mask=num_predictor_mask, apply_freq_mask=False, apply_time_warp=False)
         else:
             self._pn_mask = None
 
@@ -129,8 +129,8 @@ class TransducerTrainer(nn.Module):
         super().train(mode=mode)
         if self.encoder.freeze:
             self.encoder.eval()
-        if self.decoder.freeze:
-            self.decoder.eval()
+        if self.predictor.freeze:
+            self.predictor.eval()
         return self
 
     def impl_forward(self, inputs: torch.FloatTensor, targets: torch.LongTensor, input_lengths: torch.LongTensor, target_lengths: torch.LongTensor) -> torch.FloatTensor:
@@ -145,59 +145,60 @@ class TransducerTrainer(nn.Module):
 
         padded_targets = torch.nn.functional.pad(
             targets, (1, 0), value=self.bos_id)
-        output_decoder, _ = self.decoder(padded_targets)
+        output_predictor, _ = self.predictor(padded_targets)
 
         if self._pn_mask is not None:
-            output_decoder, _ = self._pn_mask(output_decoder, target_lengths+1)
+            output_predictor, _ = self._pn_mask(
+                output_predictor, target_lengths+1)
 
         if self._compact:
             packed_enc = PackedSequence(output_encoder, o_lens)
-            packed_dec = PackedSequence(output_decoder, target_lengths+1)
+            packed_dec = PackedSequence(output_predictor, target_lengths+1)
             # squeeze targets to 1-dim
             targets = PackedSequence(targets, target_lengths).data.squeeze(1)
             if self.isfused:
-                joint_out = self.joint.impl_forward(
+                joinout = self.joiner.impl_forward(
                     packed_enc, packed_dec)
             elif self._sampled_softmax:
                 # try sampled softmax
-                joint_out = self.joint.impl_forward(packed_enc, packed_dec)
+                joinout = self.joiner.impl_forward(packed_enc, packed_dec)
                 indices_sampled, targets = torch.unique(
                     targets, sorted=True, return_inverse=True)
                 targets += 1
                 indices_sampled = torch.nn.functional.pad(
                     indices_sampled, (1, 0))
-                joint_out = joint_out[:, indices_sampled].log_softmax(dim=-1)
+                joinout = joinout[:, indices_sampled].log_softmax(dim=-1)
             else:
-                joint_out = self.joint(packed_enc, packed_dec)
+                joinout = self.joiner(packed_enc, packed_dec)
         else:
-            joint_out = self.joint(output_encoder, output_decoder)
+            joinout = self.joiner(output_encoder, output_predictor)
 
-        return joint_out, targets, o_lens, target_lengths, output_encoder, output_decoder
+        return joinout, targets, o_lens, target_lengths, output_encoder, output_predictor
 
     def forward(self, inputs: torch.FloatTensor, targets: torch.LongTensor, input_lengths: torch.LongTensor, target_lengths: torch.LongTensor) -> torch.FloatTensor:
 
-        tupled_jointout = self.impl_forward(
+        tupled_joinerout = self.impl_forward(
             inputs, targets, input_lengths, target_lengths)
 
-        joint_out, targets, o_lens, target_lengths = tupled_jointout[:4]
+        joinout, targets, o_lens, target_lengths = tupled_joinerout[:4]
 
         loss = 0.0
         if self.ilme_weight != 0.0:
             # calculate the ILME ILM loss
-            # h_decoder_out: (N, U+1, H)
-            h_decoder_out = tupled_jointout[5]
+            # h_predictor_out: (N, U+1, H)
+            h_predictor_out = tupled_joinerout[5]
             # ilm_log_probs: (N, 1, U, V) -> (N, U, V)
-            ilm_log_probs = self.joint(
+            ilm_log_probs = self.joiner(
                 self._dummy_h_enc_ilme_loss.expand(
-                    h_decoder_out.size(0), -1, -1),
-                h_decoder_out[:, :-1, :]).squeeze(1)
+                    h_predictor_out.size(0), -1, -1),
+                h_predictor_out[:, :-1, :]).squeeze(1)
             # ilm_log_probs: (N, U, V) -> (\sum(U_i), V)
             ilm_log_probs = gather.cat(ilm_log_probs, target_lengths)
             if targets.dim() == 2:
                 # normal layout -> compact layout
                 # ilm_targets: (\sum{U_i}, )
                 ilm_targets = torch.cat(
-                    [targets[n, :target_lengths[n]] for n in range(h_decoder_out.size(0))], dim=0)
+                    [targets[n, :target_lengths[n]] for n in range(h_predictor_out.size(0))], dim=0)
             elif targets.dim() == 1:
                 ilm_targets = targets
             else:
@@ -209,14 +210,14 @@ class TransducerTrainer(nn.Module):
 
         with autocast(enabled=False):
             if self.isfused:
-                loss += RNNTFusedLoss(joint_out.float(), targets.to(dtype=torch.int32),
-                                      o_lens.to(device=joint_out.device,
+                loss += RNNTFusedLoss(joinout.float(), targets.to(dtype=torch.int32),
+                                      o_lens.to(device=joinout.device,
                                                 dtype=torch.int32),
-                                      target_lengths.to(device=joint_out.device, dtype=torch.int32), reduction='mean')
+                                      target_lengths.to(device=joinout.device, dtype=torch.int32), reduction='mean')
             else:
-                loss += RNNTLoss(joint_out.float(), targets.to(dtype=torch.int32),
-                                 o_lens.to(device=joint_out.device, dtype=torch.int32), target_lengths.to(
-                    device=joint_out.device, dtype=torch.int32),
+                loss += RNNTLoss(joinout.float(), targets.to(dtype=torch.int32),
+                                 o_lens.to(device=joinout.device, dtype=torch.int32), target_lengths.to(
+                    device=joinout.device, dtype=torch.int32),
                     reduction='mean', gather=True, compact=self._compact)
 
         return loss
@@ -247,70 +248,67 @@ def build_model(
         del checkpoint
         return new_state_dict
 
-    def _build(config: dict, module: str) -> nn.Module:
-        assert 'kwargs' in config
+    def _build(c_cfg: dict, component: Literal['encoder', 'predictor', 'joiner']) -> Union[tn_zoo.AbsEncoder, pn_zoo.AbsDecoder, joiner_zoo.AbsJointNet]:
+        assert 'kwargs' in c_cfg
 
-        if module == 'encoder':
+        if component == 'encoder':
             zoo = tn_zoo
-        elif module == 'decoder':
+        elif component == 'predictor':
             zoo = pn_zoo
-        elif module == 'joint':
-            zoo = joint_zoo
+        elif component == 'joiner':
+            zoo = joiner_zoo
         else:
-            raise ValueError(f"Unknow module: {module}")
+            raise ValueError(f"Unknow component: {component}")
 
-        _model = getattr(zoo, config['type'])(
-            **config['kwargs'])  # type: AbsJointNet
+        _model = getattr(zoo, c_cfg['type'])(**c_cfg['kwargs'])
 
-        if "pretrained" in config:
-            if module == "encoder":
+        if "pretrained" in c_cfg:
+            if component == "encoder":
                 prefix = 'module.am.'
-            elif module == "decoder":
+            elif component == "predictor":
                 prefix = 'module.lm.'
             else:
                 raise RuntimeError(
-                    "Unknown module with 'pretrained' option: {}".format(module))
+                    "Unsupport component with 'pretrained' option: {}".format(component))
 
             _model.load_state_dict(
-                _load_and_immigrate(
-                    config['pretrained'],
-                    prefix, ''), strict=False)
+                _load_and_immigrate(c_cfg['pretrained'], prefix, ''), strict=False)
 
-        if 'freeze' in config and config['freeze']:
-            if 'pretrained' not in config:
+        if 'freeze' in c_cfg and c_cfg['freeze']:
+            if 'pretrained' not in c_cfg:
                 raise RuntimeError(
-                    "freeze=True while 'pretrained' is empty is not allowed. In {} init".format(module))
+                    "freeze=True while 'pretrained' is empty is not allowed. In {} init".format(component))
             _model.requires_grad_(False)
             setattr(_model, 'freeze', True)
         else:
             setattr(_model, 'freeze', False)
 
         if verbose and args['rank'] == 0:
-            if 'pretrained' not in config:
+            if 'pretrained' not in c_cfg:
                 _path = ''
             else:
-                _path = config['pretrained']
-            print("{:<8}: freeze={:<5} | loaded from {}".format(
-                module.upper(), str(_model.freeze), _path))
+                _path = c_cfg['pretrained']
+            print("{:<10}: freeze={:<5} | loaded from {}".format(
+                component.lower(), str(_model.freeze), _path))
             del _path
         return _model
 
     assert 'encoder' in cfg
     assert 'decoder' in cfg
-    assert 'joint' in cfg
+    assert 'joiner' in cfg
     verbose = False if args is None else verbose
 
     encoder = _build(cfg['encoder'], 'encoder')
-    decoder = _build(cfg['decoder'], 'decoder')
-    jointnet = _build(cfg['joint'], 'joint')
-    if all(_model.freeze for _model in [encoder, decoder, jointnet]):
+    predictor = _build(cfg['decoder'], 'predictor')
+    joiner = _build(cfg['joiner'], 'joiner')
+    if all(_model.freeze for _model in [encoder, predictor, joiner]):
         raise RuntimeError("It's illegal to freeze all parts of Transducer.")
 
     is_part_freeze = not all(not _model.freeze for _model in [
-                             encoder, decoder, jointnet])
+                             encoder, predictor, joiner])
 
     if not wrapped:
-        return encoder, decoder, jointnet
+        return encoder, predictor, joiner
 
     # for compatible of old settings
     if 'transducer' in cfg:
@@ -318,8 +316,12 @@ def build_model(
     else:
         transducer_kwargs = {}
 
-    model = TransducerTrainer(encoder=encoder, decoder=decoder,
-                              jointnet=jointnet, **transducer_kwargs)
+    model = TransducerTrainer(
+        encoder=encoder,
+        predictor=predictor,
+        joiner=joiner,
+        **transducer_kwargs
+    )
 
     if not dist:
         if is_part_freeze:

@@ -499,8 +499,8 @@ class ILM(AbsDecoder):
         rnntmodel = rnnt_builder(cfg, dist=False)
         coreutils.load_checkpoint(rnntmodel, f_check)
         self._stem = rnntmodel.decoder
-        self._head = rnntmodel.joint
-        self._dim_enc_out = cfg['joint']['kwargs']['odim_encoder']
+        self._head = rnntmodel.joiner
+        self._dim_enc_out = cfg['joiner']['kwargs']['odim_encoder']
         del rnntmodel
 
     def forward(self, x, input_lengths):

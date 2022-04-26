@@ -12,7 +12,7 @@ from ..shared.data import (
 )
 from .beam_search import BeamSearcher as RNNTDecoder
 from .train import build_model as rnnt_builder
-from .joint import (
+from .joiner import (
     PackedSequence,
     AbsJointNet
 )
@@ -69,8 +69,8 @@ class DiscTransducerTrainer(nn.Module):
         super().__init__()
         self.searcher = beamdecoder
         self.encoder = encoder
-        self.decoder = predictor
-        self.joint = joiner
+        self.predictor = predictor
+        self.joiner = joiner
         self.isfused = fused
 
     def werloss(self, encoder_out: torch.Tensor, frame_lens: torch.Tensor, targets: torch.Tensor, target_lens: torch.Tensor):
@@ -82,8 +82,8 @@ class DiscTransducerTrainer(nn.Module):
         """
         # batched: (batchsize*beamsize, )
         with torch.no_grad():
-            self.joint.requires_grad_(False)
-            self.decoder.requires_grad_(False)
+            self.joiner.requires_grad_(False)
+            self.predictor.requires_grad_(False)
             all_hypos = self.searcher.batching_rna(encoder_out, frame_lens)
             cnt_hypos = encoder_out.new_tensor(
                 [len(list_hypos) for list_hypos in all_hypos], dtype=torch.long
@@ -107,8 +107,8 @@ class DiscTransducerTrainer(nn.Module):
                 for list_hypos in all_hypos
             ]
             del all_hypos
-            self.joint.requires_grad_(True)
-            self.decoder.requires_grad_(True)
+            self.joiner.requires_grad_(True)
+            self.predictor.requires_grad_(True)
 
         frame_lens = frame_lens.to(torch.int)
         target_lens = target_lens.to(torch.int)
@@ -147,28 +147,28 @@ class DiscTransducerTrainer(nn.Module):
         )
         expd_target_lens = target_lens.new_tensor(
             [len(hypo)-1 for hypo in batched_tokens])
-        preditor_out, _ = self.decoder(
+        preditor_out, _ = self.predictor(
             pred_in, input_lengths=expd_target_lens+1)
 
         packed_enc_out = PackedSequence(enc_out_expand, enc_out_lens)
         packed_pred_out = PackedSequence(preditor_out, expd_target_lens+1)
         if self.isfused:
-            joiner_out = self.joint.impl_forward(
+            joinout = self.joiner.impl_forward(
                 packed_enc_out, packed_pred_out)
         else:
-            joiner_out = self.joint(packed_enc_out, packed_pred_out)
+            joinout = self.joiner(packed_enc_out, packed_pred_out)
 
         with autocast(enabled=False):
             if self.isfused:
                 nll = RNNTFusedLoss(
-                    joiner_out.float(), squeezed_targets,
-                    enc_out_lens.to(device=joiner_out.device),
-                    expd_target_lens.to(device=joiner_out.device))
+                    joinout.float(), squeezed_targets,
+                    enc_out_lens.to(device=joinout.device),
+                    expd_target_lens.to(device=joinout.device))
             else:
                 nll = RNNTLoss(
-                    joiner_out.float(), squeezed_targets,
-                    enc_out_lens.to(device=joiner_out.device),
-                    expd_target_lens.to(device=joiner_out.device),
+                    joinout.float(), squeezed_targets,
+                    enc_out_lens.to(device=joinout.device),
+                    expd_target_lens.to(device=joinout.device),
                     gather=True, compact=True)
 
         # nll: (bs*n_hyps, )
@@ -201,7 +201,7 @@ def build_model(cfg: dict, args: argparse.Namespace, dist: bool = True) -> DiscT
 
     rnnt_decoder = RNNTDecoder(
         decoder=predictor,
-        joint=joiner,
+        joiner=joiner,
         **cfg['MWER']['decoder']
     )
     model = DiscTransducerTrainer(

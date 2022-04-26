@@ -17,11 +17,11 @@
                     "type": "number",
                     "default": 0
                 },
-                "num_decoder_mask": {
+                "num_predictor_mask": {
                     "type": "number",
                     "default": -1
                 },
-                "decoder_mask_range": {
+                "predictor_mask_range": {
                     "type": "number",
                     "default": 0.1
                 },
@@ -38,8 +38,8 @@
                     "type": "boolean",
                     "default": false
                 },
-                "jointnet": {},
-                "decoder": {},
+                "joiner": {},
+                "predictor": {},
                 "encoder": {}
             }
         },
@@ -775,8 +775,8 @@
                 }
             }
         },
-        "joint": {
-            "description": "Configuration of Transducer joint network",
+        "joiner": {
+            "description": "Configuration of Transducer joiner network",
             "type": "object",
             "required": [
                 "type",
@@ -857,7 +857,7 @@
                                     "act": {
                                         "default": "tanh"
                                     },
-                                    "joint_mode": {
+                                    "join_mode": {
                                         "default": "add"
                                     },
                                     "hdim": {
@@ -867,7 +867,7 @@
                                     "num_classes": {
                                         "type": "number"
                                     },
-                                    "odim_decoder": {
+                                    "odim_predictor": {
                                         "type": "number"
                                     },
                                     "odim_encoder": {
@@ -894,7 +894,7 @@
                                     "act": {
                                         "default": "tanh"
                                     },
-                                    "joint_mode": {
+                                    "join_mode": {
                                         "default": "add"
                                     },
                                     "hdim": {
@@ -904,7 +904,7 @@
                                     "num_classes": {
                                         "type": "number"
                                     },
-                                    "odim_decoder": {
+                                    "odim_predictor": {
                                         "type": "number"
                                     },
                                     "odim_encoder": {

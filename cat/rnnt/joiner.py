@@ -100,9 +100,9 @@ class AbsJointNet(nn.Module):
         raise NotImplementedError
 
     def forward(self, *args, **kwargs):
-        joint_out = self.impl_forward(
+        joinout = self.impl_forward(
             *args, **kwargs)  # type: torch.Tensor
-        return joint_out.log_softmax(dim=-1)
+        return joinout.log_softmax(dim=-1)
 
 
 class DenormalJointNet(AbsJointNet):
@@ -187,20 +187,20 @@ class DenormalJointNet(AbsJointNet):
 
 class JointNet(AbsJointNet):
     """
-    Joint `encoder_output` and `decoder_output`.
+    Joint `encoder_output` and `predictor_output`.
     Args:
         encoder_output (torch.FloatTensor): A output sequence of encoder. `FloatTensor` of size ``(batch, time_steps, dimensionA)``
-        decoder_output (torch.FloatTensor): A output sequence of decoder. `FloatTensor` of size ``(batch, label_length, dimensionB)``
+        predictor_output (torch.FloatTensor): A output sequence of predictor. `FloatTensor` of size ``(batch, label_length, dimensionB)``
     Returns:
-        outputs (torch.FloatTensor): outputs of joint `encoder_output` and `decoder_output`. `FloatTensor` of size ``(batch, time_steps, label_length, dimensionA + dimensionB)``
+        outputs (torch.FloatTensor): outputs of joined `encoder_output` and `predictor_output`. `FloatTensor` of size ``(batch, time_steps, label_length, dimensionA + dimensionB)``
     """
 
     def __init__(self,
                  odim_encoder: int,
-                 odim_decoder: int,
+                 odim_predictor: int,
                  num_classes: int,
                  hdim: int = -1,
-                 joint_mode: Literal['add', 'cat'] = 'add',
+                 join_mode: Literal['add', 'cat'] = 'add',
                  act: Literal['tanh', 'relu'] = 'tanh'):
         super().__init__()
 
@@ -211,72 +211,72 @@ class JointNet(AbsJointNet):
         else:
             raise NotImplementedError(f"Unknown activation layer type: {act}")
 
-        if joint_mode == 'add':
+        if join_mode == 'add':
             if hdim == -1:
-                hdim = max(odim_decoder, odim_encoder)
+                hdim = max(odim_predictor, odim_encoder)
             self.fc_enc = nn.Linear(odim_encoder, hdim)
-            self.fc_dec = nn.Linear(odim_decoder, hdim)
+            self.fc_dec = nn.Linear(odim_predictor, hdim)
             self.fc = nn.Sequential(
                 act_layer,
                 nn.Linear(hdim, num_classes)
             )
-        elif joint_mode == 'cat':
+        elif join_mode == 'cat':
             self.fc_enc = None
             self.fc_dec = None
             self.fc = nn.Sequential(
                 act_layer,
-                nn.Linear(odim_encoder + odim_decoder, num_classes)
+                nn.Linear(odim_encoder + odim_predictor, num_classes)
             )
         else:
-            raise RuntimeError(f"Unknown mode for joint net: {joint_mode}")
+            raise RuntimeError(f"Unknown mode for joint net: {join_mode}")
 
-        self._mode = joint_mode
+        self._mode = join_mode
         self._V = num_classes
 
-    def impl_forward(self, encoder_output: Union[torch.Tensor, PackedSequence], decoder_output: Union[torch.Tensor, PackedSequence]) -> torch.FloatTensor:
+    def impl_forward(self, encoder_output: Union[torch.Tensor, PackedSequence], predictor_output: Union[torch.Tensor, PackedSequence]) -> torch.FloatTensor:
 
-        if isinstance(encoder_output, PackedSequence) and isinstance(decoder_output, PackedSequence):
+        if isinstance(encoder_output, PackedSequence) and isinstance(predictor_output, PackedSequence):
             if self._mode == 'add':
                 # compact memory mode, gather the tensors without padding
                 encoder_output.set(self.fc_enc(encoder_output.data))
-                decoder_output.set(self.fc_dec(decoder_output.data))
+                predictor_output.set(self.fc_dec(predictor_output.data))
             else:
                 dim_enc, dim_dec = encoder_output.data.size(
-                    -1), decoder_output.data.size(-1)
+                    -1), predictor_output.data.size(-1)
                 encoder_output.set(torch.nn.functional.pad(
                     encoder_output.data, (0, dim_dec)))
-                decoder_output.set(torch.nn.functional.pad(
-                    decoder_output.data, (dim_enc, 0)))
+                predictor_output.set(torch.nn.functional.pad(
+                    predictor_output.data, (dim_enc, 0)))
 
             # shape: (\sum_{Ti(Ui+1)}, V)
-            expanded_out = encoder_output + decoder_output
+            expanded_out = encoder_output + predictor_output
 
-        elif isinstance(encoder_output, torch.Tensor) and isinstance(decoder_output, torch.Tensor):
+        elif isinstance(encoder_output, torch.Tensor) and isinstance(predictor_output, torch.Tensor):
 
-            assert (encoder_output.dim() == 3 and decoder_output.dim() == 3) or (
-                encoder_output.dim() == 1 and decoder_output.dim() == 1)
+            assert (encoder_output.dim() == 3 and predictor_output.dim() == 3) or (
+                encoder_output.dim() == 1 and predictor_output.dim() == 1)
 
             if self._mode == 'add':
                 encoder_output = self.fc_enc(encoder_output)
-                decoder_output = self.fc_dec(decoder_output)
+                predictor_output = self.fc_dec(predictor_output)
 
             if encoder_output.dim() == 3:
                 _, T, _ = encoder_output.size()
-                _, Up, _ = decoder_output.size()
+                _, Up, _ = predictor_output.size()
                 encoder_output = encoder_output.unsqueeze(2)
-                decoder_output = decoder_output.unsqueeze(1)
+                predictor_output = predictor_output.unsqueeze(1)
                 encoder_output = encoder_output.expand(-1, -1, Up, -1)
-                decoder_output = decoder_output.expand(-1, T, -1, -1)
+                predictor_output = predictor_output.expand(-1, T, -1, -1)
 
             if self._mode == 'add':
-                expanded_out = encoder_output + decoder_output
+                expanded_out = encoder_output + predictor_output
             else:
                 expanded_out = torch.cat(
-                    [encoder_output, decoder_output], dim=-1)
+                    [encoder_output, predictor_output], dim=-1)
 
         else:
             raise NotImplementedError(
-                "Output of encoder and decoder being fed into jointnet should be of same type. Expect (Tensor, Tensor) or (PackedSequence, PackedSequence), instead ({}, {})".format(type(encoder_output), type(decoder_output)))
+                "Output of encoder and predictor being fed into joint net should be of same type. Expect (Tensor, Tensor) or (PackedSequence, PackedSequence), instead ({}, {})".format(type(encoder_output), type(predictor_output)))
 
         return self.fc(expanded_out)
 
@@ -290,28 +290,28 @@ class HATNet(JointNet):
     def __init__(
             self,
             odim_encoder: int,
-            odim_decoder: int,
+            odim_predictor: int,
             num_classes: int,
             hdim: int = -1,
-            joint_mode: Literal['add', 'cat'] = 'add',
+            join_mode: Literal['add', 'cat'] = 'add',
             act: Literal['tanh', 'relu'] = 'tanh'):
-        super().__init__(odim_encoder, odim_decoder, num_classes,
-                         hdim=hdim, joint_mode=joint_mode, act=act)
+        super().__init__(odim_encoder, odim_predictor, num_classes,
+                         hdim=hdim, join_mode=join_mode, act=act)
         self._dist_blank = nn.LogSigmoid()
 
     @property
     def is_normalize_separated(self) -> bool:
         return False
 
-    def ilm_est(self, decoder_output: torch.Tensor):
+    def ilm_est(self, predictor_output: torch.Tensor):
         """ILM score estimation"""
         assert not self.training
-        if isinstance(decoder_output, PackedSequence):
-            decoder_output.set(self.fc_dec(decoder_output.data))
-            fc_out = decoder_output.data
+        if isinstance(predictor_output, PackedSequence):
+            predictor_output.set(self.fc_dec(predictor_output.data))
+            fc_out = predictor_output.data
 
-        elif isinstance(decoder_output, torch.Tensor):
-            fc_out = self.fc_dec(decoder_output)
+        elif isinstance(predictor_output, torch.Tensor):
+            fc_out = self.fc_dec(predictor_output)
 
         # compute log softmax over real labels
         fc_out = self.fc(fc_out)

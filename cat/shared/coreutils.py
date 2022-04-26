@@ -20,6 +20,19 @@ import torch.multiprocessing as mp
 from torch.nn.utils.rnn import pad_sequence
 
 
+# FIXME: following codes will be removed soon or later
+########## COMPATIBLE ###########
+def translate_prev_checkpoint(state_dict: OrderedDict) -> OrderedDict:
+    """Translate checkpoint of previous version of RNN-T so that it could be loaded with the new one."""
+    new_state_dict = OrderedDict()
+    for k, v in state_dict.items():
+        k = k.replace('decoder.', 'predictor.', 1).replace(
+            'joint.', 'joiner.', 1)
+        new_state_dict[k] = v
+    return new_state_dict
+#################################
+
+
 def check_parser(args: argparse.Namespace, expected_attrs: List[str]):
     unseen = []
     for attr in expected_attrs:
@@ -465,7 +478,17 @@ def load_checkpoint(model: Union[torch.nn.Module, torch.nn.parallel.DistributedD
             # remove the 'module.'
             new_state_dict[k[7:]] = v
         state_dict = new_state_dict
-    model.load_state_dict(state_dict)
+
+    try:
+        model.load_state_dict(state_dict)
+    except RuntimeError as re:
+        if "Error(s) in loading state_dict" in str(re):
+            model.load_state_dict(
+                translate_prev_checkpoint(state_dict)
+            )
+        else:
+            raise RuntimeError(str(re))
+    # model.load_state_dict(state_dict)
     return model
 
 

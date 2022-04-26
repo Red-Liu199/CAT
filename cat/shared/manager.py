@@ -214,7 +214,19 @@ class Manager(object):
                 f"> Initialize model from: {args.init_model}", args.gpu)
             checkpoint = torch.load(
                 args.init_model, map_location=f'cuda:{args.gpu}')  # type: OrderedDict
-            self.model.load_state_dict(checkpoint['model'])
+
+            try:
+                self.model.load_state_dict(checkpoint['model'])
+            except RuntimeError as re:
+                if "Error(s) in loading state_dict" in str(re):
+                    self.model.load_state_dict(
+                        coreutils.translate_prev_checkpoint(
+                            checkpoint['model'])
+                    )
+                else:
+                    raise RuntimeError(str(re))
+
+        del checkpoint
 
     def run(self, args: argparse.Namespace):
 
@@ -305,7 +317,16 @@ class Manager(object):
         r'Load checkpoint.'
 
         dist.barrier()
-        self.model.load_state_dict(checkpoint['model'])
+        try:
+            self.model.load_state_dict(checkpoint['model'])
+        except RuntimeError as re:
+            if "Error(s) in loading state_dict" in str(re):
+                self.model.load_state_dict(
+                    coreutils.translate_prev_checkpoint(checkpoint['model'])
+                )
+            else:
+                raise RuntimeError(str(re))
+
         self.scheduler.load_state_dict(checkpoint['scheduler'])
 
         # monitor is not required to load
