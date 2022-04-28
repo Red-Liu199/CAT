@@ -6,7 +6,7 @@
 
 from ..shared.data import (
     BalancedDistributedSampler,
-    StringEncodeCollateWrapper
+    PipeTokenize
 )
 from ..shared import tokenizer as tknz
 from . import scheduler
@@ -33,8 +33,7 @@ from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
 from torch.cuda.amp import autocast, GradScaler
 from torch.utils.tensorboard import SummaryWriter
-if torch.__version__ >= '1.8.0':
-    from torch.distributed.optim import ZeroRedundancyOptimizer
+from torch.distributed.optim import ZeroRedundancyOptimizer
 
 
 class Manager(object):
@@ -46,7 +45,14 @@ class Manager(object):
             func_build_model: Callable[[dict, argparse.Namespace], Union[nn.Module, nn.parallel.DistributedDataParallel]],
             func_train: Optional[Callable] = None,
             func_eval: Optional[Callable] = None,
-            extra_tracks: Union[str, List[str], None] = None):
+            extra_tracks: Union[str, List[str], None] = None,
+            _wds_hook: Callable[[wds.WebDataset], wds.WebDataset] = None):
+        """Initialize the manager for training.
+
+        _wds_hook (callable): for webdataset loading, the dataset would be loaded as
+            >>> # dataset is an instance of WebDataset
+            >>> dataset = _wds_hook(dataset)
+        """
         super().__init__()
 
         coreutils.check_parser(args, ['rank', 'gpu', 'workers', 'trset', 'devset', 'databalance',
@@ -77,24 +83,34 @@ class Manager(object):
             '''
             os.environ['RANK'] = str(dist.get_rank())
             os.environ['WORLD_SIZE'] = str(dist.get_world_size())
-            tr_set = (wds.WebDataset(
-                # expand expression first with braceexpand, then glob, e.g.
-                # "{a,b,c}/*.tar" -> ["a/*.tar", "b/*.tar", "c/*.tar"] -> ["a/1.tar", "a/2.tar", ...]
-                [f for p_expanded in braceexpand(args.trset)
-                 for f in glob.glob(p_expanded)],
-                shardshuffle=True,
-                nodesplitter=wds.shardlists.split_by_node)
+            tr_set = (
+                wds.WebDataset(
+                    # expand expression first with braceexpand, then glob, e.g.
+                    # "{a,b,c}/*.tar" -> ["a/*.tar", "b/*.tar", "c/*.tar"] -> ["a/1.tar", "a/2.tar", ...]
+                    [f for p_expanded in braceexpand(args.trset)
+                     for f in glob.glob(p_expanded)],
+                    shardshuffle=True,
+                    nodesplitter=wds.shardlists.split_by_node
+                )
                 # buffer size of shuffling
                 .shuffle(2000)
+                # decode the .tar file to normal data
                 .decode()
+                # extract data to original tuple
                 .to_tuple("mat.npy", "label.txt")
-                .batched(
-                    args.batch_size//dist.get_world_size(),
-                    collation_fn=StringEncodeCollateWrapper(
-                        tokenizer=tknz.load(args.tokenizer),
-                        collator=collate_fn),
-                    # set partial=False to avoid a partial batch, but would drop a few of data, see bellow disscussion.
-                    partial=False))
+                # convert raw text into tensor with tokenizer
+                .map(PipeTokenize(args.tokenizer))
+            )
+            if _wds_hook is not None:
+                # add some hook if needed, e.g. filter short seqs for CTC/CRF
+                tr_set = _wds_hook(tr_set)
+            tr_set = tr_set.batched(
+                args.batch_size//dist.get_world_size(),
+                collation_fn=collate_fn,
+                # set partial=False to avoid a partial batch, but would drop a few of data, see bellow disscussion.
+                partial=False
+            )
+
             args.batch_size = (args.batch_size //
                                dist.get_world_size()) * dist.get_world_size()
             trainloader = wds.WebLoader(
@@ -105,7 +121,7 @@ class Manager(object):
             '''
 
             # we don't know the size of dataset, just set a value large enough
-            args.n_steps = int(35000)
+            args.n_steps = 0
             train_sampler = None
         else:
             tr_set = Dataset(args.trset)

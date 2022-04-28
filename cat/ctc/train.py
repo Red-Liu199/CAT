@@ -12,13 +12,24 @@ from ..shared.data import (
 
 import os
 import argparse
-from collections import OrderedDict
 from typing import *
 
 import torch
 import torch.nn as nn
 import torch.distributed as dist
 from torch.cuda.amp import autocast
+
+
+def check_label_len_for_ctc(tupled_mat_label: Tuple[torch.FloatTensor, torch.LongTensor]):
+    """filter the short seqs for CTC/CRF"""
+    # NOTE:
+    #   1/4 subsampling is used for Conformer model defaultly
+    #   for other sampling ratios, you may need to modify the values
+    return (tupled_mat_label[0].shape[0] // 4 > tupled_mat_label[1].shape[0])
+
+
+def filter_hook(dataset):
+    return dataset.select(check_label_len_for_ctc)
 
 
 def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
@@ -34,7 +45,9 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
     manager = Manager(
         KaldiSpeechDataset,
         sortedPadCollateASR(flatten_target=True),
-        args, build_model
+        args,
+        func_build_model=build_model,
+        _wds_hook=filter_hook
     )
 
     # training
@@ -73,11 +86,11 @@ class AMTrainer(nn.Module):
         netout, lens_o = self.am(logits, input_lengths)
         netout = torch.log_softmax(netout, dim=-1)
 
+        labels = labels.cpu()
+        lens_o = lens_o.cpu()
+        label_lengths = label_lengths.cpu()
         if self.is_crf:
             assert self._crf_ctx is not None
-            labels = labels.cpu()
-            lens_o = lens_o.cpu()
-            label_lengths = label_lengths.cpu()
             with autocast(enabled=False):
                 loss = self.criterion(
                     netout.float(), labels.to(torch.int),

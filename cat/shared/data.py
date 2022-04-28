@@ -303,14 +303,16 @@ class sortedPadCollateASR():
     """
 
     def __init__(self, flatten_target: bool = False) -> None:
+        """
+        flatten_target (bool): flatten the target to be 1-dim, default False (2-dim)
+        """
         self._flatten_target = flatten_target
 
-    def __call__(self, batch):
-        if isinstance(batch[0][0], np.ndarray):
-            batch = [(torch.as_tensor(mat), torch.as_tensor(label))
-                     for mat, label in batch]
-        batches = [(mat, label, mat.size(0))
-                   for mat, label in batch]
+    def __call__(self, batch: List[Tuple[torch.FloatTensor, torch.IntTensor]]):
+        batches = [
+            (mat, label, mat.size(0))
+            for mat, label in batch
+        ]
         batch_sorted = sorted(batches, key=lambda item: item[2], reverse=True)
 
         mats = coreutils.pad_list([x[0] for x in batch_sorted])
@@ -474,20 +476,9 @@ def group_indices(args: Tuple[List[List[int]], List[int], int, int]):
     return idx_groups, p_id
 
 
-class StringEncodeCollateWrapper():
-    """A wrapper for ASR collator, accept input label in raw text and conduct decoding by given tokenizer."""
-
-    def __init__(
-            self,
-            tokenizer: AbsTokenizer,
-            collator: Callable[[List[Tuple[torch.FloatTensor, str]]], Tuple[torch.FloatTensor, torch.LongTensor, torch.LongTensor, torch.LongTensor]]) -> None:
+class PipeTokenize:
+    def __init__(self, tokenizer: AbsTokenizer) -> None:
         self._tokenizer = tokenizer
-        self._collator = collator
 
-    def __call__(self, minibatch: List[Tuple[torch.FloatTensor, str]]):
-        minibatch = [
-            (mat, torch.tensor(
-                self._tokenizer.encode(_string),
-                dtype=torch.long))
-            for mat, _string in minibatch]
-        return self._collator(minibatch)
+    def __call__(self, samples: Tuple[np.ndarray, str]) -> Tuple[np.ndarray, torch.LongTensor]:
+        return (torch.as_tensor(samples[0]), torch.LongTensor(self._tokenizer.encode(samples[1])))
