@@ -59,10 +59,14 @@ def cnt_we(gt: List[int], hy: List[int]) -> List[int]:
 
 
 class MWERTrainer(TransducerTrainer):
-    def __init__(self, beamdecoder: RNNTDecoder, *args, **kwargs):
+    def __init__(self, beamdecoder: RNNTDecoder, mle_weight: float, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.searcher = beamdecoder
         assert self._compact
+        assert not self._fused, f"RNN-T+MWER doesn't support fused mode yet."
+        assert isinstance(mle_weight, float)
+        # RNN-T loss weight for joint training
+        self.mle_weight = mle_weight
 
     def werloss(self, enc_out: torch.Tensor, frame_lens: torch.Tensor, targets: torch.Tensor, target_lens: torch.Tensor):
         """
@@ -72,11 +76,22 @@ class MWERTrainer(TransducerTrainer):
         target_lens : (N, )
         """
         # batched: (batchsize*beamsize, )
+        targets = targets.to(
+            device='cpu', dtype=torch.int32, non_blocking=True)
+        frame_lens = frame_lens.to(torch.int)
+        target_lens = target_lens.to(torch.int)
+        bs = enc_out.size(0)
         with torch.no_grad():
             istraining = self.training
             self.eval()
             self.requires_grad_(False)
             all_hypos = self.searcher.batching_rna(enc_out, frame_lens)
+            # filter the ground truth label
+            all_hypos = [
+                [hypo for hypo in list_hypos if hypo.pred[1:] !=
+                    tuple(targets[n, :target_lens[n]].tolist())]
+                for n, list_hypos in enumerate(all_hypos)
+            ]
             cnt_hypos = enc_out.new_tensor(
                 [len(list_hypos) for list_hypos in all_hypos], dtype=torch.long
             )
@@ -102,11 +117,6 @@ class MWERTrainer(TransducerTrainer):
             self.requires_grad_(True)
             self.train(istraining)
 
-        frame_lens = frame_lens.to(torch.int)
-        target_lens = target_lens.to(torch.int)
-        targets = targets.to(torch.int)
-
-        bs = enc_out.size(0)
         enc_out_expand = torch.cat(
             [
                 enc_out[n:n+1].expand(len(batched_tokens[n]), -1, -1)
@@ -118,10 +128,11 @@ class MWERTrainer(TransducerTrainer):
                 for n in range(bs)
             ], dim=0)
 
-        gt = sum([[
-            ' '.join(str(x) for x in targets[n, :target_lens[n]].cpu(
-            ).tolist())]*len(batched_tokens[n]) for n in range(bs)], []
-        )
+        gt = sum([
+            [' '.join(str(x) for x in targets[n, :target_lens[n]].tolist())] *
+            len(batched_tokens[n])
+            for n in range(bs)
+        ], [])
         batched_tokens = sum(batched_tokens, [])
         hy = [
             ' '.join(str(x) for x in hyps[1:])
@@ -131,7 +142,7 @@ class MWERTrainer(TransducerTrainer):
         del gt
         del hy
         pred_in = coreutils.pad_list([
-            targets.new_tensor(hypo)
+            targets.new_tensor(hypo, device=enc_out.device)
             for hypo in batched_tokens
         ])
         squeezed_targets = targets.new_tensor(
@@ -142,23 +153,16 @@ class MWERTrainer(TransducerTrainer):
         pred_out, _ = self.predictor(
             pred_in, input_lengths=expd_target_lens+1)
 
-        joinout, squeezed_targets = self.compute_join(
+        joinout, squeezed_targets, enc_out_lens = self.compute_join(
             enc_out_expand, pred_out, squeezed_targets, enc_out_lens, expd_target_lens)
 
         with autocast(enabled=False):
-            if self._fused:
-                nll = RNNTFusedLoss(
-                    joinout.float(), squeezed_targets,
-                    enc_out_lens.to(device=joinout.device),
-                    expd_target_lens.to(device=joinout.device)
-                )
-            else:
-                nll = RNNTLoss(
-                    joinout.float(), squeezed_targets,
-                    enc_out_lens.to(device=joinout.device),
-                    expd_target_lens.to(device=joinout.device),
-                    gather=True, compact=True
-                )
+            nll = RNNTLoss(
+                joinout.float(), squeezed_targets,
+                enc_out_lens.to(device=joinout.device),
+                expd_target_lens.to(device=joinout.device),
+                gather=True, compact=True
+            )
 
         # nll: (bs*n_hyps, )
         nll = (-nll).exp()
@@ -168,16 +172,35 @@ class MWERTrainer(TransducerTrainer):
         den = den[torch.repeat_interleave(cnt_hypos)]
         return torch.sum(nll / den * penalty) / bs
 
-    def forward(self, inputs: torch.FloatTensor, targets: torch.LongTensor, input_lengths: torch.LongTensor, target_lengths: torch.LongTensor) -> torch.FloatTensor:
+    def forward(self, inputs: torch.FloatTensor, targets: torch.LongTensor, in_lens: torch.LongTensor, target_lens: torch.LongTensor) -> torch.FloatTensor:
 
-        enc_out, enc_out_len = self.encoder(inputs, input_lengths)
+        enc_out, enc_out_lens = self.encoder(inputs, in_lens)
 
-        return self.werloss(
+        loss_mbr = self.werloss(
             enc_out,
-            enc_out_len,
+            enc_out_lens,
             targets,
-            target_lengths
+            target_lens
         )
+        if self.mle_weight == 0.:
+            return loss_mbr
+        else:
+            pred_out = self.predictor(torch.nn.functional.pad(
+                targets, (1, 0), value=self.bos_id))[0]
+
+            joinout, targets, enc_out_lens = self.compute_join(
+                enc_out, pred_out, targets, enc_out_lens, target_lens
+            )
+            with autocast(enabled=False):
+                loss_mle = RNNTLoss(
+                    joinout.float(), targets.to(dtype=torch.int32),
+                    enc_out_lens.to(device=joinout.device,
+                                    dtype=torch.int32),
+                    target_lens.to(
+                        device=joinout.device, dtype=torch.int32),
+                    reduction='mean', gather=True, compact=self._compact
+                )
+            return loss_mbr + self.mle_weight * loss_mle
 
 
 def build_model(cfg: dict, args: argparse.Namespace, dist: bool = True) -> MWERTrainer:
@@ -186,6 +209,10 @@ def build_model(cfg: dict, args: argparse.Namespace, dist: bool = True) -> MWERT
         MWER:
             decoder:
                 ...
+            trainer:
+                ...
+        # basic transducer config
+        ...
 
     """
     assert 'MWER' in cfg, f"missing 'MWER' in field:"
@@ -203,6 +230,7 @@ def build_model(cfg: dict, args: argparse.Namespace, dist: bool = True) -> MWERT
         encoder=encoder,
         predictor=predictor,
         joiner=joiner,
+        **cfg['MWER']['trainer'],
         **cfg['transducer'])
 
     if not dist:

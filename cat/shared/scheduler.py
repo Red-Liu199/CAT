@@ -10,8 +10,7 @@ import numpy as np
 from collections import OrderedDict
 from typing import *
 
-if torch.__version__ >= '1.8.0':
-    from torch.distributed.optim import ZeroRedundancyOptimizer
+from torch.distributed.optim import ZeroRedundancyOptimizer
 
 
 def SetupOptim(type_optim: str, paramlist: Iterable[torch.nn.parameter.Parameter], use_zero: bool = False, **kwargs) -> Union[torch.optim.Optimizer, ZeroRedundancyOptimizer]:
@@ -68,13 +67,10 @@ class Scheduler(object):
         self.lr_init = self.lr_cur
 
     @property
-    def lr_cur(self):
+    def lr_cur(self) -> float:
         return self.optimizer.param_groups[0]['lr']
 
-    def update_lr(self, *args, **kwargs):
-        return None
-
-    def _adjust_lr_(self, lr: float):
+    def _adjust_lr(self, lr: float):
         for param_group in self.optimizer.param_groups:
             param_group['lr'] = lr
 
@@ -88,6 +84,10 @@ class Scheduler(object):
         return output
 
     def load_state_dict(self, ckpt: OrderedDict, optim_only: bool = False):
+        """Load state dict from checkpoint.
+
+        By setting `optim_only`, it allows to update the configurations of scheduler
+        """
         if optim_only:
             self.optimizer.load_state_dict(ckpt['optimizer'])
             return None
@@ -100,11 +100,19 @@ class Scheduler(object):
             else:
                 setattr(self, name, ckpt[name])
 
-    def impl_step(self, metric) -> Tuple[int, str]:
+    def update_lr_step(self, global_steps: int):
+        """Method for updating the LR by steps. Defaultly do nothing."""
+        return None
+
+    def impl_step(self, metric) -> Tuple[Literal[0, 1, 2], str]:
+        """Implementation of scheduler updating according to metric from evaluation.
+        This function will be invoked by `scheduler.step()`
+        """
         raise NotImplementedError
 
-    def step(self, global_epoch: int, metric) -> Tuple[int, str]:
-        """Optimizer step
+    def step(self, global_epoch: int, metric) -> Tuple[Literal[0, 1, 2], str]:
+        """Optimizer step.
+        Update the scheduler by every evaluation, useful for early-stop.
 
         Args:
             global_epoch (int): the global epoch (begins from 1)
@@ -126,6 +134,8 @@ class Scheduler(object):
 
 
 class SchedulerEarlyStop(Scheduler):
+    """A scheduler wrapper for early-stop ones."""
+
     def __init__(
             self,
             optimizer_configs,
@@ -142,8 +152,7 @@ class SchedulerEarlyStop(Scheduler):
         self.gamma = gamma
         self.count_worse = 0
 
-    def impl_step(self, metric):
-
+    def impl_step(self, metric) -> Tuple[Literal[0, 1, 2], str]:
         state = 0
         info = ''
         if self.epoch_cur <= self.epoch_min:
@@ -162,7 +171,7 @@ class SchedulerEarlyStop(Scheduler):
                 if lr < self.lr_stop:
                     state = 2
                 else:
-                    self._adjust_lr_(lr)
+                    self._adjust_lr(lr)
                     self.count_worse = 0
 
         info = "Epoch: [{}@{}] | best={:.2f} | current={:.2f} | worse_count={} | lr={:.2e}".format(
@@ -172,6 +181,8 @@ class SchedulerEarlyStop(Scheduler):
 
 
 class SchedulerFixedStop(Scheduler):
+    """A scheduler wrapper for ones stopping at fixed epochs."""
+
     def __init__(
             self,
             optimizer_configs,
@@ -181,7 +192,8 @@ class SchedulerFixedStop(Scheduler):
         super().__init__(optimizer_configs, paramlist, reverse_metric_direc)
         self.epoch_max = epoch_max
 
-    def custom_update(self):
+    def _impl_update_lr_epoch(self):
+        """Implementation of your custom LR update method. Defaultly do nothing."""
         return None
 
     def impl_step(self, metric):
@@ -192,7 +204,7 @@ class SchedulerFixedStop(Scheduler):
             self.best_metric = metric
             state = 1
 
-        self.custom_update()
+        self._impl_update_lr_epoch()
 
         info = "Epoch: [{}/{}] | best={:.2f} | current={:.2f} | lr={:.2e}".format(
             self.epoch_cur, self.epoch_max, self.best_metric, metric, self.lr_cur)
@@ -232,7 +244,7 @@ class SchedulerWarmupMileStone(SchedulerEarlyStop):
         if self.lr_init != refer_lr:
             print("Warning: the learning set in optimizer and `refer_lr` are different.")
             self.lr_init = refer_lr
-            self._adjust_lr_(refer_lr)
+            self._adjust_lr(refer_lr)
 
         self.epoch_warmup = warmup_epoch
         self.lr_addon = (self.max_lr-self.lr_init)/warmup_epoch
@@ -244,7 +256,7 @@ class SchedulerWarmupMileStone(SchedulerEarlyStop):
                 self.best_metric = metric
                 state = 1
             cur_lr = self.lr_cur
-            self._adjust_lr_(cur_lr+self.lr_addon)
+            self._adjust_lr(cur_lr+self.lr_addon)
             info = "Epoch: [{}/{}] | best={:.2f} | current={:.2f} | lr={:.2e}".format(
                 self.epoch_cur, self.epoch_warmup, self.best_metric, metric, self.lr_cur)
             return state, info
@@ -272,18 +284,13 @@ class SchedulerTransformer(SchedulerFixedStop):
         assert warmup_steps > 0
         self.lr_init = peak_factor/math.sqrt(d_model)
         self._div_warmup_steps = 1./math.sqrt(warmup_steps)/warmup_steps
-        self.update_lr(1)
+        self.update_lr_step(1)
 
-    def update_lr(self, global_step: int):
-        """Update the learning rate with global step"""
-        step = float(global_step)
+    def update_lr_step(self, global_steps: int):
+        step = float(global_steps)
         lr = self.lr_init * min(1./math.sqrt(step),
                                 step*self._div_warmup_steps)
-        self._adjust_lr_(lr)
-
-    def custom_update(self):
-        """Do nothing"""
-        return None
+        self._adjust_lr(lr)
 
 
 class SchedulerTransformerEarlyStop(SchedulerEarlyStop):
@@ -311,15 +318,14 @@ class SchedulerTransformerEarlyStop(SchedulerEarlyStop):
         self._div_warmup_steps = 1./math.sqrt(warmup_steps)/warmup_steps
         self.step_cur = 0
         self.warmup_steps = warmup_steps
-        self.update_lr(1)
+        self.update_lr_step(1)
 
-    def update_lr(self, global_step: int):
-        """Update the learning rate with global step"""
-        self.step_cur = global_step
-        step = float(global_step)
+    def update_lr_step(self, global_steps: int):
+        self.step_cur = global_steps
+        step = float(global_steps)
         lr = self.lr_init * min(1./math.sqrt(step),
                                 step*self._div_warmup_steps)
-        self._adjust_lr_(lr)
+        self._adjust_lr(lr)
 
     def impl_step(self, metric):
         if self.step_cur <= self.warmup_steps:
@@ -337,6 +343,10 @@ class SchedulerTransformerEarlyStop(SchedulerEarlyStop):
 
 
 class SchedulerIterAnnealing(SchedulerFixedStop):
+    """
+    (Linear) annealing the LR by every evaluation time.
+    """
+
     def __init__(
             self,
             optimizer_configs,
@@ -348,12 +358,14 @@ class SchedulerIterAnnealing(SchedulerFixedStop):
         assert decay_factor > 0. and decay_factor < 1. and epoch_max > 0
         self.decay = decay_factor
 
-    def custom_update(self):
+    def _impl_update_lr_epoch(self):
         lr = self.lr_init * (self.decay ** self.epoch_cur)
-        self._adjust_lr_(lr)
+        self._adjust_lr(lr)
 
 
 class SchedulerCosineAnnealing(SchedulerFixedStop):
+    """Annealing the LR with cosine function (and period) in epoch level."""
+
     def __init__(
             self,
             optimizer_configs,
@@ -374,11 +386,11 @@ class SchedulerCosineAnnealing(SchedulerFixedStop):
         self.lr_min = lr_min
         self.lr_max = self.lr_init
 
-    def custom_update(self):
+    def _impl_update_lr_epoch(self):
         epoch_idx = self.epoch_cur - 1
         lr_max = (self.lr_max *
                   self.decay**(epoch_idx//self.period))
 
         lr = self.lr_min + 0.5 * (lr_max - self.lr_min) * (
             1 + np.cos((epoch_idx % self.period)/self.period * np.pi))
-        self._adjust_lr_(lr)
+        self._adjust_lr(lr)

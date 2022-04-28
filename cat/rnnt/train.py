@@ -160,7 +160,7 @@ class TransducerTrainer(nn.Module):
                 joinout = joinout[:, indices_sampled].log_softmax(dim=-1)
         else:
             joinout = self.joiner(enc_out, pred_out)
-        return joinout, targets.to(torch.int)
+        return joinout, targets.to(torch.int), enc_out_lens
 
     def forward(self, inputs: torch.FloatTensor, targets: torch.LongTensor, in_lens: torch.LongTensor, target_lens: torch.LongTensor) -> torch.FloatTensor:
 
@@ -168,7 +168,7 @@ class TransducerTrainer(nn.Module):
         pred_out = self.predictor(torch.nn.functional.pad(
             targets, (1, 0), value=self.bos_id))[0]
 
-        joinout, targets = self.compute_join(
+        joinout, targets, enc_out_lens = self.compute_join(
             enc_out, pred_out, targets, enc_out_lens, target_lens
         )
         loss = 0.0

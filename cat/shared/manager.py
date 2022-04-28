@@ -215,7 +215,10 @@ class Manager(object):
                 f"> Initialize model from: {args.init_model}", args.gpu)
             checkpoint = torch.load(
                 args.init_model, map_location=f'cuda:{args.gpu}')  # type: OrderedDict
-
+            if 'scheduler' in checkpoint:
+                # load the optimizer params
+                self.scheduler.load_state_dict(
+                    checkpoint['scheduler'], optim_only=True)
             try:
                 self.model.load_state_dict(checkpoint['model'])
             except RuntimeError as re:
@@ -295,7 +298,9 @@ class Manager(object):
         `PATH/name.pt`, or `name(.pt)` if `PATH` is empty.
         """
 
-        if torch.__version__ > '1.8.0' and isinstance(self.scheduler.optimizer, ZeroRedundancyOptimizer):
+        if isinstance(self.scheduler.optimizer, ZeroRedundancyOptimizer):
+            # the ZeroRedundancyOptimizer shards the optimizer into processes,
+            # so we need to collect them to save on the disk.
             self.scheduler.optimizer.consolidate_state_dict(0)
 
         if self.rank != 0 or self.DEBUG:
@@ -471,7 +476,7 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
 
             manager.step += 1
             global_step = manager.step
-            scheduler.update_lr(global_step)
+            scheduler.update_lr_step(global_step)
 
             # average for logging, since we divide loss by fold for backward,
             # here we multiply fold back for logging
