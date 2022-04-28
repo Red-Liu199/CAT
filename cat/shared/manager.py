@@ -279,7 +279,8 @@ class Manager(object):
                     metrics = metrics[0]
 
                 if args.rank == 0:
-                    self.writer.add_scalar('loss/dev', metrics, n_eval)
+                    self.writer.add_scalar('loss/dev', metrics, self.step)
+                    self.monitor.update('eval:loss', (metrics, self.step))
 
                 state = self.scheduler.step(n_eval, metrics)
                 self.model.train()
@@ -294,8 +295,7 @@ class Manager(object):
                 self.save(checkpoint)
                 if self.rank == 0 and not self.DEBUG:
                     self.monitor.visualize(args.dir)
-                    # skip exporting, since the monitor exported with visualize() automatically.
-                    # self.monitor.export()
+                    self.monitor.export()
                     self.cm.appendinfo(self.epoch, self.step,
                                        metrics, self.scheduler.lr_cur, checkpoint)
 
@@ -539,8 +539,8 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
 
                 # update monitor
                 manager.monitor.update({
-                    'train:loss': tolog['loss'],
-                    'train:lr': tolog['lr']
+                    'train:loss': (tolog['loss'], global_step),
+                    'train:lr': (tolog['lr'], global_step)
                 })
 
             if args.verbose:
@@ -615,7 +615,6 @@ def evaluate(testloader, args: argparse.Namespace, manager: Manager) -> float:
         total_loss += real_loss.item()
 
     avg_loss = total_loss/cnt_seq
-    manager.monitor.update('eval:loss', avg_loss)
 
     return avg_loss
 

@@ -17,14 +17,15 @@ import numpy as np
 import matplotlib.pyplot as plt
 from typing import *
 
-FILE_WRITER = r"training.summary"
+FILE_WRITER = r"training.smr"
 BASE_METRIC = ['train:loss', 'train:lr', 'eval:loss']
 
 
 class BaseSummary():
     def __init__(self, src: dict = None) -> None:
         if src is None:
-            self._values = []   # type: List[Any]
+            self._step = []     # type: List[int]
+            self._val = []   # type: List[Any]
             self._time = []     # type: List[float]
             self._cnt = 0
         else:
@@ -35,41 +36,35 @@ class BaseSummary():
         return self.dump()
 
     def dump(self) -> dict:
-        return {
-            'val': self._values,
-            'time': self._time,
-            'cnt': self._cnt
-        }
+        return self.__dict__
 
     def load(self, src: dict):
-        self._values = src['val']
-        self._time = src['time']
-        self._cnt = src['cnt']
+        self.__dict__.update(src)
 
-    def update(self, value: Any):
-        self._values.append(value)
-        self._time.append(time.time())
+    def update(self, value: Any, step: int = -1):
         self._cnt += 1
+        if step == -1:
+            self._step.append(self._cnt)
+        else:
+            self._step.append(step)
+        self._val.append(value)
+        self._time.append(time.time())
 
-    def merge(self, appd_summary):
-        if self._cnt > 0 and appd_summary._cnt > 0:
-            if self._time[-1] > appd_summary._time[0]:
-                raise RuntimeError(
-                    f"Trying to merge conflict Summary: s0_end > s1_beg: {self._time[-1]} > {appd_summary._time[0]}")
-
-        self._time += appd_summary._time
-        self._values += appd_summary._values
-        self._cnt += appd_summary._cnt
+    def merge(self, apd_smr: "BaseSummary"):
+        for k in self.__dict__.keys():
+            self.__dict__[k] += apd_smr.__dict__[k]
 
 
 class MonitorWriter():
     '''Monitor writer
-
-    Args:
-        path (str): directory or path to resuming file.
     '''
 
-    def __init__(self, path: str = './') -> None:
+    def __init__(self, path: str = FILE_WRITER) -> None:
+        """
+        Args:
+            path (str): directory or path to resuming file.
+                If no such file exists, will create one at export().
+        """
         if os.path.isfile(path):
             # assume path is file-like
             self.load(path)
@@ -97,13 +92,14 @@ class MonitorWriter():
                 continue
             self.summaries[m] = BaseSummary()
 
-    def update(self, name: Union[str, dict], value: Any = None):
+    def update(self, name: Union[str, Dict[str, Tuple[Any, int]]], value: Optional[Tuple[Any, int]] = None):
         """update summary writer
 
         Example:
-            >>> writer.update('loss', 0.1)  # one per invoking
+            >>> # update 'loss' at step 1 with value 0.1
+            >>> writer.update('loss', (0.1, 1))  # one per invoking
             # update a batch of values
-            >>> writer.update({'loss': 0.1, 'acc': 0.5})
+            >>> writer.update({'loss': (0.1, 1), 'acc': (0.5, 1)})
         """
         if value is None:
             assert isinstance(
@@ -116,24 +112,23 @@ class MonitorWriter():
             assert isinstance(
                 metric, str), f"expect metric type to be str, instead of {type(metric)}"
             assert metric in self.summaries, f"try to update {metric}, but expected one of {list(self.summaries.keys())}"
-            self.summaries[metric].update(val)
+            self.summaries[metric].update(*val)
 
-    def empty(self):
+    def empty(self, keep_keys: bool = False):
         metrics = list(self.summaries.keys())
         del self.summaries
         self.summaries = {}
-        for m in metrics:
-            self.addWriter(m)
+        if keep_keys:
+            for m in metrics:
+                self.addWriter(m)
 
     def state_dict(self) -> OrderedDict:
-        return OrderedDict([
-            ('path', self._default_path),
-            ('summaries', {metric: smr.dump()
-             for metric, smr in self.summaries.items()})
-        ])
+        return OrderedDict(
+            (metric, smr.data)
+            for metric, smr in self.summaries.items()
+        )
 
     def load_state_dict(self, state_dict: OrderedDict):
-        self._default_path = state_dict['path']
         self.summaries = {}
         for m, smr in state_dict['summaries'].items():
             self.summaries[m] = BaseSummary(smr)
@@ -147,18 +142,15 @@ class MonitorWriter():
             path = os.path.join(path, FILE_WRITER)
 
         if os.path.isfile(path):
-            prev_writer = MonitorWriter(path)
-            prev_writer.merge(self)
-            writer = prev_writer
+            writer = MonitorWriter(path)
+            writer.merge(self)
         else:
             writer = self
-            prev_writer = None
 
         with open(path, 'wb') as fo:
             pickle.dump(writer.state_dict(), fo)
 
-        del prev_writer
-        self.empty()
+        self.empty(keep_keys=True)
 
     def load(self, path: str = None):
         """load writer, if path is None, load from self._default_path"""
@@ -191,7 +183,6 @@ class MonitorWriter():
                     self.summaries[m].merge(appd_writer.summaries[m])
 
     def visualize(self, fig_path: str = None) -> str:
-        self.export()
         return plot_monitor(self._default_path, o_path=fig_path)
 
 
