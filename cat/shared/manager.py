@@ -476,12 +476,16 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
     t_last_batch = time.time()
     quit_flag = torch.tensor(0, device=args.gpu)
     cnt_step_update = 0
-    if args.check_freq == -1:
-        tt_step = fold*args.n_steps
-    else:
-        tt_step = fold*args.check_freq
-    for i, minibatch in tqdm(enumerate(trainloader), desc=f'Epoch {manager.epoch} | train',
-                             unit='batch', total=tt_step, disable=(args.gpu != 0 or args.verbose), leave=False):
+
+    p_bar = tqdm(
+        enumerate(trainloader),
+        desc=f'Epoch {manager.epoch} | train',
+        unit='batch',
+        total=fold*args.n_steps,
+        disable=(args.gpu != 0 or args.verbose),
+        leave=False
+    )
+    for i, minibatch in p_bar:
         dist.all_reduce(quit_flag, op=dist.ReduceOp.MAX)
         if quit_flag:
             # update n_steps, since we don't know how many steps there are with large dataset mode.
@@ -552,6 +556,7 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
                 t_last_step = time.time()
 
             if args.check_freq != -1 and (manager.step % args.check_freq) == 0:
+                p_bar.clear()
                 yield None
 
             # reset accumulated loss
@@ -573,6 +578,7 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
     manager.step_by_last_epoch += cnt_step_update
     if args.check_freq == -1:
         yield
+    del p_bar
     return
 
 
