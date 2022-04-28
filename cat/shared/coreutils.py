@@ -8,6 +8,7 @@ import os
 import json
 import heapq
 import uuid
+import glob
 import argparse
 import numpy as np
 from collections import OrderedDict
@@ -271,8 +272,8 @@ def basic_trainer_parser(prog: str = '', training: bool = True,  isddp: bool = T
                             help="Configure to debug settings, would overwrite most of the options.")
         parser.add_argument("--verbose", action="store_true",
                             help="Configure to print out more detailed info.")
-        parser.add_argument("--checkall", action="store_true",
-                            help="Save all checkpoints instead only the recent one.")
+        parser.add_argument("--check-freq", type=int, default=-1,
+                            help="Interval of checkpoints by steps (# of minibatches). Default: -1 (by epoch).")
 
         parser.add_argument("--trset", type=str, default=None,
                             help="Location of training data. Default: <data>/[pickle|hdf5]/tr.[pickle|hdf5]")
@@ -455,7 +456,7 @@ def setup_path(args: argparse.Namespace):
     setattr(args, 'checksdir', checksdir)
     setattr(args, 'logsdir', logsdir)
     if not args.debug and args.resume is None:
-        if os.listdir(checksdir) != []:
+        if glob.glob(os.path.join(args.checksdir, "*.pt")) != []:
             raise FileExistsError(
                 f"{args.checksdir} is not empty!")
 

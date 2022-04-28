@@ -1332,7 +1332,7 @@
                                         "type": "number",
                                         "default": 0
                                     },
-                                    "epoch_max": {
+                                    "iter_max": {
                                         "type": "number"
                                     },
                                     "lr_min": {
@@ -1374,7 +1374,7 @@
                                         "type": "number",
                                         "default": 1e-05
                                     },
-                                    "epoch_min": {
+                                    "iter_min": {
                                         "type": "number"
                                     },
                                     "paramlist": {},
@@ -1401,7 +1401,7 @@
                                         "type": "boolean",
                                         "default": true
                                     },
-                                    "epoch_max": {
+                                    "iter_max": {
                                         "type": "number"
                                     },
                                     "paramlist": {},
@@ -1428,7 +1428,7 @@
                                         "type": "boolean",
                                         "default": true
                                     },
-                                    "epoch_max": {
+                                    "iter_max": {
                                         "type": "number"
                                     },
                                     "decay_factor": {
@@ -1462,7 +1462,7 @@
                                         "type": "number",
                                         "default": 1.0
                                     },
-                                    "epoch_max": {
+                                    "iter_max": {
                                         "type": "number"
                                     },
                                     "warmup_steps": {
@@ -1560,7 +1560,7 @@
                                     "refer_batch": {
                                         "type": "number"
                                     },
-                                    "warmup_epoch": {
+                                    "iter_warmup": {
                                         "type": "number"
                                     },
                                     "total_batch_size": {

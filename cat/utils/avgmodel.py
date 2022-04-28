@@ -9,16 +9,17 @@ usage:
     python utils/avgmodel.py -h
 """
 
-from cat.shared.monitor import MonitorWriter
+from cat.shared.manager import F_CHECKLIST, CheckpointManager
 
+import os
 import argparse
 import collections
-import os
+from typing import Literal, List
 
 import torch
 
 
-def average_checkpoints(inputs):
+def average_checkpoints(inputs: List[str]):
     """Loads checkpoints from inputs and returns a model with averaged weights.
 
     Args:
@@ -77,19 +78,29 @@ def average_checkpoints(inputs):
     return new_state
 
 
-def find_n_best(fdir: str, n: int):
+def select_checkpoint(fdir: str, n: int = -1, mode: Literal['best', 'last', 'slicing'] = 'best', _slicing: tuple = None):
 
-    temp_writer = MonitorWriter()
-    # FIXME : this is hard-coded
-    temp_writer.load(fdir.replace('checks', 'logs'))
-    if 'eval:loss' not in temp_writer.summaries:
-        raise RuntimeError("Could not locate the n-best checkpoint.")
+    if os.path.isfile(fdir):
+        cm = CheckpointManager(fdir)
+    elif os.path.isdir(fdir):
+        cm = CheckpointManager(os.path.join(fdir, F_CHECKLIST))
+    else:
+        raise RuntimeError(f"'{fdir}' is neither a file or a folder.")
 
-    metric = [(i+1, _m)
-              for i, _m in enumerate(temp_writer['eval:loss']._values)]
+    checklist = [(path, check['metric']) for path, check in cm.content.items()]
 
-    metric = sorted(metric, key=lambda item: item[1])[:n]
-    return [os.path.join(fdir, f"checkpoint.{idx:03}.pt") for idx, _ in metric]
+    if mode == 'best':
+        assert n > 0
+        assert n <= len(checklist)
+        checklist = sorted(checklist, key=lambda x: x[1])[:n]
+    elif mode == 'last':
+        assert n > 0
+        assert n <= len(checklist)
+        checklist = checklist[-n:]
+    else:
+        assert _slicing is not None
+        checklist = checklist[_slicing[0]:_slicing[1]]
+    return [path for path, _ in checklist]
 
 
 def main():
@@ -104,26 +115,26 @@ def main():
                         help='Write the new checkpoint containing the averaged weights to this path.')
     parser.add_argument("--num-best", type=int, help='If set, try to find checkpoint.xxx.pt with N best metric')
 
-    parser.add_argument("--num-epoch-checkpoints", type=int, help='If set, try to find checkpoint.xxx.pt int the path specified by input'
+    parser.add_argument("--num-checkpoints", type=int, help='If set, try to find checkpoint.xxx.pt int the path specified by input'
     "Set number of consecutive checkpoints to be average.")
     parser.add_argument("--upper-bound", type=int, help="Set upper bound checkpoint. E.g."
-    '--num-epoch-checkpoint=10 --upper-bound=50, checkpoints 41-50 would be averaged.')
+    '--num-checkpoint=10 --upper-bound=50, checkpoints 41-50 would be averaged.')
     # fmt: on
     args = parser.parse_args()
 
     if args.num_best is not None:
         assert os.path.isdir(args.inputs[0])
-        list_path = find_n_best(args.inputs[0], args.num_best)
+        list_path = select_checkpoint(args.inputs[0],  args.num_best)
         if args.output is None:
             args.output = os.path.join(
                 args.inputs[0], f'avg_best_{args.num_best}.pt')
     else:
         num = None
-        if args.num_epoch_checkpoints is not None:
-            num = args.num_epoch_checkpoints
+        if args.num_checkpoints is not None:
+            num = args.num_checkpoints
 
-        assert not ((args.upper_bound is None) ^ (args.num_epoch_checkpoints is None)
-                    ), "--upper-bound and --num-epoch-checkpoints are required together"
+        assert not ((args.upper_bound is None) ^ (args.num_checkpoints is None)
+                    ), "--upper-bound and --num-checkpoints are required together"
 
         list_path = []
         if num is None:
@@ -133,20 +144,16 @@ def main():
             upper = args.upper_bound
             fdir = args.inputs[0]
             assert os.path.isdir(fdir), f'--inputs={fdir} is not a directory.'
-            list_path = [os.path.join(
-                fdir, f'checkpoint.{x:03}.pt') for x in range(upper, upper-num, -1) if x >= 1]
+            list_path = select_checkpoint(
+                fdir, num, mode='slicing', _slicing=(upper-num+1, upper+1))
 
             if args.output is None:
                 args.output = os.path.join(
                     fdir, f'avg_{upper}_{num}.pt')
 
-    # reverse the order the checkpoints for the convenience of saving the log in last checkpoint
-    list_path = sorted(list_path, reverse=True)
     print("Averaging checkpoints:\n"+'\n'.join(list_path))
-
     new_state = average_checkpoints(list_path)
     torch.save(new_state, args.output)
-
     print("Finished writing averaged checkpoint to {}".format(args.output))
 
 

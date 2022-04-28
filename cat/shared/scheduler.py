@@ -61,7 +61,7 @@ class Scheduler(object):
 
         self.optimizer = SetupOptim(
             optimizer_configs['type'], paramlist, ('use_zero' in optimizer_configs) and optimizer_configs['use_zero'], **optimizer_configs['kwargs'])
-        self.epoch_cur = 0
+        self.iter_cur = 0
         self.best_metric = None
         self._reverse_ = reverse_metric_direc
         self.lr_init = self.lr_cur
@@ -104,18 +104,18 @@ class Scheduler(object):
         """Method for updating the LR by steps. Defaultly do nothing."""
         return None
 
-    def impl_step(self, metric) -> Tuple[Literal[0, 1, 2], str]:
+    def impl_step(self, metric) -> Literal[0, 1, 2]:
         """Implementation of scheduler updating according to metric from evaluation.
         This function will be invoked by `scheduler.step()`
         """
         raise NotImplementedError
 
-    def step(self, global_epoch: int, metric) -> Tuple[Literal[0, 1, 2], str]:
+    def step(self, cnt_iter: int, metric) -> Tuple[Literal[0, 1, 2], str]:
         """Optimizer step.
         Update the scheduler by every evaluation, useful for early-stop.
 
         Args:
-            global_epoch (int): the global epoch (begins from 1)
+            cnt_iter (int): # of iterations (begins from 1)
             metric (obj): the metric for evaluate the performance
 
         Returns: (state, info)
@@ -129,7 +129,7 @@ class Scheduler(object):
         if self.best_metric is None:
             self.best_metric = metric
 
-        self.epoch_cur = global_epoch
+        self.iter_cur = cnt_iter
         return self.impl_step(metric)
 
 
@@ -140,76 +140,68 @@ class SchedulerEarlyStop(Scheduler):
             self,
             optimizer_configs,
             paramlist: Iterable[torch.nn.parameter.Parameter],
-            epoch_min: int,
+            iter_min: int,
             lr_stop: float = 1e-5,
             num_ahead: int = 1,
             gamma: float = 0.1,
             reverse_metric_direc: bool = True):
         super().__init__(optimizer_configs, paramlist, reverse_metric_direc)
         self.lr_stop = lr_stop
-        self.epoch_min = epoch_min
+        self.iter_min = iter_min
         self.num_ahead = num_ahead
         self.gamma = gamma
-        self.count_worse = 0
+        self.cnt_worse = 0
 
-    def impl_step(self, metric) -> Tuple[Literal[0, 1, 2], str]:
+    def impl_step(self, metric) -> Literal[0, 1, 2]:
         state = 0
-        info = ''
-        if self.epoch_cur <= self.epoch_min:
+        if self.iter_cur <= self.iter_min:
             if not (self._reverse_ ^ (metric < self.best_metric)):
                 self.best_metric = metric
                 state = 1
         elif not (self._reverse_ ^ (metric < self.best_metric)):
             self.best_metric = metric
-            self.count_worse = 0
+            self.cnt_worse = 0
             state = 1
         else:
-            self.count_worse += 1
-            if self.count_worse >= self.num_ahead:
+            self.cnt_worse += 1
+            if self.cnt_worse >= self.num_ahead:
                 lr = self.lr_cur
                 lr *= self.gamma
                 if lr < self.lr_stop:
                     state = 2
                 else:
                     self._adjust_lr(lr)
-                    self.count_worse = 0
-
-        info = "Epoch: [{}@{}] | best={:.2f} | current={:.2f} | worse_count={} | lr={:.2e}".format(
-            self.epoch_cur, self.epoch_min, self.best_metric, metric, self.count_worse, self.lr_cur)
-
-        return state, info
+                    self.cnt_worse = 0
+        return state
 
 
 class SchedulerFixedStop(Scheduler):
-    """A scheduler wrapper for ones stopping at fixed epochs."""
+    """A scheduler wrapper for ones stopping at fixed iterations."""
 
     def __init__(
             self,
             optimizer_configs,
             paramlist: Iterable[torch.nn.parameter.Parameter],
-            epoch_max: int,
+            iter_max: int,
             reverse_metric_direc: bool = True):
         super().__init__(optimizer_configs, paramlist, reverse_metric_direc)
-        self.epoch_max = epoch_max
+        self.iter_max = iter_max
 
-    def _impl_update_lr_epoch(self):
+    def _impl_update_lr_iter(self):
         """Implementation of your custom LR update method. Defaultly do nothing."""
         return None
 
     def impl_step(self, metric):
         state = 0
-        if self.epoch_cur >= self.epoch_max:
+        if self.iter_cur >= self.iter_max:
             state = 2
         elif not (self._reverse_ ^ (metric < self.best_metric)):
             self.best_metric = metric
             state = 1
 
-        self._impl_update_lr_epoch()
+        self._impl_update_lr_iter()
 
-        info = "Epoch: [{}/{}] | best={:.2f} | current={:.2f} | lr={:.2e}".format(
-            self.epoch_cur, self.epoch_max, self.best_metric, metric, self.lr_cur)
-
-        return state, info
+        return state
 
 
 class SchedulerWarmupMileStone(SchedulerEarlyStop):
@@ -223,7 +215,7 @@ class SchedulerWarmupMileStone(SchedulerEarlyStop):
             optimizer_configs,
             paramlist: Iterable[torch.nn.parameter.Parameter],
             total_batch_size: int,
-            warmup_epoch: int,
+            iter_warmup: int,
             refer_batch: int,
             refer_lr: float = 0.,
             lr_stop: float = 1e-5,
@@ -236,7 +228,7 @@ class SchedulerWarmupMileStone(SchedulerEarlyStop):
             refer_lr = self.lr_init
 
         assert total_batch_size > 0
-        assert warmup_epoch > 0
+        assert iter_warmup > 0
         assert refer_batch > 0
         assert refer_lr > 0
 
@@ -246,20 +238,18 @@ class SchedulerWarmupMileStone(SchedulerEarlyStop):
             self.lr_init = refer_lr
             self._adjust_lr(refer_lr)
 
-        self.epoch_warmup = warmup_epoch
-        self.lr_addon = (self.max_lr-self.lr_init)/warmup_epoch
+        self.iter_warmup = iter_warmup
+        self.lr_addon = (self.max_lr-self.lr_init)/iter_warmup
 
     def impl_step(self, metric):
-        if self.epoch_cur <= self.epoch_warmup:
+        if self.iter_cur <= self.iter_warmup:
             state = 0
             if not (self._reverse_ ^ (metric < self.best_metric)):
                 self.best_metric = metric
                 state = 1
             cur_lr = self.lr_cur
             self._adjust_lr(cur_lr+self.lr_addon)
-            info = "Epoch: [{}/{}] | best={:.2f} | current={:.2f} | lr={:.2e}".format(
-                self.epoch_cur, self.epoch_warmup, self.best_metric, metric, self.lr_cur)
-            return state, info
+            return state
         else:
             return super().impl_step(metric)
 
@@ -276,10 +266,10 @@ class SchedulerTransformer(SchedulerFixedStop):
             paramlist: Iterable[torch.nn.parameter.Parameter],
             d_model: int,
             warmup_steps: int,
-            epoch_max: int,
+            iter_max: int,
             peak_factor: float = 1.0,
             reverse_metric_direc: bool = True):
-        super().__init__(optimizer_configs, paramlist, epoch_max, reverse_metric_direc)
+        super().__init__(optimizer_configs, paramlist, iter_max, reverse_metric_direc)
         assert d_model > 0
         assert warmup_steps > 0
         self.lr_init = peak_factor/math.sqrt(d_model)
@@ -295,7 +285,7 @@ class SchedulerTransformer(SchedulerFixedStop):
 
 class SchedulerTransformerEarlyStop(SchedulerEarlyStop):
     """
-    Linear warmup by step + decay by step + early stop by epoch
+    Linear warmup by step + decay by step + early stop by iteration
     peak lr = peak_factor / sqrt(d_model * warpup_steps)
     """
 
@@ -332,8 +322,7 @@ class SchedulerTransformerEarlyStop(SchedulerEarlyStop):
             if not (self._reverse_ ^ (metric < self.best_metric)):
                 self.best_metric = metric
 
-            return 0, "Epoch: [{}] | best={:.2f} | current={:.2f} | lr={:.2e}".format(
-                self.epoch_cur, self.best_metric, metric, self.lr_cur)
+            return 0
         else:
             lr0 = self.lr_cur
             states = super().impl_step(metric)
@@ -352,45 +341,45 @@ class SchedulerIterAnnealing(SchedulerFixedStop):
             optimizer_configs,
             paramlist: Iterable[torch.nn.parameter.Parameter],
             decay_factor: float,
-            epoch_max: int,
+            iter_max: int,
             reverse_metric_direc: bool = True):
-        super().__init__(optimizer_configs, paramlist, epoch_max, reverse_metric_direc)
-        assert decay_factor > 0. and decay_factor < 1. and epoch_max > 0
+        super().__init__(optimizer_configs, paramlist, iter_max, reverse_metric_direc)
+        assert decay_factor > 0. and decay_factor < 1. and iter_max > 0
         self.decay = decay_factor
 
-    def _impl_update_lr_epoch(self):
-        lr = self.lr_init * (self.decay ** self.epoch_cur)
+    def _impl_update_lr_iter(self):
+        lr = self.lr_init * (self.decay ** self.iter_cur)
         self._adjust_lr(lr)
 
 
 class SchedulerCosineAnnealing(SchedulerFixedStop):
-    """Annealing the LR with cosine function (and period) in epoch level."""
+    """Annealing the LR with cosine function (and period) in iteration level."""
 
     def __init__(
             self,
             optimizer_configs,
             paramlist: Iterable[torch.nn.parameter.Parameter],
             lr_min: float,
-            epoch_max: int,
+            iter_max: int,
             period: int = 0,
             decay_factor: float = 1.,
             reverse_metric_direc: bool = True):
-        super().__init__(optimizer_configs, paramlist, epoch_max, reverse_metric_direc)
-        assert period >= 0 and lr_min >= 0 and epoch_max > 0
+        super().__init__(optimizer_configs, paramlist, iter_max, reverse_metric_direc)
+        assert period >= 0 and lr_min >= 0 and iter_max > 0
         assert decay_factor > 0. and decay_factor <= 1.
         if period == 0:
-            period = epoch_max
+            period = iter_max
 
         self.period = period
         self.decay = decay_factor
         self.lr_min = lr_min
         self.lr_max = self.lr_init
 
-    def _impl_update_lr_epoch(self):
-        epoch_idx = self.epoch_cur - 1
+    def _impl_update_lr_iter(self):
+        iter_idx = self.iter_cur - 1
         lr_max = (self.lr_max *
-                  self.decay**(epoch_idx//self.period))
+                  self.decay**(iter_idx//self.period))
 
         lr = self.lr_min + 0.5 * (lr_max - self.lr_min) * (
-            1 + np.cos((epoch_idx % self.period)/self.period * np.pi))
+            1 + np.cos((iter_idx % self.period)/self.period * np.pi))
         self._adjust_lr(lr)

@@ -286,9 +286,9 @@
                     "type": "boolean",
                     "default": false
                 },
-                "checkall": {
-                    "type": "boolean",
-                    "default": false
+                "check-freq": {
+                    "type": "number",
+                    "default": -1
                 },
                 "print-freq": {
                     "type": "number",

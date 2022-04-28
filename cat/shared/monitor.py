@@ -125,6 +125,19 @@ class MonitorWriter():
         for m in metrics:
             self.addWriter(m)
 
+    def state_dict(self) -> OrderedDict:
+        return OrderedDict([
+            ('path', self._default_path),
+            ('summaries', {metric: smr.dump()
+             for metric, smr in self.summaries.items()})
+        ])
+
+    def load_state_dict(self, state_dict: OrderedDict):
+        self._default_path = state_dict['path']
+        self.summaries = {}
+        for m, smr in state_dict['summaries'].items():
+            self.summaries[m] = BaseSummary(smr)
+
     def export(self, path: str = None):
         """export writer, if path is None, export to self._default_path"""
 
@@ -142,10 +155,7 @@ class MonitorWriter():
             prev_writer = None
 
         with open(path, 'wb') as fo:
-            pickle.dump({
-                'path': writer._default_path,
-                'summaries': {metric: smr.dump() for metric, smr in writer.summaries.items()}
-            }, fo)
+            pickle.dump(writer.state_dict(), fo)
 
         del prev_writer
         self.empty()
@@ -162,52 +172,54 @@ class MonitorWriter():
             path), f"{self.__class__.__name__}: trying to load from invalid file {path}"
 
         with open(path, 'rb') as fi:
-            check = pickle.load(fi)
+            self.load_state_dict(pickle.load(fi))
 
-            self._default_path = check['path']
-            self.summaries = {}
-            for m, smr in check['summaries'].items():
-                self.summaries[m] = BaseSummary(smr)
+    def merge(self, appd_writer: "MonitorWriter"):
 
-    def merge(self, appd_writer):
+        if len(self.summaries) == 0:
+            self.summaries = appd_writer.summaries.copy()
+        elif len(appd_writer.summaries) == 0:
+            return
+        else:
+            for m in self.summaries:
+                if m in appd_writer:
+                    self.summaries[m].merge(appd_writer.summaries[m])
 
-        assert list(self.summaries.keys()) == list(appd_writer.summaries.keys(
-        )), f"{self.__class__.__name__}: merge failed due to mismatch keys {list(self.summaries.keys())} {list(appd_writer.summaries.keys())}"
-
-        for m in self.summaries:
-            self.summaries[m].merge(appd_writer[m])
+            for m in appd_writer.summaries:
+                if m not in self:
+                    self.addWriter(m)
+                    self.summaries[m].merge(appd_writer.summaries[m])
 
     def visualize(self, fig_path: str = None) -> str:
         self.export()
         return plot_monitor(self._default_path, o_path=fig_path)
 
 
-def draw_time(ax: plt.Axes, summary: BaseSummary, n_epoch: int = -1, prop_box=True):
+def draw_time(ax: plt.Axes, summary: BaseSummary, n_iter_eval: int = -1, prop_box=True):
     d_time = np.asarray(summary.data['time'])
     d_time -= d_time[0]
     d_time /= 3600.0
 
-    if n_epoch == -1:
+    if n_iter_eval == -1:
         ax.plot(d_time)
-        fmt = 'iter'
-        ylabel = 'Total time (h)'
-        ax.ticklabel_format(axis="x", style="sci",
-                            scilimits=(0, 0), useMathText=True)
+        fmt = 'step'
+        ylabel = 'Total time (hour)'
         speed = d_time[-1]/d_time.shape[0]
     else:
-        epoch_time = []
-        step_per_epoch = d_time.shape[0]//n_epoch
-        for i in range(n_epoch):
-            epoch_time.append(
-                d_time[(i+1)*step_per_epoch-1] - d_time[i*step_per_epoch])
+        time_per_eval = []
+        step_per_iter = d_time.shape[0]//n_iter_eval
+        for i in range(n_iter_eval):
+            time_per_eval.append(
+                d_time[(i+1)*step_per_iter-1] - d_time[i*step_per_iter])
 
-        ax.plot([1+x for x in range(n_epoch)], epoch_time, '.', markersize=2)
+        ax.plot(time_per_eval, '.', markersize=2)
         # plot a dummy marker to set ylim to 0.0
-        ax.scatter(1, 0.5*min(epoch_time), alpha=0.0)
-        fmt = 'epoch'
+        ax.scatter(1, 0.5*min(time_per_eval), alpha=0.0)
+        fmt = 'iter'
         ylabel = 'Time (hour)'
-        speed = sum(epoch_time)/n_epoch
+        speed = sum(time_per_eval)/n_iter_eval
 
+    ax.ticklabel_format(axis="y", style="sci", scilimits=(0, 0))
     if prop_box:
         props = dict(boxstyle='round', facecolor='wheat', alpha=0.8)
         if speed < 1.:
@@ -259,18 +271,18 @@ def draw_tr_loss(ax: plt.Axes, summary: BaseSummary, smooth_value: float = 0.9):
 def draw_dev_loss(ax: plt.Axes, summary: BaseSummary, prop_box=True):
 
     scalars = np.asarray(summary.data['val'])
-    num_epochs = summary.data['cnt']
+    n_iter_eval = summary.data['cnt']
     min_loss = min(scalars)
     if min_loss <= 0. or (max(scalars)/min_loss < 10.):
-        ax.plot([i+1 for i in range(num_epochs)], scalars)
+        ax.plot([i+1 for i in range(n_iter_eval)], scalars)
+        ax.ticklabel_format(axis="y", style="sci", scilimits=(0, 0))
     else:
-        ax.semilogy([i+1 for i in range(num_epochs)], scalars)
+        ax.semilogy([i+1 for i in range(n_iter_eval)], scalars)
 
     if prop_box:
         props = dict(boxstyle='round', facecolor='wheat', alpha=0.8)
         textstr = '\n'.join([
-            "min={:.2f}".format(min_loss),
-            f"{num_epochs} epoch"
+            "min={:.2f}".format(min_loss)
         ])
         ax.text(0.95, 0.95, textstr, transform=ax.transAxes,
                 fontsize=8, verticalalignment='top', horizontalalignment='right', bbox=props)

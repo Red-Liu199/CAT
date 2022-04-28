@@ -8,7 +8,6 @@ from ..shared.data import (
     BalancedDistributedSampler,
     PipeTokenize
 )
-from ..shared import tokenizer as tknz
 from . import scheduler
 from . import coreutils
 from ._specaug import SpecAug
@@ -22,9 +21,9 @@ import glob
 import webdataset as wds
 from braceexpand import braceexpand
 from collections import OrderedDict
-from typing import *
 from datetime import datetime
 from tqdm import tqdm
+from typing import *
 
 import torch
 import torch.nn as nn
@@ -34,6 +33,8 @@ from torch.utils.data import DataLoader
 from torch.cuda.amp import autocast, GradScaler
 from torch.utils.tensorboard import SummaryWriter
 from torch.distributed.optim import ZeroRedundancyOptimizer
+
+F_CHECKLIST = "checkpoint.list"
 
 
 class Manager(object):
@@ -57,7 +58,7 @@ class Manager(object):
 
         coreutils.check_parser(args, ['rank', 'gpu', 'workers', 'trset', 'devset', 'databalance',
                                       'batch_size', 'grad_accum_fold', 'config', 'dir', 'debug',
-                                      'logsdir', 'resume', 'init_model'])
+                                      'logsdir', 'checksdir', 'resume', 'init_model'])
 
         # setup dataloader
         val_set = Dataset(args.devset)
@@ -162,6 +163,7 @@ class Manager(object):
             coreutils.count_parameters(self.model)/1e6), args.gpu)
 
         # get GPU info and create readme.md
+        # NOTE: the following function requires the allreduce OP, so don't put it inside the `if...:` block
         gpu_info = coreutils.gather_all_gpu_info(args.gpu)
         if args.rank == 0 and not args.debug:
             coreutils.gen_readme(os.path.join(args.dir, 'readme.md'),
@@ -192,12 +194,16 @@ class Manager(object):
         if hasattr(self.model, "requires_slice") and self.model.requires_slice:
             parameters = filter(lambda x: x.requires_grad,
                                 self.model.parameters())
-            self.scheduler = GetScheduler(
+            self.scheduler = build_scheduler(
                 configures['scheduler'], parameters)
         else:
-            self.scheduler = GetScheduler(
+            self.scheduler = build_scheduler(
                 configures['scheduler'], self.model.parameters())
 
+        self.cm = CheckpointManager(
+            os.path.join(args.checksdir, F_CHECKLIST),
+            header=f"created at {datetime.today().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
         self.monitor = MonitorWriter(args.logsdir)
         self.monitor.addWriter(BASE_METRIC)
         if extra_tracks is not None:
@@ -211,8 +217,10 @@ class Manager(object):
 
         self.rank = args.rank   # type: int
         self.DEBUG = args.debug  # type: bool
-        self.epoch = 0      # type:int
-        self.step = 0       # type:int
+        self.epoch = 0      # type: int
+        self.step = 0       # type: int
+        # use to resume from checkpoint
+        self.step_by_last_epoch = 0   # type: int
 
         if not (args.resume is None or args.init_model is None):
             coreutils.distprint(
@@ -250,62 +258,66 @@ class Manager(object):
     def run(self, args: argparse.Namespace):
 
         coreutils.check_parser(
-            args, ['checksdir', 'rank', 'gpu', 'dir', 'checkall'])
+            args, ['checksdir', 'rank', 'gpu', 'dir'])
 
         self.model.train()
-        while True:
+        terminated = False
+        n_eval = 0
+        while not terminated:
             self.epoch += 1
             if self.train_sampler is None:
                 pass
             else:
                 self.train_sampler.set_epoch(self.epoch)
 
-            self.train(self.trainloader, args, self)
+            for _ in self.train(self.trainloader, args, self):
+                n_eval += 1
+                self.model.eval()
+                metrics = self.evaluate(self.valloader, args, self)
+                if isinstance(metrics, tuple):
+                    # defaultly use the first one to evaluate
+                    metrics = metrics[0]
 
-            self.model.eval()
-            metrics = self.evaluate(self.valloader, args, self)
-            if isinstance(metrics, tuple):
-                # defaultly use the first one to evaluate
-                metrics = metrics[0]
+                if args.rank == 0:
+                    self.writer.add_scalar('loss/dev', metrics, n_eval)
 
-            if args.rank == 0:
-                self.writer.add_scalar('loss/dev', metrics, self.epoch)
+                state = self.scheduler.step(n_eval, metrics)
+                self.model.train()
 
-            state, info = self.scheduler.step(self.epoch, metrics)
-
-            coreutils.distprint(info, args.gpu)
-            self.model.train()
-
-            if args.checkall:
                 checkpoint = os.path.join(
-                    args.checksdir, "checkpoint.{:03}.pt".format(self.epoch))
-            else:
-                checkpoint = os.path.join(args.checksdir, "checkpoint.pt")
-
-            self.save(checkpoint)
-            if self.rank == 0 and not self.DEBUG:
-                self.monitor.visualize(args.dir)
-                # skip exporting, since the monitor exported with visualize() automatically.
-                # self.monitor.export()
-
-            if state == 2:
-                # backup the last checkpoint
-                if args.checkall and self.rank == 0 and not self.DEBUG:
-                    shutil.copyfile(checkpoint, os.path.join(
-                        args.checksdir, "checkpoint.pt"))
-                coreutils.distprint(
-                    "Terminated: GPU[%d]" % self.rank, args.gpu)
-                dist.barrier()
-                break
-            elif state == 1:
+                    args.checksdir,
+                    f"checkpoint.{self.epoch:04}e{self.step}s.pt"
+                )
+                # inside self.save(), there maybe all_reduce OP, don't put it in rank==0 block.
+                # we should save the checkpoint before monitor.export(), otherwise the monitor is dumped
+                # ... into file and empty.
+                self.save(checkpoint)
                 if self.rank == 0 and not self.DEBUG:
-                    shutil.copyfile(checkpoint, os.path.join(
-                        args.checksdir, "bestckpt.pt"))
-                continue
-            elif state == 0:
-                continue
-            else:
-                raise RuntimeError(f"Unknown state: {state}.")
+                    self.monitor.visualize(args.dir)
+                    # skip exporting, since the monitor exported with visualize() automatically.
+                    # self.monitor.export()
+                    self.cm.appendinfo(self.epoch, self.step,
+                                       metrics, self.scheduler.lr_cur, checkpoint)
+
+                coreutils.distprint(
+                    f"Epoch: {self.epoch} | Step: {self.step} | Loss: {metrics:.3e} | LR: {self.scheduler.lr_cur:.3e}",
+                    args.gpu)
+                if state == 2:
+                    # backup the last checkpoint
+                    if self.rank == 0 and not self.DEBUG:
+                        shutil.copyfile(checkpoint, os.path.join(
+                            args.checksdir, "checkpoint.pt"))
+                    print("Terminated: GPU[%d]" % self.rank)
+                    terminated = True
+                    dist.barrier()
+                    break
+                elif state == 1:
+                    # maybe do something with the best model by far
+                    pass
+                elif state == 0:
+                    pass
+                else:
+                    raise RuntimeError(f"Unknown state: {state}.")
 
     def save(self, name: str, PATH: str = '') -> str:
         """Save checkpoint.
@@ -328,8 +340,11 @@ class Manager(object):
         torch.save(OrderedDict({
             'model': self.model.state_dict(),
             'scheduler': self.scheduler.state_dict(),
+            # monitor is only for backup, never load it in manager.load()
+            'monitor': self.monitor.state_dict(),
             'epoch': self.epoch,
-            'step': self.step
+            'step': self.step,
+            'step_by_last_epoch': self.step_by_last_epoch
         }), PATH)
 
         return PATH
@@ -353,9 +368,11 @@ class Manager(object):
         # monitor is not required to load
         self.epoch = checkpoint['epoch']
         self.step = checkpoint['step']
+        self.step_by_last_epoch = checkpoint.get(
+            'step_by_last_epoch', self.step)
 
 
-def GetScheduler(scheduler_configs: dict, param_list: Iterable) -> scheduler.Scheduler:
+def build_scheduler(scheduler_configs: dict, param_list: Iterable) -> scheduler.Scheduler:
     schdl_base = getattr(scheduler, scheduler_configs['type'])
     return schdl_base(scheduler_configs['optimizer'], param_list, **scheduler_configs['kwargs'])
 
@@ -439,7 +456,7 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
         return detach_loss, n_batch
 
     coreutils.check_parser(args, ['grad_accum_fold', 'n_steps', 'verbose',
-                                  'print_freq', 'rank', 'gpu', 'debug', 'amp', 'grad_norm'])
+                                  'print_freq', 'check_freq', 'rank', 'gpu', 'debug', 'amp', 'grad_norm'])
 
     model = manager.model
     scheduler = manager.scheduler
@@ -452,26 +469,35 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
     world_size = dist.get_world_size()
     fold = args.grad_accum_fold
     assert fold >= 1
-    detach_loss = 0.0
+    detach_loss = 0.
     n_batch = 0
     t_data = 0.
     t_last_step = time.time()
     t_last_batch = time.time()
     quit_flag = torch.tensor(0, device=args.gpu)
+    cnt_step_update = 0
+    if args.check_freq == -1:
+        tt_step = fold*args.n_steps
+    else:
+        tt_step = fold*args.check_freq
     for i, minibatch in tqdm(enumerate(trainloader), desc=f'Epoch {manager.epoch} | train',
-                             unit='batch', total=fold*args.n_steps, disable=(args.gpu != 0 or args.verbose), leave=False):
-
+                             unit='batch', total=tt_step, disable=(args.gpu != 0 or args.verbose), leave=False):
         dist.all_reduce(quit_flag, op=dist.ReduceOp.MAX)
         if quit_flag:
             # update n_steps, since we don't know how many steps there are with large dataset mode.
-            args.n_steps = (i + 1) // fold
+            args.n_steps = cnt_step_update
             break
 
+        if cnt_step_update + manager.step_by_last_epoch < manager.step:
+            if fold == 1 or (i+1) % fold == 0:
+                cnt_step_update += 1
+            continue
+
         features, input_lengths, labels, label_lengths = minibatch
+        features = features.cuda(args.gpu, non_blocking=True)
         # since the gradient fold could be > 1, we need to accumulate the time
         if args.verbose:
             t_data += time.time() - t_last_batch
-        features = features.cuda(args.gpu, non_blocking=True)
 
         if manager.specaug is not None:
             features, input_lengths = manager.specaug(features, input_lengths)
@@ -493,6 +519,7 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
             manager.step += 1
             global_step = manager.step
             scheduler.update_lr_step(global_step)
+            cnt_step_update += 1
 
             # average for logging, since we divide loss by fold for backward,
             # here we multiply fold back for logging
@@ -516,15 +543,16 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
                     'train:lr': tolog['lr']
                 })
 
-            n_time = (i+1)//fold
-
             if args.verbose:
                 coreutils.distprint(
-                    f"[{manager.epoch} - {n_time}/{args.n_steps}] | data {t_data:6.3f} | time {time.time()-t_last_step:6.3f} | "
+                    f"[{manager.epoch} - {cnt_step_update}/{args.n_steps}] | data {t_data:6.3f} | time {time.time()-t_last_step:6.3f} | "
                     f"loss {tolog['loss']:.2e} | lr {tolog['lr']:.2e}",
                     args.gpu)
                 t_data = 0.0
                 t_last_step = time.time()
+
+            if args.check_freq != -1 and (manager.step % args.check_freq) == 0:
+                yield None
 
             # reset accumulated loss
             detach_loss -= detach_loss
@@ -542,6 +570,10 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
         quit_flag += 1
         # wait until other processes quit
         dist.all_reduce(quit_flag, op=dist.ReduceOp.MAX)
+    manager.step_by_last_epoch += cnt_step_update
+    if args.check_freq == -1:
+        yield
+    return
 
 
 @torch.no_grad()
@@ -586,3 +618,95 @@ def evaluate(testloader, args: argparse.Namespace, manager: Manager) -> float:
     manager.monitor.update('eval:loss', avg_loss)
 
     return avg_loss
+
+
+class CheckpointManager:
+    def __init__(self, f_checklist: str, header: str = None) -> None:
+
+        # the checkpoint locations would be used for identification
+        '''Example
+        {
+            '/path/to/check000.pt': {
+                'epoch': 0,
+                'step':  100000,
+                'metric' : 12.3,
+                'lr'  :  1e-5,
+                'extra' : [...]
+            },
+            ...
+        }
+        '''
+        self._checks = OrderedDict()  # type: OrderedDict[str, Dict]
+        self._f_checklist = f_checklist
+
+        if os.path.exists(f_checklist):
+            # ignore the new header in case overwritten or duplicated.
+            header = None
+            self.getcontent()
+        else:
+            header = ''
+            header = '\n'.join('# '+x for x in [
+                "Use '#' in a new line to identify a comment",
+                "Field definition:",
+                "    No.epoch No.step metric(loss) LR pathtocheckpoint ...(any append info is ok);",
+                "    the float numbers are saved via (1.0).hex(), use float.fromhex('...') to get original data;",
+                "    the No.step is also saved as hex via hex(123), use int('...', 16) to get original data.",
+                "Header info:",
+                " "*4 + header.replace('\n', ' ')
+            ])
+            with open(f_checklist, 'w') as fit:
+                fit.write(header)
+
+    @property
+    def content(self):
+        return self._checks
+
+    def getcontent(self):
+        assert os.path.isfile(self._f_checklist)
+
+        with open(self._f_checklist, 'r') as fit:
+            for line in fit:
+                line = line.strip()
+                if line[0] == '#' or line == '':
+                    # skip the comments
+                    continue
+                contents = line.split()
+                assert len(contents) >= 5
+                n_epoch, n_step, metric, lr, f_check = contents[:5]
+                self._checks.update({
+                    f_check: {
+                        'epoch': int(n_epoch),
+                        'step': int(n_step, 16),
+                        'metric': float.fromhex(metric),
+                        'lr': float.fromhex(lr),
+                        'extra': contents[5:]
+                    }
+                })
+
+    def appendinfo(self, n_epoch: int, n_step: int, metric: float, lr: float, f_check: str, *args):
+        self._checks.update({
+            f_check: {
+                'epoch': n_epoch,
+                'step': n_step,
+                'metric': metric,
+                'lr': lr,
+                'extra': list(args)
+            }
+        })
+        orin_text = open(self._f_checklist, 'r').read()
+        try:
+            with open(self._f_checklist, 'a') as fot:
+                fot.write('\n')
+                fot.write((" "*4).join(
+                    [
+                        f"{n_epoch:04}",
+                        f"{n_step:#010x}",
+                        f"{float(metric).hex()}",
+                        f"{float(lr).hex()}",
+                        f_check
+                    ]+[str(x) for x in args])
+                )
+        except Exception as err:
+            with open(self._f_checklist, 'w') as fot:
+                fot.write(orin_text)
+            raise RuntimeError(str(err))

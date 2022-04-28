@@ -514,17 +514,15 @@ def TrainTokenizer(f_hyper: str):
 def model_average(
         setting: dict,
         checkdir: str,
-        returnifexist: bool = False,
-        _pattern: str = r"checkpoint[.]\d+[.]pt") -> Tuple[str, str]:
+        returnifexist: bool = False) -> Tuple[str, str]:
     """Do model averaging according to given setting, return the averaged model path."""
 
     assert 'mode' in setting, "missing 'mode' in ['avgmodel']"
     assert 'num' in setting, "missing 'num' in ['avgmodel']"
     avg_mode, avg_num = setting['mode'], setting['num']
 
-    import re
     import torch
-    from cat.utils.avgmodel import find_n_best, average_checkpoints
+    from cat.utils.avgmodel import select_checkpoint, average_checkpoints
 
     suffix_avgmodel = f"{avg_mode}-{avg_num}"
     checkpoint = os.path.join(checkdir, suffix_avgmodel)
@@ -537,24 +535,13 @@ def model_average(
         i += 1
     checkpoint = tmp_check
 
-    if avg_mode == 'best':
-        f_check_list = find_n_best(checkdir, avg_num)
-    elif avg_mode == 'last':
-        pattern = re.compile(_pattern)
-        f_check_all = [os.path.join(checkdir, _f) for _f in os.listdir(
-            checkdir) if pattern.search(_f) is not None]
-        if len(f_check_all) < avg_num:
-            raise RuntimeError(
-                f"trying to average {avg_num} models, with only {len(f_check_all)} checkpoints existing.")
-        # assume the checkpoint name as checkpoint.0001.pt,
-        # so we could sort the files to get last N ones
-        f_check_list = sorted(f_check_all, reverse=True)[:avg_num]
-        del f_check_all
+    if avg_mode in ['best', 'last']:
+        params = average_checkpoints(
+            select_checkpoint(checkdir, avg_num, avg_mode))
     else:
         raise NotImplementedError(
             f"Unknown model averaging mode: {avg_mode}, expected in ['best', 'last']")
 
-    params = average_checkpoints(f_check_list)
     # delete the parameter of optimizer for saving disk.
     for k in list(params.keys()):
         if k != 'model':
@@ -744,13 +731,10 @@ if __name__ == "__main__":
             suffix_avgmodel = os.path.basename(checkpoint)[:-3]
         else:
             # model averaging
-            if 'avgmodel' not in inference_settings:
-                suffix_avgmodel = 'best-1'
-                checkpoint = os.path.join(checkdir, 'bestckpt.pt')
-            else:
-                checkpoint, suffix_avgmodel = model_average(
-                    setting=inference_settings['avgmodel'],
-                    checkdir=checkdir)
+            checkpoint, suffix_avgmodel = model_average(
+                setting=inference_settings.get(
+                    'avgmodel', {'mode': 'best', 'num': 1}),
+                checkdir=checkdir)
 
             _hyper = readfromjson(f_hyper_settings)
             _hyper['inference']['decode']['resume'] = checkpoint
