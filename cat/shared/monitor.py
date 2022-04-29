@@ -24,40 +24,40 @@ BASE_METRIC = ['train:loss', 'train:lr', 'eval:loss']
 class BaseSummary():
     def __init__(self, src: dict = None) -> None:
         if src is None:
-            self._step = []     # type: List[int]
-            self._val = []   # type: List[Any]
-            self._time = []     # type: List[float]
-            self._cnt = 0
+            self.step = []     # type: List[int]
+            self.val = []   # type: List[Any]
+            self.time = []     # type: List[float]
+            self.cnt = 0
         else:
             self.load(src)
 
+    def __repr__(self) -> str:
+        return f"{self.data}"
+
     @property
     def data(self) -> dict:
-        return self.dump()
-
-    def dump(self) -> dict:
         return self.__dict__
 
     def load(self, src: dict):
         self.__dict__.update(src)
 
-    def update(self, value: Any, step: int = -1):
-        self._cnt += 1
-        if step == -1:
-            self._step.append(self._cnt)
-        else:
-            self._step.append(step)
-        self._val.append(value)
-        self._time.append(time.time())
-
     def merge(self, apd_smr: "BaseSummary"):
         for k in self.__dict__.keys():
             self.__dict__[k] += apd_smr.__dict__[k]
 
+    def update(self, value: Any, step: int = -1):
+        self.cnt += 1
+        if step == -1:
+            self.step.append(self.cnt)
+        else:
+            self.step.append(step)
+        self.val.append(value)
+        self.time.append(time.time())
+
 
 class MonitorWriter():
-    '''Monitor writer
-    '''
+    """Monitor writer
+    """
 
     def __init__(self, path: str = FILE_WRITER) -> None:
         """
@@ -65,21 +65,34 @@ class MonitorWriter():
             path (str): directory or path to resuming file.
                 If no such file exists, will create one at export().
         """
-        if os.path.isfile(path):
-            # assume path is file-like
-            self.load(path)
-            return
-        elif os.path.isdir(path):
+        self.summaries = {}
+        self._has_exported_since_last_load = False
+        if os.path.isdir(path):
             path = os.path.join(path, FILE_WRITER)
 
+        path = os.path.realpath(path)
         self._default_path = path
-        self.summaries = {}   # type: Dict[str, BaseSummary]
+        if os.path.isfile(path):
+            assert os.access(path, os.W_OK), \
+                f"{self.__class__.__name__}: no write access to '{path}'."
+            self.load()
+        else:
+            assert os.access(os.path.dirname(path), os.W_OK), \
+                f"{self.__class__.__name__}: no write access to '{path}', maybe directory not exist."
 
     def __contains__(self, index):
         return index in self.summaries
 
+    def __iter__(self):
+        for smr in self.summaries:
+            yield smr
+        return
+
     def __getitem__(self, index):
         return self.summaries[index]
+
+    def __repr__(self) -> str:
+        return f"{self.summaries}"
 
     def addWriter(self, names: Union[List[str], str]):
         if isinstance(names, str):
@@ -130,41 +143,35 @@ class MonitorWriter():
 
     def load_state_dict(self, state_dict: OrderedDict):
         self.summaries = {}
-        for m, smr in state_dict['summaries'].items():
+        for m, smr in state_dict.items():
             self.summaries[m] = BaseSummary(smr)
 
-    def export(self, path: str = None):
-        """export writer, if path is None, export to self._default_path"""
+    def _concat_if_exist(self):
+        if os.path.isfile(self._default_path):
+            tmp_writer = MonitorWriter(self._default_path)
+            tmp_writer.merge(self)
+            return tmp_writer
+        else:
+            return self
 
-        if path is None:
-            path = self._default_path
-        elif os.path.isdir(path):
-            path = os.path.join(path, FILE_WRITER)
-
-        if os.path.isfile(path):
-            writer = MonitorWriter(path)
-            writer.merge(self)
+    def export(self):
+        """export writer"""
+        # avoid duplicated data
+        if self._has_exported_since_last_load:
+            writer = self._concat_if_exist()
         else:
             writer = self
-
-        with open(path, 'wb') as fo:
+        with open(self._default_path, 'wb') as fo:
             pickle.dump(writer.state_dict(), fo)
 
         self.empty(keep_keys=True)
+        self._has_exported_since_last_load = True
 
-    def load(self, path: str = None):
-        """load writer, if path is None, load from self._default_path"""
-
-        if path is None:
-            path = self._default_path
-        elif os.path.isdir(path):
-            path = os.path.join(path, FILE_WRITER)
-
-        assert os.path.isfile(
-            path), f"{self.__class__.__name__}: trying to load from invalid file {path}"
-
-        with open(path, 'rb') as fi:
+    def load(self):
+        """load writer"""
+        with open(self._default_path, 'rb') as fi:
             self.load_state_dict(pickle.load(fi))
+        self._has_exported_since_last_load = False
 
     def merge(self, appd_writer: "MonitorWriter"):
 
@@ -183,32 +190,25 @@ class MonitorWriter():
                     self.summaries[m].merge(appd_writer.summaries[m])
 
     def visualize(self, fig_path: str = None) -> str:
-        return plot_monitor(self._default_path, o_path=fig_path)
+        if self._has_exported_since_last_load:
+            assert os.path.isfile(self._default_path)
+            # first load previous log, then visualize
+            tmp_writer = MonitorWriter(self._default_path)
+            tmp_writer.merge(self)
+            return plot_monitor(tmp_writer, o_path=fig_path)
+        else:
+            return plot_monitor(self, o_path=fig_path)
 
 
-def draw_time(ax: plt.Axes, summary: BaseSummary, n_iter_eval: int = -1, prop_box=True):
-    d_time = np.asarray(summary.data['time'])
+def draw_time(ax: plt.Axes, smr: BaseSummary, prop_box=True):
+    x = smr.data['step']
+    d_time = np.asarray(smr.data['time'])
     d_time -= d_time[0]
     d_time /= 3600.0
 
-    if n_iter_eval == -1:
-        ax.plot(d_time)
-        fmt = 'step'
-        ylabel = 'Total time (hour)'
-        speed = d_time[-1]/d_time.shape[0]
-    else:
-        time_per_eval = []
-        step_per_iter = d_time.shape[0]//n_iter_eval
-        for i in range(n_iter_eval):
-            time_per_eval.append(
-                d_time[(i+1)*step_per_iter-1] - d_time[i*step_per_iter])
-
-        ax.plot(time_per_eval, '.', markersize=2)
-        # plot a dummy marker to set ylim to 0.0
-        ax.scatter(1, 0.5*min(time_per_eval), alpha=0.0)
-        fmt = 'iter'
-        ylabel = 'Time (hour)'
-        speed = sum(time_per_eval)/n_iter_eval
+    ax.plot(x, d_time)
+    ylabel = 'Total time (hour)'
+    speed = d_time[-1]/d_time.shape[0]
 
     ax.ticklabel_format(axis="y", style="sci", scilimits=(0, 0))
     if prop_box:
@@ -217,11 +217,11 @@ def draw_time(ax: plt.Axes, summary: BaseSummary, n_iter_eval: int = -1, prop_bo
             speed = speed * 60
             if speed < 1.:
                 speed = speed * 60
-                timestr = "{:.0f} sec/{}".format(speed, fmt)
+                timestr = f"{speed:.0f} sec/step"
             else:
-                timestr = "{:.1f} min/{}".format(speed, fmt)
+                timestr = f"{speed:.1f} min/step"
         else:
-            timestr = "{:.2f} h/{}".format(speed, fmt)
+            timestr = f"{speed:.2f} h/step"
         ax.text(0.95, 0.05, timestr, transform=ax.transAxes,
                 fontsize=8, verticalalignment='bottom', horizontalalignment='right', bbox=props)
 
@@ -230,45 +230,33 @@ def draw_time(ax: plt.Axes, summary: BaseSummary, n_iter_eval: int = -1, prop_bo
     return ax
 
 
-def draw_tr_loss(ax: plt.Axes, summary: BaseSummary, smooth_value: float = 0.9):
-    scalars = np.asarray(summary.data['val'])
+def draw_loss(ax: plt.Axes, smr: BaseSummary, smooth_value: float = 0.9, ylabel: str = 'loss', prop_box=True):
+    x = smr.data['step']
+    scalars = np.asarray(smr.data['val'])
 
     assert smooth_value >= 0. and smooth_value < 1.
-    res_smooth = 1 - smooth_value
 
-    running_mean = np.zeros_like(scalars)
-    running_mean[0] = scalars[0]
-    for i in range(1, len(scalars)):
-        running_mean[i] = smooth_value * \
-            running_mean[i-1] + res_smooth * scalars[i]
-
-    min_loss = min(running_mean)
-    if min_loss <= 0. or (max(scalars) / min(scalars) < 10.):
-        ax.plot(scalars, color='C0', alpha=0.25)
-        ax.plot(running_mean, color='C0')
-        ax.ticklabel_format(axis="y", style="sci", scilimits=(0, 0))
+    if smooth_value > 0.:
+        res_smooth = 1 - smooth_value
+        running_mean = np.zeros_like(scalars)
+        running_mean[0] = scalars[0]
+        for i in range(1, len(scalars)):
+            running_mean[i] = smooth_value * \
+                running_mean[i-1] + res_smooth * scalars[i]
+        alpha = 0.25
     else:
-        ax.semilogy(scalars, color='C0', alpha=0.25)
-        ax.semilogy(running_mean, color='C0')
+        alpha = 1.0
 
-    ax.ticklabel_format(axis="x", style="sci",
-                        scilimits=(0, 0), useMathText=True)
-    ax.grid(True, ls='--', which='both')
-    ax.set_ylabel('Training loss')
-    ax.set_xlabel("Step")
-    return ax
-
-
-def draw_dev_loss(ax: plt.Axes, summary: BaseSummary, prop_box=True):
-
-    scalars = np.asarray(summary.data['val'])
-    n_iter_eval = summary.data['cnt']
     min_loss = min(scalars)
-    if min_loss <= 0. or (max(scalars)/min_loss < 10.):
-        ax.plot([i+1 for i in range(n_iter_eval)], scalars)
+    if min_loss <= 0. or (max(scalars) / min_loss < 10.):
+        ax.plot(x, scalars, color='C0', alpha=alpha)
+        if smooth_value > 0.:
+            ax.plot(x, running_mean, color='C0')
         ax.ticklabel_format(axis="y", style="sci", scilimits=(0, 0))
     else:
-        ax.semilogy([i+1 for i in range(n_iter_eval)], scalars)
+        ax.semilogy(x, scalars, color='C0', alpha=alpha)
+        if smooth_value > 0.:
+            ax.semilogy(x, running_mean, color='C0')
 
     if prop_box:
         props = dict(boxstyle='round', facecolor='wheat', alpha=0.8)
@@ -277,16 +265,16 @@ def draw_dev_loss(ax: plt.Axes, summary: BaseSummary, prop_box=True):
         ])
         ax.text(0.95, 0.95, textstr, transform=ax.transAxes,
                 fontsize=8, verticalalignment='top', horizontalalignment='right', bbox=props)
+    ax.ticklabel_format(axis="x", style="sci",
+                        scilimits=(0, 0), useMathText=True)
     ax.grid(True, ls='--', which='both')
-    ax.set_ylabel('Dev loss')
-    ax.set_xlabel('Epoch')
+    ax.set_ylabel(ylabel)
     return ax
 
 
-def draw_lr(ax: plt.Axes, summary: BaseSummary):
+def draw_lr(ax: plt.Axes, smr: BaseSummary):
 
-    ax.plot(summary.data['val'])
-
+    ax.plot(smr.data['step'], smr.data['val'])
     ax.ticklabel_format(axis="x", style="sci",
                         scilimits=(0, 0), useMathText=True)
     ax.ticklabel_format(axis="y", style="sci",
@@ -296,8 +284,8 @@ def draw_lr(ax: plt.Axes, summary: BaseSummary):
     return ax
 
 
-def draw_any(ax: plt.Axes, summary: BaseSummary, _name: str = ''):
-    ax.plot(summary.data['val'])
+def draw_any(ax: plt.Axes, smr: BaseSummary, _name: str = ''):
+    ax.plot(smr.data['step'], smr.data['val'])
     ax.ticklabel_format(axis="x", style="sci",
                         scilimits=(0, 0), useMathText=True)
     ax.grid(ls='--')
@@ -305,25 +293,28 @@ def draw_any(ax: plt.Axes, summary: BaseSummary, _name: str = ''):
     return ax
 
 
-def plot_monitor(path: str, o_path: str = None, title: str = None, interactive_show=False) -> str:
+def plot_monitor(mwriter: Union[str, MonitorWriter], o_path: str = None, title: str = None, interactive_show=False) -> str:
     """Plot the monitor log files
 
     Args:
-        path (str): directory of log files
+        mwriter (str, MonitorWriter): path of the monitor writer file or the monitorwriter object
         title (str, optional): title name (title of ploting)
         interactive_show (bool, optional): specify whether plot in interactive mode. Default False.
     """
 
     if title is None:
         title = ' '
+    if isinstance(mwriter, MonitorWriter):
+        log_writer = mwriter
+    else:
+        log_writer = MonitorWriter(mwriter)
 
-    log_writer = MonitorWriter(path)
-    apd = []
+    user_custom_tracks = []
     for k in log_writer.summaries:
         if k not in BASE_METRIC:
-            apd.append(k)
+            user_custom_tracks.append(k)
 
-    n_row = 2 + (len(apd) // 2 + len(apd) % 2)
+    n_row = 2 + (len(user_custom_tracks) // 2 + len(user_custom_tracks) % 2)
     n_col = 2
 
     _, axes = plt.subplots(n_row, n_col, figsize=(
@@ -334,22 +325,24 @@ def plot_monitor(path: str, o_path: str = None, title: str = None, interactive_s
     axes[0][0].set_xticklabels([])
 
     # Time
-    draw_time(axes[0][1], log_writer['train:loss'],
-              log_writer['eval:loss'].data['cnt'], True)
+    draw_time(axes[0][1], log_writer['train:loss'], True)
     axes[0][1].set_xticklabels([])
 
     # Training loss and moving average
-    draw_tr_loss(axes[1][0], log_writer['train:loss'])
+    draw_loss(axes[1][0], log_writer['train:loss'], ylabel='train loss')
+    axes[1][0].set_xlabel("Step")
 
     # Dev loss
-    draw_dev_loss(axes[1][1], log_writer['eval:loss'])
+    draw_loss(axes[1][1], log_writer['eval:loss'],
+              smooth_value=0., ylabel='dev loss', prop_box=True)
+    axes[1][1].set_xlabel("Step")
 
     # custom metric
-    for i, k in enumerate(apd):
+    for i, k in enumerate(user_custom_tracks):
         r, c = (4+i)//2, (4+i) % 2
         draw_any(axes[r][c], log_writer[k], k)
     # rm the empty subplot
-    if len(apd) % 2 != 0:
+    if len(user_custom_tracks) % 2 != 0:
         axes[-1][-1].set_axis_off()
 
     # Global settings
@@ -360,13 +353,12 @@ def plot_monitor(path: str, o_path: str = None, title: str = None, interactive_s
         plt.show()
     else:
         if o_path is None:
-            direc = os.path.dirname(path)
-            outpath = os.path.join(direc, 'monitor.png')
+            outpath = os.path.join(os.path.dirname(
+                log_writer._default_path), 'monitor.png')
         else:
             if os.path.isdir(o_path):
                 outpath = os.path.join(o_path, 'monitor.png')
             else:
-                assert os.path.isdir(os.path.dirname(o_path))
                 outpath = o_path
         plt.savefig(outpath, dpi=200, facecolor="w")
     plt.close()
@@ -379,12 +371,12 @@ def cmp(checks: List[str], legends: Union[List[str], None] = None, title: str = 
         assert os.path.isfile(c), f"{c} is not a file."
 
     log_writer = MonitorWriter(checks[0])
-    apd = []
+    user_custom_tracks = []
     for k in log_writer.summaries:
         if k not in BASE_METRIC:
-            apd.append(k)
+            user_custom_tracks.append(k)
 
-    n_row = 2 + (len(apd) // 2 + len(apd) % 2)
+    n_row = 2 + (len(user_custom_tracks) // 2 + len(user_custom_tracks) % 2)
     n_col = 2
 
     _, axes = plt.subplots(n_row, n_col, figsize=(
@@ -396,18 +388,18 @@ def cmp(checks: List[str], legends: Union[List[str], None] = None, title: str = 
     for clog in checks:
         log_writer = MonitorWriter(clog)
         draw_lr(axes[0][0], log_writer['train:lr'])
-        draw_time(axes[0][1], log_writer['train:loss'],
-                  log_writer['eval:loss'].data['cnt'], prop_box=False)
-        draw_tr_loss(axes[1][0], log_writer['train:loss'])
-        draw_dev_loss(axes[1][1], log_writer['eval:loss'], False)
+        draw_time(axes[0][1], log_writer['train:loss'], prop_box=False)
+        draw_loss(axes[1][0], log_writer['train:loss'], ylabel='train loss')
+        draw_loss(axes[1][1], log_writer['eval:loss'],
+                  smooth_value=0., ylabel='dev loss', prop_box=False)
 
         # custom metric
-        for i, k in enumerate(apd):
+        for i, k in enumerate(user_custom_tracks):
             r, c = (4+i)//2, (4+i) % 2
             draw_any(axes[r][c], log_writer[k], k)
 
     # rm the empty subplot
-    if len(apd) % 2 != 0:
+    if len(user_custom_tracks) % 2 != 0:
         axes[-1][-1].set_axis_off()
 
     axes[0][0].legend(legends, fontsize=8)
@@ -421,7 +413,6 @@ def cmp(checks: List[str], legends: Union[List[str], None] = None, title: str = 
             outpath = os.path.join(
                 o_path, 'compare-{}-{}.png'.format(*legends))
         else:
-            assert os.path.isdir(os.path.dirname(o_path))
             outpath = o_path
     plt.savefig(outpath, dpi=200, facecolor="w")
     plt.close()

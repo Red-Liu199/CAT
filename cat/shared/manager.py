@@ -14,10 +14,10 @@ from ._specaug import SpecAug
 from .monitor import MonitorWriter, BASE_METRIC
 
 import os
-import argparse
+import glob
 import time
 import shutil
-import glob
+import argparse
 import webdataset as wds
 from braceexpand import braceexpand
 from collections import OrderedDict
@@ -217,7 +217,7 @@ class Manager(object):
 
         self.rank = args.rank   # type: int
         self.DEBUG = args.debug  # type: bool
-        self.epoch = 0      # type: int
+        self.epoch = 1      # type: int
         self.step = 0       # type: int
         # use to resume from checkpoint
         self.step_by_last_epoch = 0   # type: int
@@ -264,7 +264,6 @@ class Manager(object):
         terminated = False
         n_eval = 0
         while not terminated:
-            self.epoch += 1
             if self.train_sampler is None:
                 pass
             else:
@@ -287,20 +286,21 @@ class Manager(object):
 
                 checkpoint = os.path.join(
                     args.checksdir,
-                    f"checkpoint.{self.epoch:04}e{self.step}s.pt"
+                    f"checkpoint.{self.epoch}e{self.step}s.pt"
                 )
                 # inside self.save(), there maybe all_reduce OP, don't put it in rank==0 block.
                 # we should save the checkpoint before monitor.export(), otherwise the monitor is dumped
                 # ... into file and empty.
                 self.save(checkpoint)
                 if self.rank == 0 and not self.DEBUG:
+                    self.cm.appendinfo(
+                        self.epoch, self.step,
+                        metrics, self.scheduler.lr_cur, checkpoint)
                     self.monitor.visualize(args.dir)
                     self.monitor.export()
-                    self.cm.appendinfo(self.epoch, self.step,
-                                       metrics, self.scheduler.lr_cur, checkpoint)
 
                 coreutils.distprint(
-                    f"Epoch: {self.epoch} | Step: {self.step} | Loss: {metrics:.3e} | LR: {self.scheduler.lr_cur:.3e}",
+                    f" Epoch: {self.epoch} | Step: {self.step} | Loss: {metrics:.3e} | LR: {self.scheduler.lr_cur:.3e}",
                     args.gpu)
                 if state == 2:
                     # backup the last checkpoint
@@ -318,6 +318,8 @@ class Manager(object):
                     pass
                 else:
                     raise RuntimeError(f"Unknown state: {state}.")
+
+            self.epoch += 1
 
     def save(self, name: str, PATH: str = '') -> str:
         """Save checkpoint.
@@ -478,14 +480,13 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
     cnt_step_update = 0
 
     p_bar = tqdm(
-        enumerate(trainloader),
-        desc=f'Epoch {manager.epoch} | train',
+        desc=f'Epoch: {manager.epoch} | train',
         unit='batch',
-        total=fold*args.n_steps,
+        total=args.n_steps,
         disable=(args.gpu != 0 or args.verbose),
         leave=False
     )
-    for i, minibatch in p_bar:
+    for i, minibatch in enumerate(trainloader):
         dist.all_reduce(quit_flag, op=dist.ReduceOp.MAX)
         if quit_flag:
             # update n_steps, since we don't know how many steps there are with large dataset mode.
@@ -495,6 +496,7 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
         if cnt_step_update + manager.step_by_last_epoch < manager.step:
             if fold == 1 or (i+1) % fold == 0:
                 cnt_step_update += 1
+                p_bar.update()
             continue
 
         features, input_lengths, labels, label_lengths = minibatch
@@ -524,6 +526,7 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
             global_step = manager.step
             scheduler.update_lr_step(global_step)
             cnt_step_update += 1
+            p_bar.update()
 
             # average for logging, since we divide loss by fold for backward,
             # here we multiply fold back for logging
@@ -556,7 +559,6 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
                 t_last_step = time.time()
 
             if args.check_freq != -1 and (manager.step % args.check_freq) == 0:
-                p_bar.clear()
                 yield None
 
             # reset accumulated loss
@@ -578,7 +580,7 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
     manager.step_by_last_epoch += cnt_step_update
     if args.check_freq == -1:
         yield
-    del p_bar
+    p_bar.close()
     return
 
 
@@ -589,7 +591,7 @@ def evaluate(testloader, args: argparse.Namespace, manager: Manager) -> float:
     cnt_seq = 0
     total_loss = 0.
 
-    for i, minibatch in tqdm(enumerate(testloader), desc=f'Epoch {manager.epoch} | eval',
+    for i, minibatch in tqdm(enumerate(testloader), desc=f'Epoch: {manager.epoch} | eval',
                              unit='batch', total=len(testloader), disable=(args.gpu != 0), leave=False):
 
         features, input_lengths, labels, label_lengths = minibatch
@@ -644,12 +646,13 @@ class CheckpointManager:
         self._checks = OrderedDict()  # type: OrderedDict[str, Dict]
         self._f_checklist = f_checklist
 
+        if header is None:
+            header = ''
+
         if os.path.exists(f_checklist):
             # ignore the new header in case overwritten or duplicated.
-            header = None
             self.getcontent()
         else:
-            header = ''
             header = '\n'.join('# '+x for x in [
                 "Use '#' in a new line to identify a comment",
                 "Field definition:",
