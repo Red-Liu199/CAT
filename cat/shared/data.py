@@ -478,6 +478,7 @@ def group_indices(args: Tuple[List[List[int]], List[int], int, int]):
 
 class PipeTokenize:
     def __init__(self, tokenizer: AbsTokenizer) -> None:
+        assert isinstance(tokenizer, AbsTokenizer)
         self._tokenizer = tokenizer
 
     def __call__(self, samples: Tuple[np.ndarray, str]) -> Tuple[np.ndarray, torch.LongTensor]:

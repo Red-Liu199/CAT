@@ -447,8 +447,9 @@ def setup_path(args: argparse.Namespace):
     else:
         highlight_msg("Debugging")
         # This is a hack, we won't read/write anything in debug mode.
-        checksdir = '/'
-        logsdir = os.path.join('./', 'tmp_debug_tensorboard')
+        logsdir = os.path.join('./', 'tmp_debug_folder')
+        checksdir = logsdir
+        os.makedirs(logsdir, exist_ok=True)
 
     if args.config is None:
         args.config = os.path.join(args.dir, 'config.json')

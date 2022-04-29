@@ -382,10 +382,6 @@ def TrainNNModel(
         checkExist('f', dev_data)
         training_settings['devset'] = dev_data
         sys.stdout.write(promt.format(f"set 'devset' to {dev_data}"))
-    if 'world-size' not in training_settings:
-        training_settings['world-size'] = 1
-    if 'rank' not in training_settings:
-        training_settings['rank'] = 0
     if 'dir' not in training_settings:
         training_settings['dir'] = args.expdir
         sys.stdout.write(promt.format(f"set 'dir' to {args.expdir}"))

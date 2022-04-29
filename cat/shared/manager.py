@@ -8,6 +8,7 @@ from ..shared.data import (
     BalancedDistributedSampler,
     PipeTokenize
 )
+from ..shared import tokenizer as tknz
 from . import scheduler
 from . import coreutils
 from ._specaug import SpecAug
@@ -100,7 +101,7 @@ class Manager(object):
                 # extract data to original tuple
                 .to_tuple("mat.npy", "label.txt")
                 # convert raw text into tensor with tokenizer
-                .map(PipeTokenize(args.tokenizer))
+                .map(PipeTokenize(tknz.load(args.tokenizer)))
             )
             if _wds_hook is not None:
                 # add some hook if needed, e.g. filter short seqs for CTC/CRF
