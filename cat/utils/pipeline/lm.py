@@ -34,6 +34,11 @@ if __name__ == "__main__":
     checkExist('d', args.expdir)
     f_hyper_settings = os.path.join(args.expdir, 'hyper-p.json')
     checkExist('f', f_hyper_settings)
+    hyper_cfg = readfromjson(f_hyper_settings)
+    if "env" in hyper_cfg:
+        for k, v in hyper_cfg["env"].items():
+            os.environ[k] = v
+
     if args.ngpu > -1:
         set_visible_gpus(args.ngpu)
     initial_datainfo()

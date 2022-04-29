@@ -258,6 +258,21 @@
                 "ctc"
             ]
         },
+        "env": {
+            "description": "Configure any environment variable if needed.",
+            "type": "object",
+            "properties": {
+                "CUDA_VISIBLE_DEVICES": {
+                    "description": "Configure which GPU(s) to be used.",
+                    "type": "string",
+                    "default": "0,1,2,3"
+                },
+                "NCCL_SOCKET_IFNAME": {
+                    "description": "Configure which network interface to be used.",
+                    "type": "string"
+                }
+            }
+        },
         "train": {
             "description": "Basic configuration of NN Training",
             "type": "object",

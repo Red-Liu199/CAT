@@ -574,6 +574,11 @@ if __name__ == "__main__":
     checkExist('f', f_hyper_settings)
     initial_datainfo()
     datainfo = readfromjson(F_DATAINFO)
+    hyper_cfg = readfromjson(f_hyper_settings)
+    if "env" in hyper_cfg:
+        for k, v in hyper_cfg["env"].items():
+            os.environ[k] = v
+
     if args.ngpu > -1:
         set_visible_gpus(args.ngpu)
 
