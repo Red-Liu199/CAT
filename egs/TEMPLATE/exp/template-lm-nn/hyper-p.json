@@ -23,7 +23,7 @@
     "train": {
         "batch_size": 64,
         "amp": true,
-        "checkall": true
+        "check-freq": 500
     },
     "inference": {
         "avgmodel": {

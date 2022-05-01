@@ -9,10 +9,16 @@ from ..shared.data import (
     PipeTokenize
 )
 from ..shared import tokenizer as tknz
-from . import scheduler
 from . import coreutils
 from ._specaug import SpecAug
-from .monitor import MonitorWriter, BASE_METRIC
+from .scheduler import (
+    State,
+    build_scheduler
+)
+from .monitor import (
+    MonitorWriter,
+    BASE_METRIC
+)
 
 import os
 import glob
@@ -157,8 +163,8 @@ class Manager(object):
         self.valloader = valloader
 
         # Initial model
-        configures = coreutils.readjson(args.config)  # type: dict
-        self.model = func_build_model(configures, args)
+        cfg = coreutils.readjson(args.config)  # type: dict
+        self.model = func_build_model(cfg, args)
 
         coreutils.distprint("> Model built. Size: {:.2f}M".format(
             coreutils.count_parameters(self.model)/1e6), args.gpu)
@@ -182,24 +188,24 @@ class Manager(object):
             self.evaluate = func_eval
 
         # Initial specaug module
-        if 'specaug_config' not in configures:
+        if 'specaug_config' not in cfg:
             specaug = None
             coreutils.distprint("> Disable SpecAug", args.gpu)
         else:
-            specaug = SpecAug(**configures['specaug_config'])
+            specaug = SpecAug(**cfg['specaug_config'])
             specaug = specaug.to(f'cuda:{args.gpu}')
         self.specaug = specaug
 
         # Initial scheduler and optimizer
-        assert 'scheduler' in configures
+        assert 'scheduler' in cfg
         if hasattr(self.model, "requires_slice") and self.model.requires_slice:
-            parameters = filter(lambda x: x.requires_grad,
-                                self.model.parameters())
             self.scheduler = build_scheduler(
-                configures['scheduler'], parameters)
+                cfg['scheduler'],
+                filter(lambda x: x.requires_grad, self.model.parameters())
+            )
         else:
             self.scheduler = build_scheduler(
-                configures['scheduler'], self.model.parameters())
+                cfg['scheduler'], self.model.parameters())
 
         self.cm = CheckpointManager(
             os.path.join(args.checksdir, F_CHECKLIST),
@@ -303,7 +309,7 @@ class Manager(object):
                 coreutils.distprint(
                     f" Epoch: {self.epoch} | Step: {self.step} | Loss: {metrics:.3e} | LR: {self.scheduler.lr_cur:.3e}",
                     args.gpu)
-                if state == 2:
+                if state == State.TERMINATED:
                     # backup the last checkpoint
                     if self.rank == 0 and not self.DEBUG:
                         shutil.copyfile(checkpoint, os.path.join(
@@ -312,10 +318,10 @@ class Manager(object):
                     terminated = True
                     dist.barrier()
                     break
-                elif state == 1:
+                elif state == State.IMPROVED:
                     # maybe do something with the best model by far
                     pass
-                elif state == 0:
+                elif state == State.CONTINUE:
                     pass
                 else:
                     raise RuntimeError(f"Unknown state: {state}.")
@@ -373,11 +379,6 @@ class Manager(object):
         self.step = checkpoint['step']
         self.step_by_last_epoch = checkpoint.get(
             'step_by_last_epoch', self.step)
-
-
-def build_scheduler(scheduler_configs: dict, param_list: Iterable) -> scheduler.Scheduler:
-    schdl_base = getattr(scheduler, scheduler_configs['type'])
-    return schdl_base(scheduler_configs['optimizer'], param_list, **scheduler_configs['kwargs'])
 
 
 '''

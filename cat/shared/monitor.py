@@ -207,7 +207,7 @@ def draw_time(ax: plt.Axes, smr: BaseSummary, prop_box=True):
     d_time /= 3600.0
 
     ax.plot(x, d_time)
-    ylabel = 'Total time (hour)'
+    ylabel = 'total time (hour)'
     speed = d_time[-1]/d_time.shape[0]
 
     ax.ticklabel_format(axis="y", style="sci", scilimits=(0, 0))
@@ -230,7 +230,7 @@ def draw_time(ax: plt.Axes, smr: BaseSummary, prop_box=True):
     return ax
 
 
-def draw_loss(ax: plt.Axes, smr: BaseSummary, smooth_value: float = 0.9, ylabel: str = 'loss', prop_box=True):
+def draw_loss(ax: plt.Axes, smr: BaseSummary, smooth_value: float = 0.9, ylabel: str = 'loss', prop_box=False):
     x = smr.data['step']
     scalars = np.asarray(smr.data['val'])
 
@@ -388,10 +388,10 @@ def cmp(checks: List[str], legends: Union[List[str], None] = None, title: str = 
     for clog in checks:
         log_writer = MonitorWriter(clog)
         draw_lr(axes[0][0], log_writer['train:lr'])
-        draw_time(axes[0][1], log_writer['train:loss'], prop_box=False)
+        draw_time(axes[0][1], log_writer['train:loss'])
         draw_loss(axes[1][0], log_writer['train:loss'], ylabel='train loss')
         draw_loss(axes[1][1], log_writer['eval:loss'],
-                  smooth_value=0., ylabel='dev loss', prop_box=False)
+                  smooth_value=0., ylabel='dev loss')
 
         # custom metric
         for i, k in enumerate(user_custom_tracks):

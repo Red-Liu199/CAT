@@ -12,7 +12,7 @@
 
 ### Result
 ```
-yesno   %SER 100.00 | %WER 44.79 [ 215 / 480, 5 ins, 120 del, 90 sub ]
+yesno   %SER 100.00 | %WER 65.42 [ 314 / 480, 0 ins, 301 del, 13 sub ]
 ```
 
 ### Monitor figure

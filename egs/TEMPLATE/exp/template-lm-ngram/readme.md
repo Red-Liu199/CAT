@@ -8,6 +8,6 @@ property:
 perplexity:
 
 ```
-Test file: data/local-lm/ptb.valid.txt -> ppl: 253.34
-Test file: data/local-lm/ptb.test.txt -> ppl: 267.94
+Test file: data/local-lm/ptb.valid.txt -> ppl: 252.96
+Test file: data/local-lm/ptb.test.txt -> ppl: 268.65
 ```

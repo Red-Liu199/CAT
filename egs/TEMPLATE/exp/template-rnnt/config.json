@@ -1,23 +1,8 @@
 {
-    "specaug_config": {
-        "apply_freq_mask": true,
-        "apply_time_mask": true,
-        "apply_time_warp": false,
-        "freq_mask_width_range": [
-            0,
-            0.15
-        ],
-        "num_freq_mask": 2,
-        "time_mask_width_range": [
-            0,
-            0.1
-        ],
-        "num_time_mask": 5
-    },
     "decoder": {
         "type": "LSTM",
         "kwargs": {
-            "hdim": 512,
+            "hdim": 256,
             "num_classes": 4,
             "with_head": false
         }
@@ -26,34 +11,34 @@
         "type": "LSTM",
         "kwargs": {
             "bidirectional": true,
-            "dropout": 0.2,
-            "hdim": 512,
+            "hdim": 256,
             "idim": 80,
+            "dropout": 0.0,
             "n_layers": 2,
             "num_classes": 4,
             "with_head": false
         }
     },
-    "joint": {
+    "joiner": {
         "type": "JointNet",
         "kwargs": {
-            "odim_decoder": 512,
-            "odim_encoder": 1024,
+            "odim_enc": 512,
+            "odim_pred": 256,
             "num_classes": 4
         }
     },
     "transducer": {
-        "compact": true,
-        "fused": true
+        "compact": true
     },
     "scheduler": {
-        "type": "SchedulerIterAnnealing",
+        "type": "SchedulerLinearAnnealing",
         "kwargs": {
-            "epoch_max": 15,
-            "decay_factor": 0.9
+            "min_step": 50,
+            "stop_lr": 1e-05,
+            "stop_step": 200
         },
         "optimizer": {
-            "use_zero": true,
+            "zeroredundancy": true,
             "type": "Adam",
             "kwargs": {
                 "lr": 0.001

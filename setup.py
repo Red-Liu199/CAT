@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='cat',
-    version='0.3.1',
+    version='0.4.0',
     packages=find_packages(exclude=['src', 'tools']),
     description="Transducer for speech recognition.",
     long_description=open('README.md', 'r').read(),

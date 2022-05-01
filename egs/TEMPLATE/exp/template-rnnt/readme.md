@@ -2,7 +2,7 @@
 
 **This part is auto-generated, add your details in Appendix**
 
-* Model size/M: 11.36
+* Model size/M: 3.19
 * GPU info \[1\]
   * \[1\] NVIDIA GeForce RTX 3090
 

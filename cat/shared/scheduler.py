@@ -6,65 +6,113 @@
 
 import math
 import torch
-import numpy as np
-from collections import OrderedDict
 from typing import *
+from enum import Enum
+from collections import OrderedDict
 
 from torch.distributed.optim import ZeroRedundancyOptimizer
 
 
-def SetupOptim(type_optim: str, paramlist: Iterable[torch.nn.parameter.Parameter], use_zero: bool = False, **kwargs) -> Union[torch.optim.Optimizer, ZeroRedundancyOptimizer]:
+def build_scheduler(cfg: dict, params: Iterable[torch.nn.parameter.Parameter]) -> "Scheduler":
+    """Build the scheduler from configurations and parameter list.
+    
+    Args:
+        cfg (dict): configuration of scheduler, including the configuration for optimizer
+            {
+                "type": "NameOfScheduler",
+                "kwargs": {
+                    ...
+                },
+                "optimizer": ... // see _build_optim for the format
+            }
+        params (iterable[parameter]): parameters to be optimized
+
+    """
+
+    # these assertions are required for avoiding toxic code to be executed in eval()
+    assert 'type' in cfg, \
+        "you should specify the 'type' field in scheduler configuration."
+    cls_scdl = cfg['type']     # type: str
+    assert isinstance(cfg['type'], str)
+    assert cls_scdl.isidentifier(
+    ), f"invalid type name: {cls_scdl}, not even valid as an identifier."
+    cls_scdl = eval(cls_scdl)     # type: Scheduler
+    return cls_scdl(
+        optimizer=_build_optim(
+            cfg=cfg['optimizer'],
+            params=params
+        ),
+        **cfg.get('kwargs', {})
+    )
+
+
+def _build_optim(cfg: dict, params: Iterable[torch.nn.parameter.Parameter]) -> Union[torch.optim.Optimizer, ZeroRedundancyOptimizer]:
     """Setup the optimizer.
 
     Args:
-        type_optim (str): name of optimizer, should be an attribute of `torch.optim`, like `Adam`, `SGD`.
-        paramlist (Iterable[Parameter]): a iterator or generator that returns parameters to be optimized.
-        use_zero (bool, default False): a flag to determinte whether use `ZeroRedundancyOptimizer` or not,
-            ref to https://pytorch.org/tutorials/recipes/zero_redundancy_optimizer.html, which is supported since
-            torch 1.8.0
-        **kwargs: any keyword arguments can be passed into optimizer initializatio.
-    
+        cfg (dict): in following format
+            {
+                // name of optimizer, should be an attribute of `torch.optim`, like `Adam`, `SGD`.
+                "type": "NameOfOptimizerClass",
+                // 'zeroredundancy' is a flag to determinte whether use `ZeroRedundancyOptimizer` or not,
+                // ... ref to https://pytorch.org/tutorials/recipes/zero_redundancy_optimizer.html, 
+                // ... which is supported since torch 1.8.0
+                "zeroredundancy": true,
+                // 'kwargs' contains any keyword arguments can be passed into optimizer initialization.
+                // such as lr, momentum (SGD), betas (Adam) ...
+                "kwargs": {
+                    ...
+                }
+            }
+
     Return:
         optimizer (torch.optim.Optimizer | ZeroRedundancyOptimizer)
-
-    Example:
-        >>> # With `use_zero=False`
-        >>> model = nn.Linear(3,4)
-        >>> optimizer = SetupOptim('Adam', model.parameters(), lr=1e-3, betas=(0.9,0.99))
-        >>> # With `use_zero=True`
-        >>> # ... (init of DDP)
-        >>> model = torch.nn.parallel.DistributedDataParallel(model)
-        >>> optimizer = SetupOptim('Adam', model.parameters(), use_zero=True, lr=1e-3, betas=(0.9,0.99))
     """
-    if not use_zero:
-        return getattr(torch.optim, type_optim)(paramlist, **kwargs)
+
+    assert 'type' in cfg
+    cls_optim = cfg['type']
+    kwarg_optim = cfg.get('kwargs', {})
+
+    assert isinstance(cls_optim, str)
+    # type: torch.optim.Optimizer
+    cls_optim = getattr(torch.optim, cls_optim)
+    if cfg.get('zeroredundancy', False):
+        return ZeroRedundancyOptimizer(
+            params=params,
+            optimizer_class=cls_optim,
+            **kwarg_optim
+        )
     else:
-        # raise NotImplementedError(f"Still on testing.")
-        if torch.__version__ < '1.8.0':
-            raise NotImplementedError
-
-        # NOTE: This is still a experimental function in torch 1.9.0
-        if torch.__version__ < '1.9.0':
-            zerooptimizer = ZeroRedundancyOptimizer(
-                params=paramlist, optim=getattr(torch.optim, type_optim), **kwargs)
-        else:
-            zerooptimizer = ZeroRedundancyOptimizer(
-                params=paramlist, optimizer_class=getattr(torch.optim, type_optim), **kwargs)
-        return zerooptimizer
+        return cls_optim(params, **kwarg_optim)
 
 
-class Scheduler(object):
-    def __init__(self, optimizer_configs: dict, paramlist: Iterable[torch.nn.parameter.Parameter], reverse_metric_direc: bool = True):
-        super().__init__()
-        if 'type_optim' in optimizer_configs:   # for compablility of previous versions
-            optimizer_configs['type'] = optimizer_configs['type_optim']
+class State(Enum):
+    """Evaluation state.
 
-        self.optimizer = SetupOptim(
-            optimizer_configs['type'], paramlist, ('use_zero' in optimizer_configs) and optimizer_configs['use_zero'], **optimizer_configs['kwargs'])
-        self.iter_cur = 0
-        self.best_metric = None
-        self._reverse_ = reverse_metric_direc
-        self.lr_init = self.lr_cur
+    meaning:
+    IMPROVED (0): continue training for metric is improving
+    CONTINUE (1): continue training by the some predefined condition
+    TERMINATED (2): stop training.
+    """
+    IMPROVED = 0
+    CONTINUE = 1
+    TERMINATED = 2
+
+
+class Scheduler:
+    def __init__(self, optimizer: torch.optim.Optimizer, reverse: bool = False):
+        """
+        Args:
+            optimizer : optimizer
+            reverse (bool): reverse the optimizing order of evaluation metric, defaultly is descending order.
+        """
+        assert isinstance(optimizer, torch.optim.Optimizer)
+        assert isinstance(reverse, bool)
+
+        self.optimizer = optimizer
+        self._reverse = reverse
+        self.init_lr = self.lr_cur
+        self.best_metric = float('-inf') if reverse else float('inf')
 
     @property
     def lr_cur(self) -> float:
@@ -73,6 +121,9 @@ class Scheduler(object):
     def _adjust_lr(self, lr: float):
         for param_group in self.optimizer.param_groups:
             param_group['lr'] = lr
+
+    def _is_improved(self, metric: float) -> bool:
+        return self._reverse ^ (metric < self.best_metric)
 
     def state_dict(self):
         output = OrderedDict()
@@ -93,259 +144,310 @@ class Scheduler(object):
             return None
 
         for name in vars(self).keys():
-            if name not in ckpt:
-                continue
             if name == "optimizer":
                 self.optimizer.load_state_dict(ckpt[name])
             else:
                 setattr(self, name, ckpt[name])
 
-    def update_lr_step(self, global_steps: int):
+    def update_lr_step(self, n_step: int):
         """Method for updating the LR by steps. Defaultly do nothing."""
         return None
 
-    def impl_step(self, metric) -> Literal[0, 1, 2]:
-        """Implementation of scheduler updating according to metric from evaluation.
-        This function will be invoked by `scheduler.step()`
-        """
-        raise NotImplementedError
-
-    def step(self, cnt_iter: int, metric) -> Tuple[Literal[0, 1, 2], str]:
-        """Optimizer step.
+    def step(self, metric: float, *args, **kwargs) -> State:
+        """Scheduler step.
         Update the scheduler by every evaluation, useful for early-stop.
 
         Args:
-            cnt_iter (int): # of iterations (begins from 1)
-            metric (obj): the metric for evaluate the performance
+            metric (float): the metric for evaluate the performance
 
-        Returns: (state, info)
-            state (int): choice of `[0, 1, 2]`, meaning
-                0: continue training by the prior condition
-                1: continue training for metric is improving
-                2: stop training.
-            
-            info (str): information
+        Returns: 
+            state (State)
         """
-        if self.best_metric is None:
-            self.best_metric = metric
-
-        self.iter_cur = cnt_iter
-        return self.impl_step(metric)
+        raise NotImplementedError
 
 
 class SchedulerEarlyStop(Scheduler):
-    """A scheduler wrapper for early-stop ones."""
+    """A scheduler wrapper for early-stop ones.
+    
+    ## LR updating way:
+    
+    ### By minibatches/steps:
+        Do nothing.
+        
+    ### By evaluation time:
+
+        if `metric` is improved, return `IMPROVED`
+
+        elif `step < min_step`, return `CONTINUE`
+
+        else
+
+            if `cnt_worse_eval <= n_tol`, return `CONTINUE`
+
+            else
+
+                if `lr_cur > stop_lr`, do `LR *= gamma`, return `CONTINUE`
+                
+                else return `TERMINATED`
+    """
 
     def __init__(
             self,
-            optimizer_configs,
-            paramlist: Iterable[torch.nn.parameter.Parameter],
-            iter_min: int,
-            lr_stop: float = 1e-5,
-            num_ahead: int = 1,
-            gamma: float = 0.1,
-            reverse_metric_direc: bool = True):
-        super().__init__(optimizer_configs, paramlist, reverse_metric_direc)
-        self.lr_stop = lr_stop
-        self.iter_min = iter_min
-        self.num_ahead = num_ahead
-        self.gamma = gamma
-        self.cnt_worse = 0
+            optimizer: torch.optim.Optimizer,
+            min_step: int,              # number of the minimum steps
+            stop_lr: float = 1e-5,      # LR to encounter the early stop
+            # number of look-forward iterations after encountering the worse metric
+            n_tol: int = 0,
+            gamma: float = 0.1,         # decay factor, LR(n+1) = gamma*LR(n)
+            reverse: bool = False):
+        super().__init__(optimizer, reverse)
 
-    def impl_step(self, metric) -> Literal[0, 1, 2]:
-        state = 0
-        if self.iter_cur <= self.iter_min:
-            if not (self._reverse_ ^ (metric < self.best_metric)):
-                self.best_metric = metric
-                state = 1
-        elif not (self._reverse_ ^ (metric < self.best_metric)):
+        assert stop_lr > 0.
+        assert gamma > 0.
+        assert min_step >= 0
+        assert not ((stop_lr < self.lr_cur) ^ (gamma < 1.)), \
+            f"in the configure: init-lr={self.init_lr:.2e} " \
+            f"stop-lr={stop_lr:.2e} gamma={gamma:.2e}\n" \
+            "the training will never terminated."
+        assert n_tol >= 0
+
+        self.stop_lr = stop_lr
+
+        self.min_step = min_step
+        self._in_min_step = True
+
+        self.n_tol = n_tol
+        self._cnt_worse = 0
+
+        self.gamma = gamma
+
+    def _check_hit_stop(self, new_lr: float) -> bool:
+        return (self.stop_lr <= new_lr) ^ (self.gamma < 1.0)
+
+    def update_lr_step(self, n_step: int):
+        if self._in_min_step and n_step >= self.min_step:
+            self._in_min_step = False
+        return None
+
+    def step(self, metric: float) -> State:
+        if self._is_improved(metric):
             self.best_metric = metric
-            self.cnt_worse = 0
-            state = 1
+            return State.IMPROVED
+        elif self._in_min_step:
+            return State.CONTINUE
         else:
-            self.cnt_worse += 1
-            if self.cnt_worse >= self.num_ahead:
-                lr = self.lr_cur
-                lr *= self.gamma
-                if lr < self.lr_stop:
-                    state = 2
+            self._cnt_worse += 1
+            if self._cnt_worse > self.n_tol:
+                if self._check_hit_stop(self.lr_cur*self.gamma):
+                    return State.TERMINATED
                 else:
-                    self._adjust_lr(lr)
-                    self.cnt_worse = 0
-        return state
+                    self._adjust_lr(self.lr_cur*self.gamma)
+                    self._cnt_worse = 0
+                    return State.CONTINUE
+            else:
+                return State.CONTINUE
 
 
 class SchedulerFixedStop(Scheduler):
-    """A scheduler wrapper for ones stopping at fixed iterations."""
+    """A scheduler wrapper for ones stopping at fixed iterations.
+    
+    ## LR updating way:
+    
+    ### By minibatches/steps:
+        do nothing
+        
+    ### By evaluation time:
+        if `step < stop_step`
+            if `metric` is improved
+                return IMPROVED
+            else
+                return CONTINUE
+        else
+            return TERMINATED
+    """
 
     def __init__(
-            self,
-            optimizer_configs,
-            paramlist: Iterable[torch.nn.parameter.Parameter],
-            iter_max: int,
-            reverse_metric_direc: bool = True):
-        super().__init__(optimizer_configs, paramlist, reverse_metric_direc)
-        self.iter_max = iter_max
+        self,
+        optimizer: torch.optim.Optimizer,
+        # the step to terminate the training,
+        # note that training won't be terminated hitting stop_step
+        # ... unitl next evaluation.
+        stop_step: int,
+            reverse: bool = False):
+        super().__init__(optimizer, reverse)
 
-    def _impl_update_lr_iter(self):
-        """Implementation of your custom LR update method. Defaultly do nothing."""
-        return None
+        assert stop_step > 0
+        self.stop_step = int(stop_step)
+        self._in_stop_step = True
 
-    def impl_step(self, metric):
-        state = 0
-        if self.iter_cur >= self.iter_max:
-            state = 2
-        elif not (self._reverse_ ^ (metric < self.best_metric)):
-            self.best_metric = metric
-            state = 1
+    def update_lr_step(self, n_step: int):
+        if self._in_stop_step and n_step >= self.stop_step:
+            self._in_stop_step = False
+        return
 
-        self._impl_update_lr_iter()
+    def step(self, metric: float, *args, **kwargs) -> State:
+        if self._in_stop_step:
+            if self._is_improved(metric):
+                return State.IMPROVED
+            else:
+                return State.CONTINUE
+        else:
+            return State.TERMINATED
 
-        return state
 
-
-class SchedulerWarmupMileStone(SchedulerEarlyStop):
+class SchedulerEarlyStopWithWarmup(SchedulerEarlyStop):
     """MileStone scheduler with warmup
         
     Combine the linear warmup and mile stone decreasing up
+
+    ## LR updating way:
+    
+    ### By minibatches/steps:
+        if `step < warmup_step`
+            linearly increasing the lr to `max_lr`
+        
+    ### By evaluation time:
+        refer to SchedulerEarlyStop
     """
 
     def __init__(
             self,
-            optimizer_configs,
-            paramlist: Iterable[torch.nn.parameter.Parameter],
-            total_batch_size: int,
-            iter_warmup: int,
-            refer_batch: int,
-            refer_lr: float = 0.,
-            lr_stop: float = 1e-5,
-            num_ahead: int = 1,
+            optimizer: torch.optim.Optimizer,
+            batch_size: int,
+            warmup_step: int,
+            ref_bs: int,
+            ref_lr: float = 0.,
+            stop_lr: float = 1e-5,
+            n_tol: int = 1,
             gamma: float = 0.1,
-            reverse_metric_direc: bool = True):
-        super().__init__(optimizer_configs, paramlist, 0, lr_stop,
-                         num_ahead, gamma, reverse_metric_direc)
-        if refer_lr == 0.:
-            refer_lr = self.lr_init
+            reverse: bool = False):
 
-        assert total_batch_size > 0
-        assert iter_warmup > 0
-        assert refer_batch > 0
-        assert refer_lr > 0
+        super().__init__(optimizer, min_step=warmup_step, stop_lr=stop_lr,
+                         n_tol=n_tol, gamma=gamma, reverse=reverse)
+        if ref_lr == 0.:
+            ref_lr = self.lr_cur
 
-        self.max_lr = max(total_batch_size/refer_batch * refer_lr, refer_lr)
-        if self.lr_init != refer_lr:
+        assert batch_size > 0
+        assert warmup_step > 0
+        assert ref_bs > 0
+        assert ref_lr > 0
+
+        if self.lr_cur != ref_lr:
             print("Warning: the learning set in optimizer and `refer_lr` are different.")
-            self.lr_init = refer_lr
-            self._adjust_lr(refer_lr)
+            self._adjust_lr(ref_lr)
 
-        self.iter_warmup = iter_warmup
-        self.lr_addon = (self.max_lr-self.lr_init)/iter_warmup
+        max_lr = max(batch_size/ref_bs * ref_lr, ref_lr)
+        self.lr_addon = (max_lr-self.lr_cur)/warmup_step
 
-    def impl_step(self, metric):
-        if self.iter_cur <= self.iter_warmup:
-            state = 0
-            if not (self._reverse_ ^ (metric < self.best_metric)):
-                self.best_metric = metric
-                state = 1
-            cur_lr = self.lr_cur
-            self._adjust_lr(cur_lr+self.lr_addon)
-            return state
-        else:
-            return super().impl_step(metric)
+    def update_lr_step(self, n_step: int):
+        if self._in_min_step:
+            self._adjust_lr(self.lr_cur + self.lr_addon)
+            if n_step >= self.min_step:
+                self._in_min_step = False
+        return None
 
 
-class SchedulerTransformer(SchedulerFixedStop):
+class SchedulerNoam(SchedulerFixedStop):
     """
     The standard scheduler of "Attention is all you need"
-    peak learning rate peak_factor / sqrt(warmup_steps * d_model)
+    peak learning rate = peak_factor / sqrt(warmup_step * dim_model)
     """
 
     def __init__(
             self,
-            optimizer_configs,
-            paramlist: Iterable[torch.nn.parameter.Parameter],
-            d_model: int,
-            warmup_steps: int,
-            iter_max: int,
+            optimizer: torch.optim.Optimizer,
+            # hidden dimension of model (attention layer in the original paper).
+            dim_model: int,
+            warmup_step: int,
+            stop_step: int,
             peak_factor: float = 1.0,
-            reverse_metric_direc: bool = True):
-        super().__init__(optimizer_configs, paramlist, iter_max, reverse_metric_direc)
-        assert d_model > 0
-        assert warmup_steps > 0
-        self.lr_init = peak_factor/math.sqrt(d_model)
-        self._div_warmup_steps = 1./math.sqrt(warmup_steps)/warmup_steps
+            reverse: bool = False):
+        super().__init__(optimizer, stop_step, reverse)
+
+        assert dim_model > 0
+        assert warmup_step > 0
+        assert peak_factor > 0.
+        self.init_lr = peak_factor / math.sqrt(dim_model)
+        self._den_in_warmup = 1./math.sqrt(warmup_step)/warmup_step
         self.update_lr_step(1)
 
-    def update_lr_step(self, global_steps: int):
-        step = float(global_steps)
-        lr = self.lr_init * min(1./math.sqrt(step),
-                                step*self._div_warmup_steps)
+    def update_lr_step(self, n_step: int):
+        super().update_lr_step(n_step)
+        lr = self.init_lr * \
+            min(1./math.sqrt(n_step),  n_step*self._den_in_warmup)
         self._adjust_lr(lr)
 
 
-class SchedulerTransformerEarlyStop(SchedulerEarlyStop):
+class SchedulerNoamEarlyStop(SchedulerEarlyStop):
     """
     Linear warmup by step + decay by step + early stop by iteration
-    peak lr = peak_factor / sqrt(d_model * warpup_steps)
+    peak lr = peak_factor / sqrt(dim_model * warmup_step)
     """
 
     def __init__(
             self,
-            optimizer_configs,
-            paramlist: Iterable[torch.nn.parameter.Parameter],
-            d_model: int,
-            warmup_steps: int,
+            optimizer: torch.optim.Optimizer,
+            dim_model: int,
+            warmup_step: int,
             peak_factor: float = 1.0,
-            lr_stop: float = 1e-5,
-            num_ahead: int = 1,
+            stop_lr: float = 0.00001,
+            n_tol: int = 0,
             gamma: float = 0.1,
-            reverse_metric_direc: bool = True):
-        super().__init__(optimizer_configs, paramlist, 0,
-                         lr_stop, num_ahead, gamma, reverse_metric_direc)
-        assert d_model > 0
-        assert warmup_steps > 0
-        self.lr_init = peak_factor/math.sqrt(d_model)
-        self._div_warmup_steps = 1./math.sqrt(warmup_steps)/warmup_steps
-        self.step_cur = 0
-        self.warmup_steps = warmup_steps
+            reverse: bool = False):
+        super().__init__(optimizer, warmup_step, stop_lr, n_tol, gamma, reverse)
+
+        assert dim_model > 0
+        assert warmup_step > 0
+        assert peak_factor > 0.
+        self.ref_lr = peak_factor / math.sqrt(dim_model)
+        self._den_in_warmup = 1./math.sqrt(warmup_step)/warmup_step
         self.update_lr_step(1)
 
-    def update_lr_step(self, global_steps: int):
-        self.step_cur = global_steps
-        step = float(global_steps)
-        lr = self.lr_init * min(1./math.sqrt(step),
-                                step*self._div_warmup_steps)
+    def update_lr_step(self, n_step: int):
+        super().update_lr_step(n_step)
+        lr = self.ref_lr * \
+            min(1./math.sqrt(n_step),  n_step*self._den_in_warmup)
         self._adjust_lr(lr)
 
-    def impl_step(self, metric):
-        if self.step_cur <= self.warmup_steps:
-            if not (self._reverse_ ^ (metric < self.best_metric)):
-                self.best_metric = metric
-
-            return 0
-        else:
-            lr0 = self.lr_cur
-            states = super().impl_step(metric)
-            lr1 = self.lr_cur
-            self.lr_init *= lr1 / lr0
-            return states
+    def step(self, metric: float) -> State:
+        prev_lr = self.lr_cur
+        state = super().step(metric)
+        self.ref_lr *= self.lr_cur / prev_lr
+        return state
 
 
-class SchedulerIterAnnealing(SchedulerFixedStop):
+class SchedulerLinearAnnealing(SchedulerFixedStop):
     """
-    (Linear) annealing the LR by every evaluation time.
+    Linearly annealing the LR by every step.
     """
 
     def __init__(
             self,
-            optimizer_configs,
-            paramlist: Iterable[torch.nn.parameter.Parameter],
-            decay_factor: float,
-            iter_max: int,
-            reverse_metric_direc: bool = True):
-        super().__init__(optimizer_configs, paramlist, iter_max, reverse_metric_direc)
-        assert decay_factor > 0. and decay_factor < 1. and iter_max > 0
-        self.decay = decay_factor
+            optimizer: torch.optim.Optimizer,
+            min_step: int,
+            stop_lr: float,
+            stop_step: int,
+            reverse: bool = False):
+        super().__init__(optimizer, stop_step, reverse)
+
+        assert stop_lr > 0. and stop_lr < self.lr_cur
+        assert min_step >= 0
+        assert stop_step > min_step
+
+        self.min_step = min_step
+        self._in_min_step = True
+        self._lr_addon = -(self.lr_cur - stop_lr) / (stop_step - min_step)
+
+    def update_lr_step(self, n_step: int):
+        if self._in_min_step:
+            if n_step >= self.min_step:
+                self._in_min_step = False
+        elif self._in_stop_step:
+            self._adjust_lr(self.lr_cur + self._lr_addon)
+            if n_step >= self.stop_step:
+                self._in_stop_step = False
+
+        return None
 
     def _impl_update_lr_iter(self):
         lr = self.lr_init * (self.decay ** self.iter_cur)
@@ -353,33 +455,35 @@ class SchedulerIterAnnealing(SchedulerFixedStop):
 
 
 class SchedulerCosineAnnealing(SchedulerFixedStop):
-    """Annealing the LR with cosine function (and period) in iteration level."""
+    """Annealing the LR with cosine function (and period) by steps."""
 
     def __init__(
             self,
-            optimizer_configs,
-            paramlist: Iterable[torch.nn.parameter.Parameter],
-            lr_min: float,
-            iter_max: int,
+            optimizer: torch.optim.Optimizer,
+            min_lr: float,
+            stop_step: int,
             period: int = 0,
             decay_factor: float = 1.,
-            reverse_metric_direc: bool = True):
-        super().__init__(optimizer_configs, paramlist, iter_max, reverse_metric_direc)
-        assert period >= 0 and lr_min >= 0 and iter_max > 0
+            reverse: bool = False):
+        super().__init__(optimizer, stop_step, reverse)
+
+        assert min_lr > 0.
+        assert period >= 0
         assert decay_factor > 0. and decay_factor <= 1.
         if period == 0:
-            period = iter_max
+            period = stop_step
 
         self.period = period
-        self.decay = decay_factor
-        self.lr_min = lr_min
-        self.lr_max = self.lr_init
+        self.decay_factor = decay_factor
+        self.min_lr = min_lr
+        self._ref_lr = self.lr_cur
 
-    def _impl_update_lr_iter(self):
-        iter_idx = self.iter_cur - 1
-        lr_max = (self.lr_max *
-                  self.decay**(iter_idx//self.period))
-
-        lr = self.lr_min + 0.5 * (lr_max - self.lr_min) * (
-            1 + np.cos((iter_idx % self.period)/self.period * np.pi))
-        self._adjust_lr(lr)
+    def update_lr_step(self, n_step: int):
+        super().update_lr_step(n_step)
+        max_lr = (self._ref_lr * self.decay_factor**((n_step-1)//self.period))
+        self._adjust_lr(
+            self.min_lr + 0.5 * (max_lr - self.min_lr) * (
+                1 + math.cos(((n_step-1) % self.period) /
+                             self.period * math.pi)
+            )
+        )

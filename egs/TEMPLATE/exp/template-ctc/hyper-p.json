@@ -21,13 +21,13 @@
     "train": {
         "amp": true,
         "batch-size": 4,
-        "checkall": true,
+        "check-freq": 50,
         "databalance": true
     },
     "inference": {
         "avgmodel": {
-            "mode": "last",
-            "num": 3
+            "mode": "best",
+            "num": 2
         },
         "decode": {
             "beam-size": 16,

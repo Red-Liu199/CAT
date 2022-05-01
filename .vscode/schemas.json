@@ -909,11 +909,11 @@
                         "Scheduler",
                         "SchedulerCosineAnnealing",
                         "SchedulerEarlyStop",
+                        "SchedulerEarlyStopWithWarmup",
                         "SchedulerFixedStop",
-                        "SchedulerIterAnnealing",
-                        "SchedulerTransformer",
-                        "SchedulerTransformerEarlyStop",
-                        "SchedulerWarmupMileStone"
+                        "SchedulerLinearAnnealing",
+                        "SchedulerNoam",
+                        "SchedulerNoamEarlyStop"
                     ]
                 },
                 "optimizer": {
@@ -942,7 +942,7 @@
                                 "SparseAdam"
                             ]
                         },
-                        "use_zero": {
+                        "zeroredundancy": {
                             "type": "boolean",
                             "default": true
                         }
@@ -1293,15 +1293,11 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
-                                    "reverse_metric_direc": {
+                                    "reverse": {
                                         "type": "boolean",
-                                        "default": true
+                                        "default": false
                                     },
-                                    "paramlist": {},
-                                    "optimizer_configs": {
-                                        "type": "object",
-                                        "properties": {}
-                                    }
+                                    "optimizer": {}
                                 }
                             }
                         }
@@ -1320,9 +1316,9 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
-                                    "reverse_metric_direc": {
+                                    "reverse": {
                                         "type": "boolean",
-                                        "default": true
+                                        "default": false
                                     },
                                     "decay_factor": {
                                         "type": "number",
@@ -1332,14 +1328,13 @@
                                         "type": "number",
                                         "default": 0
                                     },
-                                    "iter_max": {
+                                    "stop_step": {
                                         "type": "number"
                                     },
-                                    "lr_min": {
+                                    "min_lr": {
                                         "type": "number"
                                     },
-                                    "paramlist": {},
-                                    "optimizer_configs": {}
+                                    "optimizer": {}
                                 }
                             }
                         }
@@ -1358,27 +1353,74 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
-                                    "reverse_metric_direc": {
+                                    "reverse": {
                                         "type": "boolean",
-                                        "default": true
+                                        "default": false
                                     },
                                     "gamma": {
                                         "type": "number",
                                         "default": 0.1
                                     },
-                                    "num_ahead": {
+                                    "n_tol": {
                                         "type": "number",
-                                        "default": 1
+                                        "default": 0
                                     },
-                                    "lr_stop": {
+                                    "stop_lr": {
                                         "type": "number",
                                         "default": 1e-05
                                     },
-                                    "iter_min": {
+                                    "min_step": {
                                         "type": "number"
                                     },
-                                    "paramlist": {},
-                                    "optimizer_configs": {}
+                                    "optimizer": {}
+                                }
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "type": {
+                                "const": "SchedulerEarlyStopWithWarmup"
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "kwargs": {
+                                "type": "object",
+                                "properties": {
+                                    "reverse": {
+                                        "type": "boolean",
+                                        "default": false
+                                    },
+                                    "gamma": {
+                                        "type": "number",
+                                        "default": 0.1
+                                    },
+                                    "n_tol": {
+                                        "type": "number",
+                                        "default": 1
+                                    },
+                                    "stop_lr": {
+                                        "type": "number",
+                                        "default": 1e-05
+                                    },
+                                    "ref_lr": {
+                                        "type": "number",
+                                        "default": 0.0
+                                    },
+                                    "ref_bs": {
+                                        "type": "number"
+                                    },
+                                    "warmup_step": {
+                                        "type": "number"
+                                    },
+                                    "batch_size": {
+                                        "type": "number"
+                                    },
+                                    "optimizer": {}
                                 }
                             }
                         }
@@ -1397,15 +1439,14 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
-                                    "reverse_metric_direc": {
+                                    "reverse": {
                                         "type": "boolean",
-                                        "default": true
+                                        "default": false
                                     },
-                                    "iter_max": {
+                                    "stop_step": {
                                         "type": "number"
                                     },
-                                    "paramlist": {},
-                                    "optimizer_configs": {}
+                                    "optimizer": {}
                                 }
                             }
                         }
@@ -1415,7 +1456,7 @@
                     "if": {
                         "properties": {
                             "type": {
-                                "const": "SchedulerIterAnnealing"
+                                "const": "SchedulerLinearAnnealing"
                             }
                         }
                     },
@@ -1424,18 +1465,20 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
-                                    "reverse_metric_direc": {
+                                    "reverse": {
                                         "type": "boolean",
-                                        "default": true
+                                        "default": false
                                     },
-                                    "iter_max": {
+                                    "stop_step": {
                                         "type": "number"
                                     },
-                                    "decay_factor": {
+                                    "stop_lr": {
                                         "type": "number"
                                     },
-                                    "paramlist": {},
-                                    "optimizer_configs": {}
+                                    "min_step": {
+                                        "type": "number"
+                                    },
+                                    "optimizer": {}
                                 }
                             }
                         }
@@ -1445,7 +1488,7 @@
                     "if": {
                         "properties": {
                             "type": {
-                                "const": "SchedulerTransformer"
+                                "const": "SchedulerNoam"
                             }
                         }
                     },
@@ -1454,25 +1497,24 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
-                                    "reverse_metric_direc": {
+                                    "reverse": {
                                         "type": "boolean",
-                                        "default": true
+                                        "default": false
                                     },
                                     "peak_factor": {
                                         "type": "number",
                                         "default": 1.0
                                     },
-                                    "iter_max": {
+                                    "stop_step": {
                                         "type": "number"
                                     },
-                                    "warmup_steps": {
+                                    "warmup_step": {
                                         "type": "number"
                                     },
-                                    "d_model": {
+                                    "dim_model": {
                                         "type": "number"
                                     },
-                                    "paramlist": {},
-                                    "optimizer_configs": {}
+                                    "optimizer": {}
                                 }
                             }
                         }
@@ -1482,7 +1524,7 @@
                     "if": {
                         "properties": {
                             "type": {
-                                "const": "SchedulerTransformerEarlyStop"
+                                "const": "SchedulerNoamEarlyStop"
                             }
                         }
                     },
@@ -1491,19 +1533,19 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
-                                    "reverse_metric_direc": {
+                                    "reverse": {
                                         "type": "boolean",
-                                        "default": true
+                                        "default": false
                                     },
                                     "gamma": {
                                         "type": "number",
                                         "default": 0.1
                                     },
-                                    "num_ahead": {
+                                    "n_tol": {
                                         "type": "number",
-                                        "default": 1
+                                        "default": 0
                                     },
-                                    "lr_stop": {
+                                    "stop_lr": {
                                         "type": "number",
                                         "default": 1e-05
                                     },
@@ -1511,63 +1553,13 @@
                                         "type": "number",
                                         "default": 1.0
                                     },
-                                    "warmup_steps": {
+                                    "warmup_step": {
                                         "type": "number"
                                     },
-                                    "d_model": {
+                                    "dim_model": {
                                         "type": "number"
                                     },
-                                    "paramlist": {},
-                                    "optimizer_configs": {}
-                                }
-                            }
-                        }
-                    }
-                },
-                {
-                    "if": {
-                        "properties": {
-                            "type": {
-                                "const": "SchedulerWarmupMileStone"
-                            }
-                        }
-                    },
-                    "then": {
-                        "properties": {
-                            "kwargs": {
-                                "type": "object",
-                                "properties": {
-                                    "reverse_metric_direc": {
-                                        "type": "boolean",
-                                        "default": true
-                                    },
-                                    "gamma": {
-                                        "type": "number",
-                                        "default": 0.1
-                                    },
-                                    "num_ahead": {
-                                        "type": "number",
-                                        "default": 1
-                                    },
-                                    "lr_stop": {
-                                        "type": "number",
-                                        "default": 1e-05
-                                    },
-                                    "refer_lr": {
-                                        "type": "number",
-                                        "default": 0.0
-                                    },
-                                    "refer_batch": {
-                                        "type": "number"
-                                    },
-                                    "iter_warmup": {
-                                        "type": "number"
-                                    },
-                                    "total_batch_size": {
-                                        "type": "number"
-                                    },
-                                    "paramlist": {},
-                                    "optimizer_configs": {}
+                                    "optimizer": {}
                                 }
                             }
                         }

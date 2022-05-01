@@ -20,7 +20,7 @@
     "train": {
         "amp": true,
         "batch-size": 4,
-        "checkall": true,
+        "check-freq": 50,
         "databalance": true
     },
     "inference": {

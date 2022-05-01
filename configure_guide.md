@@ -91,7 +91,7 @@ egs/<task>/exp/template
         ...
     },
     // required for RNN-T, code: cat/rnnt/joint.py
-    "joint": {
+    "joiner": {
         "type": ...,   // can be any class derived from 'AbsJointNet' in cat/rnnt/joint.py
         "kwargs": {    // arguments according to 'type'
             ...
@@ -120,7 +120,6 @@ egs/<task>/exp/template
         // optimizer settings
         "optimizer": {
             "type": ...,       // all available ones in torch.optim
-            "use_zero": true,  // flag of whether use 'ZeroRedundancyOptimizer' for less memory usage.
             "kwargs": {        // arguments according to 'type'
                 ...
             }

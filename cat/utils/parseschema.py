@@ -218,7 +218,7 @@ for m in dir(torch.optim):
     if inspect.isclass(_m) and issubclass(_m, Optimizer):
         modules.append(_m)
 parse_processing(optim, modules)
-optim['properties']['use_zero'] = gen_object(bool, default=True)
+optim['properties']['zeroredundancy'] = gen_object(bool, default=True)
 processing['properties']['optimizer'] = optim
 
 schema['properties']['scheduler'] = processing
