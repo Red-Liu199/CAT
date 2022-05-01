@@ -422,17 +422,13 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
                     (features, labels, input_lengths, label_lengths)
                 )
 
-        if isinstance(loss, tuple):
-            assert len(loss) == 2
-            loss, norm_size = loss
-        else:
-            norm_size = features.size(0)
+            if isinstance(loss, tuple):
+                assert len(loss) == 2
+                loss, norm_size = loss
+            else:
+                norm_size = features.size(0)
+            loss /= fold
 
-        if torch.isinf(loss):
-            # FIXME: this is not a proper fixing
-            loss.data.zero_()
-
-        loss = loss / fold
         if not isinstance(norm_size, torch.Tensor):
             norm_size = input_lengths.new_tensor(
                 int(norm_size), device=args.gpu)
