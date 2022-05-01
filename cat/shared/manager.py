@@ -40,6 +40,9 @@ from torch.utils.data import DataLoader
 from torch.cuda.amp import autocast, GradScaler
 from torch.utils.tensorboard import SummaryWriter
 from torch.distributed.optim import ZeroRedundancyOptimizer
+from torch.multiprocessing import Event
+
+terminate_event = Event()
 
 F_CHECKLIST = "checkpoint.list"
 
@@ -474,7 +477,6 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
     t_data = 0.
     t_last_step = time.time()
     t_last_batch = time.time()
-    quit_flag = torch.tensor(0, device=args.gpu)
     cnt_step_update = 0
 
     p_bar = tqdm(
@@ -485,8 +487,7 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
         leave=False
     )
     for i, minibatch in enumerate(trainloader):
-        dist.all_reduce(quit_flag, op=dist.ReduceOp.MAX)
-        if quit_flag:
+        if terminate_event.is_set():
             # update n_steps, since we don't know how many steps there are with large dataset mode.
             args.n_steps = cnt_step_update
             break
@@ -495,6 +496,9 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
             if fold == 1 or (i+1) % fold == 0:
                 cnt_step_update += 1
                 p_bar.update()
+                if args.verbose and args.gpu == 0:
+                    print(
+                        f"\rIn skipping steps: {cnt_step_update + manager.step_by_last_epoch}/{manager.step}", end='')
             continue
 
         features, input_lengths, labels, label_lengths = minibatch
@@ -509,7 +513,6 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
         # update every fold times and drop the last few batches (number of which <= fold)
         if fold == 1 or (i+1) % fold == 0:
             detach_loss, n_batch = _go_step(detach_loss, n_batch)
-
             if grad_norm > 0.0:
                 if enableAMP:
                     scaler.unscale_(optimizer)
@@ -570,11 +573,12 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
         if args.verbose:
             t_last_batch = time.time()
 
-    if not quit_flag:
-        # set quit flag to True
-        quit_flag += 1
-        # wait until other processes quit
-        dist.all_reduce(quit_flag, op=dist.ReduceOp.MAX)
+    if not terminate_event.is_set():
+        terminate_event.set()
+    dist.barrier()
+    if args.rank == 0:
+        terminate_event.clear()
+
     manager.step_by_last_epoch += cnt_step_update
     if args.check_freq == -1:
         yield
