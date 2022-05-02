@@ -40,9 +40,6 @@ from torch.utils.data import DataLoader
 from torch.cuda.amp import autocast, GradScaler
 from torch.utils.tensorboard import SummaryWriter
 from torch.distributed.optim import ZeroRedundancyOptimizer
-from torch.multiprocessing import Event
-
-terminate_event = Event()
 
 F_CHECKLIST = "checkpoint.list"
 
@@ -413,27 +410,32 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
         _trainer_hook (optional, callable function) : custom hook function, check source code for usage.
     """
 
-    def _go_step(detach_loss, n_batch):
+    def _go_step(detach_loss, n_batch, minibatch):
+        feats, frame_lens, labels, label_lens = minibatch
+        feats = feats.cuda(args.gpu, non_blocking=True)
+        if manager.specaug is not None:
+            feats, frame_lens = manager.specaug(feats, frame_lens)
+
         # we divide loss with fold since we want the gradients to be divided by fold
         with autocast(enabled=enableAMP):
             if _trainer_hook is None:
-                loss = model(features, labels, input_lengths, label_lengths)
+                loss = model(feats, labels, frame_lens, label_lens)
             else:
                 # you could custom model forward, tracks logging and metric calculation in the hook
                 loss = _trainer_hook(
                     manager, model, args, (i+1) % fold,
-                    (features, labels, input_lengths, label_lengths)
+                    (feats, labels, frame_lens, label_lens)
                 )
 
             if isinstance(loss, tuple):
                 assert len(loss) == 2
                 loss, norm_size = loss
             else:
-                norm_size = features.size(0)
+                norm_size = feats.size(0)
             loss /= fold
 
         if not isinstance(norm_size, torch.Tensor):
-            norm_size = input_lengths.new_tensor(
+            norm_size = frame_lens.new_tensor(
                 int(norm_size), device=args.gpu)
         else:
             norm_size = norm_size.to(device=args.gpu, dtype=torch.long)
@@ -472,12 +474,13 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
     world_size = dist.get_world_size()
     fold = args.grad_accum_fold
     assert fold >= 1
-    detach_loss = 0.
+    accum_loss = 0.
     n_batch = 0
     t_data = 0.
     t_last_step = time.time()
     t_last_batch = time.time()
     cnt_step_update = 0
+    is_quit = torch.tensor(0, dtype=torch.bool, device=args.gpu)
 
     p_bar = tqdm(
         desc=f'Epoch: {manager.epoch} | train',
@@ -487,32 +490,28 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
         leave=False
     )
     for i, minibatch in enumerate(trainloader):
-        if terminate_event.is_set():
-            # update n_steps, since we don't know how many steps there are with large dataset mode.
-            args.n_steps = cnt_step_update
-            break
+        # since the gradient fold could be > 1, we need to accumulate the time
+        if args.verbose:
+            t_data += time.time() - t_last_batch
 
-        if cnt_step_update + manager.step_by_last_epoch < manager.step:
-            if fold == 1 or (i+1) % fold == 0:
+        # update every fold times and drop the last few batches (number of which <= fold)
+        if fold == 1 or (i+1) % fold == 0:
+            dist.all_reduce(is_quit, op=dist.ReduceOp.MAX)
+            if is_quit:
+                # update n_steps, since we don't know how many steps there are with large dataset mode.
+                args.n_steps = cnt_step_update
+                break
+
+            # skip steps when resuming from stop training
+            if cnt_step_update + manager.step_by_last_epoch < manager.step:
                 cnt_step_update += 1
                 p_bar.update()
                 if args.verbose and args.gpu == 0:
                     print(
                         f"\rIn skipping steps: {cnt_step_update + manager.step_by_last_epoch}/{manager.step}", end='')
-            continue
+                continue
 
-        features, input_lengths, labels, label_lengths = minibatch
-        features = features.cuda(args.gpu, non_blocking=True)
-        # since the gradient fold could be > 1, we need to accumulate the time
-        if args.verbose:
-            t_data += time.time() - t_last_batch
-
-        if manager.specaug is not None:
-            features, input_lengths = manager.specaug(features, input_lengths)
-
-        # update every fold times and drop the last few batches (number of which <= fold)
-        if fold == 1 or (i+1) % fold == 0:
-            detach_loss, n_batch = _go_step(detach_loss, n_batch)
+            accum_loss, n_batch = _go_step(accum_loss, n_batch, minibatch)
             if grad_norm > 0.0:
                 if enableAMP:
                     scaler.unscale_(optimizer)
@@ -531,10 +530,10 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
 
             # average for logging, since we divide loss by fold for backward,
             # here we multiply fold back for logging
-            detach_loss *= fold / n_batch
+            accum_loss *= fold / n_batch
             # measure accuracy and record loss; item() can sync all processes.
             tolog = {
-                'loss': detach_loss.item(),
+                'loss': accum_loss.item(),
                 'lr': scheduler.lr_cur
             }
 
@@ -563,21 +562,21 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
                 yield None
 
             # reset accumulated loss
-            detach_loss -= detach_loss
+            accum_loss -= accum_loss
             n_batch -= n_batch
         else:
             # gradient accumulation w/o sync
             with model.no_sync():
-                detach_loss, n_batch = _go_step(detach_loss, n_batch)
+                accum_loss, n_batch = _go_step(accum_loss, n_batch, minibatch)
 
         if args.verbose:
             t_last_batch = time.time()
 
-    if not terminate_event.is_set():
-        terminate_event.set()
-    dist.barrier()
-    if args.rank == 0:
-        terminate_event.clear()
+    if not is_quit:
+        # set quit flag to True
+        is_quit = ~is_quit
+        # wait until other processes quit
+        dist.all_reduce(is_quit, op=dist.ReduceOp.MAX)
 
     manager.step_by_last_epoch += cnt_step_update
     if args.check_freq == -1:
