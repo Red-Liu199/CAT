@@ -438,7 +438,7 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
         else:
             norm_size = norm_size.to(device=args.gpu, dtype=torch.long)
 
-        normalized_loss = loss.detach() * norm_size
+        loss_local_sum = loss.detach() * norm_size
         if 'databalance' in args and args.databalance:
             '''
             get current global size
@@ -446,14 +446,14 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
             but current impl is more robust
             '''
             dist.all_reduce(norm_size)
-            loss.data = normalized_loss * (world_size / norm_size)
+            loss.data = loss_local_sum * (world_size / norm_size)
         else:
             norm_size *= world_size
 
         scaler.scale(loss).backward()
 
-        dist.all_reduce(normalized_loss)
-        detach_loss += normalized_loss.float()
+        dist.all_reduce(loss_local_sum)
+        detach_loss += loss_local_sum.float()
         n_batch += norm_size
 
         return detach_loss, n_batch

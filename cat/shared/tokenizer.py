@@ -129,7 +129,7 @@ class JiebaTokenizer(AbsTokenizer):
             self._vocabulary[w] = idx
 
     def _enc(self, s: str) -> List[int]:
-        cut_words = self._tokenizer.cut(s.replace(' ', ''), HMM=False)
+        cut_words = self._tokenizer.cut(s.strip().replace(' ', ''), HMM=False)
         rt_indices = []     # type: List[int]
         for w in cut_words:
             if w not in self._vocabulary:
@@ -337,7 +337,7 @@ class JiebaComposePhoneTokenizer(JiebaTokenizer):
         raise NotImplementedError
 
     def _enc(self, s: str) -> List[int]:
-        cut_words = self._tokenizer.cut(s.replace(' ', ''), HMM=False)
+        cut_words = self._tokenizer.cut(s.strip().replace(' ', ''), HMM=False)
         unkid = self._w2pid['<unk>']
         rt_indices = [list(self._w2pid.get(w, unkid))
                       for w in cut_words]     # type: List[List[int]]

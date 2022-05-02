@@ -71,7 +71,7 @@ class AMTrainer(nn.Module):
             self._crf_ctx = None
             self.criterion = CRFLoss(lamb=lamb)
         else:
-            self.criterion = nn.CTCLoss(reduction='none')
+            self.criterion = nn.CTCLoss()
 
     def register_crf_ctx(self, den_lm: Optional[str] = None):
         """Register the CRF context on model device."""
@@ -100,8 +100,7 @@ class AMTrainer(nn.Module):
             netout = netout.transpose(0, 1)
             loss = self.criterion(netout, labels.to(torch.int), lens_o.to(
                 torch.int), label_lengths.to(torch.int))
-
-        return loss.mean()
+        return loss
 
 
 def build_model(

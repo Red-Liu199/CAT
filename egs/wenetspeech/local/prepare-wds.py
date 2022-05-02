@@ -44,7 +44,7 @@ def parsingData(
     filter_bound = []   # type: List[Tuple[int, int]]
     for filt in filter_group:
         assert ':' in filt, f"parsingData: invalid filter format {filt}"
-        l_bound, u_bound = (i for i in filt.split(':'))
+        l_bound, u_bound = filt.split(':')
         l_bound = 1 if l_bound == '' else int(l_bound)
         u_bound = 2**32-1 if u_bound == '' else int(u_bound)
         filter_bound.append((l_bound, u_bound))
@@ -57,7 +57,7 @@ def parsingData(
         with open(_f_lb, 'r') as fi_label:
             labels += fi_label.readlines()
 
-    labels = [l.split(maxsplit=1)
+    labels = [l.strip().split(maxsplit=1)
               for l in labels]      # type: List[Tuple[str, str]]
 
     num_labels = len(labels)
@@ -82,8 +82,9 @@ def parsingData(
     if len(filter_bound) > 1:
         sinks = []
         for l, u in filter_bound:
+            prefix = '' if l <= 1 else str(l)
             suffix = '' if u == (2**32-1) else str(u)
-            subdir = os.path.join(d_out, f"{l}_{u}")
+            subdir = os.path.join(d_out, f"{prefix}_{suffix}")
             os.makedirs(subdir, exist_ok=True)
             sinks.append(
                 wds.ShardWriter(os.path.join(subdir, fmt), maxcount=2000)
@@ -121,12 +122,12 @@ if __name__ == "__main__":
     with open(F_DATAINFO, 'r') as fi:
         srcdata = json.load(fi)
 
-    for subset in ['dev']:
+    for subset in ['dev', 'train_l']:
         parsingData(
             f_scps=srcdata[subset]['scp'],
             f_labels=srcdata[subset]['trans'],
-            d_out="./debug-wds",
-            fmt=f"wenet-{subset}-%05d.tar",
-            filter_group=["10:1500"],
+            d_out=f"/mnt/nvme_workspace/zhenghh/speechdata/wenetspeech/{subset}",
+            fmt=f"{subset}_%05d.tar",
+            filter_group=[":10", "11:1000", "1001:1200", "1201:1500", "1500:"],
             iszh=True
         )
