@@ -504,14 +504,14 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
                         f"\rIn skipping steps: {cnt_step_update + manager.step_by_last_epoch}/{manager.step}", end='')
             continue
 
+        dist.all_reduce(is_quit, op=dist.ReduceOp.MAX)
+        if is_quit:
+            # update n_steps, since we don't know how many steps there are with large dataset mode.
+            args.n_steps = cnt_step_update
+            break
+
         # update every fold times and drop the last few batches (number of which <= fold)
         if fold == 1 or (i+1) % fold == 0:
-            dist.all_reduce(is_quit, op=dist.ReduceOp.MAX)
-            if is_quit:
-                # update n_steps, since we don't know how many steps there are with large dataset mode.
-                args.n_steps = cnt_step_update
-                break
-
             accum_loss, n_batch = _go_step(accum_loss, n_batch, minibatch)
             if grad_norm > 0.0:
                 if enableAMP:
