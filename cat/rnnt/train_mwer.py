@@ -4,8 +4,6 @@
 
 from ..shared import Manager
 from ..shared import coreutils
-from ..shared.decoder import AbsDecoder
-from ..shared.encoder import AbsEncoder
 from ..shared.data import (
     KaldiSpeechDataset,
     sortedPadCollateASR
@@ -13,9 +11,6 @@ from ..shared.data import (
 from .beam_search import BeamSearcher as RNNTDecoder
 from .train import build_model as rnnt_builder
 from .train import TransducerTrainer
-from .joiner import (
-    AbsJointNet
-)
 
 from warp_rnnt import rnnt_loss as RNNTLoss
 from warp_rnnt import fused_rnnt_loss_ as RNNTFusedLoss
@@ -26,7 +21,6 @@ import argparse
 from typing import *
 
 import torch
-import torch.nn as nn
 import torch.distributed as dist
 from torch.cuda.amp import autocast
 

@@ -494,6 +494,16 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
         if args.verbose:
             t_data += time.time() - t_last_batch
 
+        # skip steps when resuming from stop training
+        if (cnt_step_update + manager.step_by_last_epoch < manager.step):
+            if fold == 1 or (i+1) % fold == 0:
+                cnt_step_update += 1
+                p_bar.update()
+                if args.verbose and args.gpu == 0:
+                    print(
+                        f"\rIn skipping steps: {cnt_step_update + manager.step_by_last_epoch}/{manager.step}", end='')
+            continue
+
         # update every fold times and drop the last few batches (number of which <= fold)
         if fold == 1 or (i+1) % fold == 0:
             dist.all_reduce(is_quit, op=dist.ReduceOp.MAX)
@@ -501,15 +511,6 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
                 # update n_steps, since we don't know how many steps there are with large dataset mode.
                 args.n_steps = cnt_step_update
                 break
-
-            # skip steps when resuming from stop training
-            if cnt_step_update + manager.step_by_last_epoch < manager.step:
-                cnt_step_update += 1
-                p_bar.update()
-                if args.verbose and args.gpu == 0:
-                    print(
-                        f"\rIn skipping steps: {cnt_step_update + manager.step_by_last_epoch}/{manager.step}", end='')
-                continue
 
             accum_loss, n_batch = _go_step(accum_loss, n_batch, minibatch)
             if grad_norm > 0.0:
@@ -523,8 +524,7 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
             optimizer.zero_grad()
 
             manager.step += 1
-            global_step = manager.step
-            scheduler.update_lr_step(global_step)
+            scheduler.update_lr_step(manager.step)
             cnt_step_update += 1
             p_bar.update()
 
@@ -540,14 +540,14 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
             # update tensorboard
             if args.rank == 0:
                 manager.writer.add_scalar(
-                    'loss/train_loss', tolog['loss'], global_step)
+                    'loss/train_loss', tolog['loss'], manager.step)
                 manager.writer.add_scalar(
-                    'lr', tolog['lr'], global_step)
+                    'lr', tolog['lr'], manager.step)
 
                 # update monitor
                 manager.monitor.update({
-                    'train:loss': (tolog['loss'], global_step),
-                    'train:lr': (tolog['lr'], global_step)
+                    'train:loss': (tolog['loss'], manager.step),
+                    'train:lr': (tolog['lr'], manager.step)
                 })
 
             if args.verbose:

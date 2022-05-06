@@ -170,7 +170,7 @@ def pack_data(
         with open(_f_lb, 'r') as fi_label:
             labels += fi_label.readlines()
 
-    labels = [l.split(maxsplit=1)
+    labels = [l.strip().split(maxsplit=1)
               for l in labels]      # type: List[Tuple[str, str]]
     num_label_lines = len(labels)
 
