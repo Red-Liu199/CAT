@@ -79,5 +79,6 @@ if __name__ == "__main__":
         trans=subtrans,
         audios=audios,
         num_mel_bins=80,
+        apply_cmvn=False,
         speed_perturb=args.sp
     )

@@ -506,8 +506,6 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
 
         dist.all_reduce(is_quit, op=dist.ReduceOp.MAX)
         if is_quit:
-            # update n_steps, since we don't know how many steps there are with large dataset mode.
-            args.n_steps = cnt_step_update
             break
 
         # update every fold times and drop the last few batches (number of which <= fold)
@@ -579,6 +577,8 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
         dist.all_reduce(is_quit, op=dist.ReduceOp.MAX)
 
     manager.step_by_last_epoch += cnt_step_update
+    # update n_steps, since we don't know how many steps there are with large dataset mode.
+    args.n_steps = cnt_step_update
     if args.check_freq == -1:
         yield
     p_bar.close()

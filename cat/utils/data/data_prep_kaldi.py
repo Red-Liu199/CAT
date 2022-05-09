@@ -12,6 +12,9 @@ import kaldiio
 import torch
 import torchaudio
 
+__all__ = ["Processor", "ReadProcessor",
+           "SpeedPerturbationProcessor", "FBankProcessor", "CMVNProcessor"]
+
 
 class Processor:
     """
@@ -99,6 +102,23 @@ class FBankProcessor(Processor):
             num_mel_bins=self._num_mel_bins)
 
 
+class CMVNProcessor(Processor):
+    """Processor to apply CMVN"""
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    def _process_fn(self, spectrum: torch.Tensor) -> torch.Tensor:
+        """
+        spectrum: (T, D)
+            T is the number of frames in the utterance
+            D is the number of the spectrum bins.
+        """
+        _mean = torch.mean(spectrum, dim=0)
+        _std = torch.std(spectrum, dim=0)
+        return (spectrum - _mean) / _std
+
+
 def process_feat_as_kaldi(raw_audios: List[Tuple[str, str]], f_scp: str, f_ark: str, processor: Processor, desc: str = ''):
     with kaldiio.WriteHelper(f'ark,scp:{f_ark},{f_scp}') as writer:
         for uid, _audio in tqdm(raw_audios, desc=desc):
@@ -110,6 +130,7 @@ def prepare_kaldi_feat(
         trans: Dict[str, List[Tuple[str, str]]],
         audios: Dict[str, List[Tuple[str, str]]],
         num_mel_bins: int = 80,
+        apply_cmvn: bool = False,
         sample_frequency: Optional[int] = None,
         speed_perturb: Optional[List[float]] = [],
         fmt_scp: str = "data/src/all_ark/{}.scp",
@@ -125,6 +146,8 @@ def prepare_kaldi_feat(
         sample_frequency = torchaudio.load(audios[subsets[0]][0][1])[1]
 
     fbank_processor = FBankProcessor(sample_frequency, num_mel_bins)
+    if apply_cmvn:
+        fbank_processor = fbank_processor.append(CMVNProcessor())
     audio2fbank = ReadProcessor().append(fbank_processor)
     process_fn = process_feat_as_kaldi
 
