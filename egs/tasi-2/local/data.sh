@@ -18,7 +18,7 @@ opts=$(python utils/parseopt.py $0 $*) && eval $opts || exit 1
 
 # Extract 80-dim FBank features
 python local/extract_meta.py \
-    $src/wav/wav_clean $src/trans_normalized.txt $out \
+    $src/wav/wav_clean $src/trans.noseg $out \
     --subset $subsets_fbank || exit 1
 
 echo "$0 done"

@@ -8,10 +8,10 @@ from cat.utils.data.data_prep_kaldi import *
 import os
 import sys
 import glob
+import shutil
 import argparse
 from typing import List, Dict, Any, Tuple
 from tqdm import tqdm
-
 
 prepare_sets = [
     'accented_hearingdata',
@@ -75,9 +75,23 @@ def pack_data(
         sinks = [wds.ShardWriter(os.path.join(d_out, fmt), maxcount=2000)]
 
     # initialize processor
-    processor = ReadProcessor().append(FBankProcessor(16000, 80))
+    processor = (
+        ReadProcessor()
+        .append(FBankProcessor(16000, 80))
+        .append(CMVNProcessor())
+    )
     for _audio in tqdm(f_audios):
-        fbank_spec = processor(_audio)
+        try:
+            fbank_spec = processor(_audio)
+        except Exception as e:
+            if "Error loading audio" in str(e):
+                sys.stderr.write(
+                    f"error loading audio: {str(e)}, skip\n")
+            else:
+                print(str(e))
+                shutil.move(
+                    _audio, f"/mnt/nas3_workspace/spmiData/tasi2_16k/wav/wav-trash/{os.path.basename(_audio)}")
+            continue
 
         uid = os.path.basename(_audio).removesuffix('.wav')
         target = label_dict.get(uid, None)
@@ -91,18 +105,11 @@ def pack_data(
 
         for (l, u), _sink in zip(filter_bound, sinks):
             if l <= L and L < u:
-                try:
-                    _sink.write({
-                        '__key__': uid,
-                        "mat.npy": fbank_spec.numpy(),
-                        "label.txt": target
-                    })
-                except Exception as e:
-                    if "Error loading audio" in str(e):
-                        sys.stderr.write(
-                            f"error loading audio: {str(e)}, skip\n")
-                finally:
-                    break
+                _sink.write({
+                    '__key__': uid,
+                    "mat.npy": fbank_spec.numpy(),
+                    "label.txt": target
+                })
 
     for s in sinks:
         s.close()
@@ -110,10 +117,10 @@ def pack_data(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("src_data", type=str, default="/mnt/nas3_workspace/spmiData/tasi2_16k/wav/wav_clean",
+    parser.add_argument("src_data", type=str,
                         help="Directory to source audio files, "
                         f"expect subset: {', '.join(prepare_sets)} in the directory.")
-    parser.add_argument("transcript", type=str, default="/mnt/nas3_workspace/spmiData/tasi2_16k/tasi2_8k.txt",
+    parser.add_argument("transcript", type=str,
                         help="Path to the transcript file.")
     parser.add_argument("odir", type=str, help="Ouput directory.")
     parser.add_argument("--subset", type=str, nargs='*', default=[],
