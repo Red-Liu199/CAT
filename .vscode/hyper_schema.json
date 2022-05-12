@@ -243,6 +243,14 @@
                                     },
                                     "userdict": {
                                         "type": "string"
+                                    },
+                                    "bos_interface": {
+                                        "type": "string",
+                                        "default": "<s>"
+                                    },
+                                    "unk_interface": {
+                                        "type": "string",
+                                        "default": "<unk>"
                                     }
                                 }
                             }

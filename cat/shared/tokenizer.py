@@ -262,16 +262,22 @@ class JiebaComposePhoneTokenizer(JiebaTokenizer):
     def __init__(
             self,
             w2p_map: str,
+            bos_interface: str,
+            unk_interface: str,
             userdict: Optional[Union[str, bytes]] = None) -> None:
         """
         Args:
             w2p_map (str) : file contains the mapping of word to phone. Usually annotated as 'lexicon_number.txt'
                             Each line should be as 
                             <word> <id0> <id1> ...
+            bos_interface (str) : start of an utterance, usually '<s>' or '<bos>'
+            unk_interface (str) : unknown word representation in the mapping. usually '<unk>' or '<UNK>'
             userdict (str, optional) : custom dictionary file
         """
         super().__init__(userdict, bos_id=0)
         assert os.path.isfile(w2p_map), f"given w2p_map='{w2p_map}' not exist."
+        self._bos_token = bos_interface
+        self._unk_token = unk_interface
         self.init_w2p(w2p_map)
 
     def init_w2p(self, f_mapping: Union[str, bytes]):
@@ -303,17 +309,21 @@ class JiebaComposePhoneTokenizer(JiebaTokenizer):
 
         self._w2pid = OrderedDict(self._w2pid)
         # check whether all word in self.vocab in w2pid
-        special = []
-        if '<s>' not in self._w2pid or '<unk>' not in self._w2pid:
+        if self._bos_token not in self._w2pid or self._unk_token not in self._w2pid:
             raise RuntimeError(
-                f"<s> and(or) <unk> are not found in '{f_mapping}', "
+                f"{self._bos_token} and(or) {self._unk_token} are not found in '{f_mapping}', "
                 "it's your duty to add these special tokens."
             )
-        if (set(self._vocabulary.keys())) != set(self._w2pid.keys()):
+        del self._vocabulary['<s>']
+        del self._vocabulary['<unk>']
+        _res_word = list(set(self._vocabulary.keys())-set(self._w2pid.keys()))
+        if _res_word != []:
             raise RuntimeError(
                 "The given w2p mapping cannot cover the full vocab: missing:\n"
-                f"{list(set(self._vocabulary.keys())-set(self._w2pid.keys()))}")
-
+                f"{_res_word}")
+        del _res_word
+        self._vocabulary.clear()
+        self._reverse_vocab = tuple()
         self.num_phns = max_phnid + 1
 
     @property
@@ -324,7 +334,9 @@ class JiebaComposePhoneTokenizer(JiebaTokenizer):
         parent_state = super().state_dict()
         parent_state.update({
             '_w2pid': self._w2pid,
-            'num_phns': self.num_phns
+            'num_phns': self.num_phns,
+            'bos': self._bos_token,
+            'unk': self._unk_token
         })
         return parent_state
 
@@ -332,13 +344,15 @@ class JiebaComposePhoneTokenizer(JiebaTokenizer):
         super().load_state_dict(state_dict)
         self._w2pid = state_dict['_w2pid']
         self.num_phns = state_dict['num_phns']
+        self._bos_token = state_dict['bos']
+        self._unk_token = state_dict['unk']
 
     def _vocab_to_dict(self) -> Dict[int, str]:
         raise NotImplementedError
 
     def _enc(self, s: str) -> List[int]:
         cut_words = self._tokenizer.cut(s.strip().replace(' ', ''), HMM=False)
-        unkid = self._w2pid['<unk>']
+        unkid = self._w2pid[self._unk_token]
         rt_indices = [list(self._w2pid.get(w, unkid))
                       for w in cut_words]     # type: List[List[int]]
         return sum(rt_indices, [])

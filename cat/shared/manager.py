@@ -595,22 +595,21 @@ def evaluate(testloader, args: argparse.Namespace, manager: Manager) -> float:
     for i, minibatch in tqdm(enumerate(testloader), desc=f'Epoch: {manager.epoch} | eval',
                              unit='batch', total=len(testloader), disable=(args.gpu != 0), leave=False):
 
-        features, input_lengths, labels, label_lengths = minibatch
-        features, labels, input_lengths, label_lengths = features.cuda(
-            args.gpu, non_blocking=True), labels, input_lengths, label_lengths
+        feats, ilens, labels, olens = minibatch
+        feats = feats.cuda(args.gpu, non_blocking=True)
 
         '''
         Suppose the loss is reduced by mean
         '''
-        loss = model(features, labels, input_lengths, label_lengths)
+        loss = model(feats, labels, ilens, olens)
 
         if isinstance(loss, tuple):
             assert len(loss) >= 2
             loss, norm_size = loss[:2]
         else:
-            norm_size = features.size(0)
+            norm_size = feats.size(0)
         if not isinstance(norm_size, torch.Tensor):
-            norm_size = input_lengths.new_tensor(
+            norm_size = ilens.new_tensor(
                 int(norm_size), device=args.gpu)
         else:
             norm_size = norm_size.to(device=args.gpu, dtype=torch.long)
