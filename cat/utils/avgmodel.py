@@ -78,14 +78,14 @@ def average_checkpoints(inputs: List[str]):
     return new_state
 
 
-def select_checkpoint(fdir: str, n: int = -1, mode: Literal['best', 'last', 'slicing'] = 'best', _slicing: tuple = None):
+def select_checkpoint(f_checklist: str, n: int = -1, mode: Literal['best', 'last', 'slicing'] = 'best', _slicing: tuple = None):
 
-    if os.path.isfile(fdir):
-        cm = CheckpointManager(fdir)
-    elif os.path.isdir(fdir):
-        cm = CheckpointManager(os.path.join(fdir, F_CHECKLIST))
+    if os.path.isfile(f_checklist):
+        cm = CheckpointManager(f_checklist)
+    elif os.path.isdir(f_checklist):
+        cm = CheckpointManager(os.path.join(f_checklist, F_CHECKLIST))
     else:
-        raise RuntimeError(f"'{fdir}' is neither a file or a folder.")
+        raise RuntimeError(f"'{f_checklist}' is neither a file or a folder.")
 
     checklist = [(path, check['metric']) for path, check in cm.content.items()]
 
@@ -108,51 +108,81 @@ def main():
         description="Tool to average the params of input checkpoints to "
         "produce a new checkpoint",
     )
-    # fmt: off
-    parser.add_argument('--inputs', required=True, nargs='+',
-                        help='Input checkpoint file paths.')
+
+    parser.add_argument('input', nargs='+', metavar='CHECK',
+                        help='Input checkpoint(s) or the checkpoint list file.')
     parser.add_argument('--output', type=str, metavar='FILE',
                         help='Write the new checkpoint containing the averaged weights to this path.')
-    parser.add_argument("--num-best", type=int, help='If set, try to find checkpoint.xxx.pt with N best metric')
+    parser.add_argument("--num-best", type=int, metavar='N',
+                        help='Average the best <N> checkpoints. If set, <CHECK> must be the checkpoint list file.')
+    parser.add_argument("--slicing-select", type=str,
+                        help="Manually select the checkpoint(s) to be averaged in python slicing way "
+                        "(e.g. '-10:' means the last ten checkpoints). "
+                        "If there are negative numbers use --slicing-select=xxx:xxx"
+                        "If set, --input MUST be the checkpoint list file. This is conflict with --num-best")
+    parser.add_argument("--keep-model-only", action="store_true", default=False,
+                        help="Remove states other than model parameters (such as scheduler / optimizer) to reduce the output file size.")
 
-    parser.add_argument("--num-checkpoints", type=int, help='If set, try to find checkpoint.xxx.pt int the path specified by input'
-    "Set number of consecutive checkpoints to be average.")
-    parser.add_argument("--upper-bound", type=int, help="Set upper bound checkpoint. E.g."
-    '--num-checkpoint=10 --upper-bound=50, checkpoints 41-50 would be averaged.')
-    # fmt: on
     args = parser.parse_args()
 
-    if args.num_best is not None:
-        assert os.path.isdir(args.inputs[0])
-        list_path = select_checkpoint(args.inputs[0],  args.num_best)
-        if args.output is None:
-            args.output = os.path.join(
-                args.inputs[0], f'avg_best_{args.num_best}.pt')
+    if args.num_best is None and args.slicing_select is None:
+        notfound = []
+        for f in args.input:
+            if not os.path.isfile(f):
+                notfound.append(f)
+        if len(notfound) > 0:
+            raise FileNotFoundError("\n{}".format('\n'.join(notfound)))
+
+        assert args.output is not None
+        pathlist = args.input
     else:
-        num = None
-        if args.num_checkpoints is not None:
-            num = args.num_checkpoints
+        assert len(args.input) == 1, \
+            "when doing averaging with checkpoint list file, " \
+            f"only one input is accepted. However, given input is {args.input}"
+        f_checklist = args.input[0]
+        try:
+            CheckpointManager(f_checklist)
+        except Exception as e:
+            print(str(e))
+            raise ValueError(
+                "Seems like the CHECK is not a valid checkpoint list file.")
 
-        assert not ((args.upper_bound is None) ^ (args.num_checkpoints is None)
-                    ), "--upper-bound and --num-checkpoints are required together"
-
-        list_path = []
-        if num is None:
-            list_path = args.inputs
-            assert args.output is not None
+        if args.num_best is not None:
+            pathlist = select_checkpoint(
+                f_checklist, args.num_best, mode='best')
+            if args.output is None:
+                args.output = os.path.join(os.path.dirname(
+                    f_checklist), f"avg_best_{args.num_best}.pt")
         else:
-            upper = args.upper_bound
-            fdir = args.inputs[0]
-            assert os.path.isdir(fdir), f'--inputs={fdir} is not a directory.'
-            list_path = select_checkpoint(
-                fdir, num, mode='slicing', _slicing=(upper-num+1, upper+1))
-
+            assert ':' in args.slicing_select, f"invalid slicing format: '{args.slicing_select}'"
+            slicing = args.slicing_select.split(':')
+            assert len(slicing) == 2
             if args.output is None:
                 args.output = os.path.join(
-                    fdir, f'avg_{upper}_{num}.pt')
+                    os.path.dirname(f_checklist), 
+                    f"avg_slice_{args.slicing_select}.pt"
+                )
 
-    print("Averaging checkpoints:\n"+'\n'.join(list_path))
-    new_state = average_checkpoints(list_path)
+            if slicing[0] == '':
+                slicing[0] = '0'
+            if slicing[1] == '':
+                slicing[1] = str(2**32-1)
+
+            slicing = [int(x) for x in slicing]
+            pathlist = select_checkpoint(
+                f_checklist, mode='slicing', _slicing=slicing)
+
+    assert len(pathlist) > 0
+    if args.output is None:
+
+        pass
+
+    print("Averaging checkpoints:\n"+'\n'.join(pathlist))
+    new_state = average_checkpoints(pathlist)
+    if args.keep_model_only:
+        for k in list(new_state.keys()):
+            if k != 'model':
+                del new_state[k]
     torch.save(new_state, args.output)
     print("Finished writing averaged checkpoint to {}".format(args.output))
 

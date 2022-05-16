@@ -269,7 +269,6 @@ class Manager(object):
 
         self.model.train()
         terminated = False
-        n_eval = 0
         while not terminated:
             if self.train_sampler is None:
                 pass
@@ -277,18 +276,13 @@ class Manager(object):
                 self.train_sampler.set_epoch(self.epoch)
 
             for _ in self.train(self.trainloader, args, self):
-                n_eval += 1
                 self.model.eval()
                 metrics = self.evaluate(self.valloader, args, self)
                 if isinstance(metrics, tuple):
                     # defaultly use the first one to evaluate
                     metrics = metrics[0]
 
-                if args.rank == 0:
-                    self.writer.add_scalar('loss/dev', metrics, self.step)
-                    self.monitor.update('eval:loss', (metrics, self.step))
-
-                state = self.scheduler.step(n_eval, metrics)
+                state = self.scheduler.step(metrics)
                 self.model.train()
 
                 checkpoint = os.path.join(
@@ -624,6 +618,9 @@ def evaluate(testloader, args: argparse.Namespace, manager: Manager) -> float:
 
     avg_loss = total_loss/cnt_seq
 
+    if args.rank == 0:
+        manager.writer.add_scalar('loss/dev', avg_loss, manager.step)
+        manager.monitor.update('eval:loss', (avg_loss, manager.step))
     return avg_loss
 
 
