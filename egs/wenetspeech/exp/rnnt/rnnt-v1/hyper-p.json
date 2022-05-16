@@ -5,9 +5,6 @@
             "dev"
         ],
         "test": [
-            "dev",
-            "test_net",
-            "test_meeting",
             "aishell-test"
         ],
         "filter": ":1000",
@@ -22,7 +19,7 @@
             "model_prefix": "sentencepiece/wenetspeech_char/spm",
             "vocab_size": 5147
         },
-        "location": "exp/rnnt-v1/tokenizer.tknz"
+        "location": "exp/rnnt/rnnt-v1/tokenizer.tknz"
     },
     "train": {
         "batch_size": 512,
@@ -36,13 +33,16 @@
             "mode": "best",
             "num": 10
         },
+        "lmdir": "exp/lm/lm-aishell",
         "decode": {
             "algo": "rna",
-            "beam-size": 128,
+            "beam-size": 16,
+            "alpha": 0.5,
+            "beta": 1.2,
+            "ilm-weight": -0.12,
             "cpu": true,
-            "nj": 80,
-            "resume": "exp/rnnt-v1/checks/best-10.pt",
-            "estimate-ILM": true
+            "nj": 20,
+            "resume": "exp/rnnt/rnnt-v1/checks/best-10.pt"
         },
         "er": {
             "mode": "cer",

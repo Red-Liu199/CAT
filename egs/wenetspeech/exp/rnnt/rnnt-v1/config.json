@@ -27,7 +27,7 @@
     "decoder": {
         "type": "LSTM",
         "kwargs": {
-            "num_classes": 5536,
+            "num_classes": 5147,
             "hdim": 512,
             "num_layers": 1,
             "with_head": false,
@@ -37,13 +37,13 @@
             ]
         }
     },
-    "joint": {
+    "joiner": {
         "type": "JointNet",
         "kwargs": {
-            "odim_encoder": 512,
-            "odim_decoder": 512,
+            "odim_enc": 512,
+            "odim_pred": 512,
             "hdim": 512,
-            "num_classes": 5536
+            "num_classes": 5147
         }
     },
     "scheduler": {
@@ -61,7 +61,7 @@
             }
         },
         "kwargs": {
-            "peak_factor": 5.0,
+            "peak_factor": 1.0,
             "d_model": 512,
             "warmup_steps": 25000,
             "epoch_max": 100

@@ -45,6 +45,19 @@ test_meeting    %SER 88.83 | %CER 18.14 [ 39971 / 220385, 1060 ins, 24078 del, 1
 aishell-test    %SER 38.87 | %CER 5.13 [ 5371 / 104765, 273 ins, 219 del, 4879 sub ]
 ```
 
+adapt to aishell
+```
+SF 0.5 1.38
+aishell-test    %SER 33.15 | %CER 4.29 [ 4493 / 104765, 210 ins, 345 del, 3938 sub ]
+
+
+ILME -0.12 0.5 1.12
+aishell-test    %SER 33.07 | %CER 4.19 [ 4386 / 104765, 193 ins, 262 del, 3931 sub ]
+
+LODR -0.38 0.63 0.38
+aishell-test    %SER 31.97 | %CER 4.01 [ 4196 / 104765, 219 ins, 234 del, 3743 sub ]
+```
+
 speechio result
 ```
 best-5 no lm

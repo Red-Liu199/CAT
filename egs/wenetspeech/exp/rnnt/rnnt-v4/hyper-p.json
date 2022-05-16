@@ -5,9 +5,6 @@
             "dev"
         ],
         "test": [
-            "dev",
-            "test_net",
-            "test_meeting",
             "aishell-test"
         ],
         "filter": "10:1000",
@@ -22,7 +19,7 @@
             "model_prefix": "sentencepiece/wenetspeech_l_char/spm",
             "vocab_size": 5536
         },
-        "location": "exp/rnnt-v4/tokenizer.tknz"
+        "location": "exp/rnnt/rnnt-v4/tokenizer.tknz"
     },
     "train": {
         "batch_size": 480,
@@ -31,7 +28,7 @@
         "checkall": true,
         "amp": true,
         "trset": "/mnt/nvme_workspace/zhenghh/speechdata/wenet-train-l/10_1000/*.tar",
-        "tokenizer": "exp/rnnt-v4/tokenizer.tknz",
+        "tokenizer": "exp/rnnt/rnnt-v4/tokenizer.tknz",
         "large-dataset": true,
         "world-size": 2,
         "rank": 0,
@@ -42,16 +39,15 @@
             "mode": "best",
             "num": 5
         },
-        "lmdir": "exp/lm-trans-l",
+        "lmdir": "exp/dummy-lm",
         "decode": {
             "algo": "rna",
             "beam-size": 16,
-            "alpha": 0.125,
-            "beta": 2.375,
+            "alpha": 1.0,
+            "beta": 0.38,
             "cpu": true,
-            "batchfly": true,
             "nj": 40,
-            "resume": "exp/rnnt-v4/checks/best-5.pt"
+            "resume": "exp/rnnt/rnnt-v4/checks/best-5.pt"
         },
         "er": {
             "mode": "cer",

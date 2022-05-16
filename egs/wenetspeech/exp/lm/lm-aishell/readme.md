@@ -1,3 +1,11 @@
+### training
+
+command
+
+```
+bash utils/pipeline/ngram.sh exp/lm/lm-aishell --text-corpus
+```
+
 ### Result
 
 ```
