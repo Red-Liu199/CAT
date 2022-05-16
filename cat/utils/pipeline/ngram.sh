@@ -101,6 +101,8 @@ fi
 echo "LM saved at $output."
 
 [ ! -f $dir/readme.md ] && (
+    echo -e "\ntrain command:\n" >>$dir/readme.md
+    echo -e "\`\`\`bash\n$0 $@\n\`\`\`" >>$dir/readme.md
     echo -e "\nproperty:\n" >>$dir/readme.md
     echo "- prune: $prune" >>$dir/readme.md
     echo "- type:  $type" >>$dir/readme.md

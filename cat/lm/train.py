@@ -84,11 +84,10 @@ def build_model(
         dist=True, wrapper=True) -> Union[nn.parallel.DistributedDataParallel, LMTrainer, AbsDecoder]:
 
     assert 'decoder' in cfg
-    # when immigrate configure from RNN-T to CTC,
+    # when training standalone LM,
     # one usually forget to set the `with_head=True`
     if not cfg['decoder']['kwargs'].get('with_head', False):
-        print("warning: 'with_head' in field:decoder:kwargs is False/not set. "
-              "If you don't know what this means, set it to True.")
+        print("warning: 'with_head' in field:decoder:kwargs is False/not set.")
 
     LMNet = getattr(model_zoo, cfg['decoder']['type'])  # type: AbsDecoder
     decoder = LMNet(**cfg['decoder']['kwargs'])

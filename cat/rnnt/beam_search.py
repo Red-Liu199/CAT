@@ -63,14 +63,14 @@ class Hypothesis():
         self.cache = cache
         self.lm_score = lm_score
         self.len_norm = len_norm
-        self.ilm_log_prob = 0.0
+        self.ilm_score = 0.0
 
     def pop_last(self) -> torch.LongTensor:
         return self._last_token
 
     @property
     def score(self):
-        score = self.log_prob + self.lm_score
+        score = self.log_prob + self.lm_score + self.ilm_score
         if self.len_norm:
             return score/len(self)
         else:
@@ -91,7 +91,7 @@ class Hypothesis():
             self.len_norm
         )
         new_hypo.pred = self.pred[:]
-        new_hypo.ilm_log_prob = fclone(self.ilm_log_prob)
+        new_hypo.ilm_score = fclone(self.ilm_score)
         return new_hypo
 
     def __add__(self, rhypo):
@@ -208,7 +208,8 @@ class BeamSearcher():
         lm_module: Optional[AbsDecoder] = None,
         alpha: Optional[float] = 0.,
         beta: Optional[float] = 0.,
-        est_ilm: bool = False
+        est_ilm: bool = False,
+        ilm_weight: Optional[float] = 0.
     ):
         super(BeamSearcher, self).__init__()
         assert blank_id == bos_id
@@ -236,6 +237,9 @@ class BeamSearcher():
 
         self.beta_ = beta
         self.est_ilm = est_ilm
+        self.ilm_weight = ilm_weight
+        if ilm_weight == 0.0:
+            self.est_ilm = False
 
         self.searcher = self.batching_rna
 
@@ -245,9 +249,7 @@ class BeamSearcher():
         return [
             (
                 [hypo.get_pred_token()[1:] for hypo in _hyps],
-                [hypo.score.item() for hypo in _hyps],
-                [hypo.ilm_log_prob.item()
-                 for hypo in _hyps] if self.est_ilm else None
+                [hypo.score.item() for hypo in _hyps]
             ) for _hyps in hypos]
 
     def batching_rna(self, encoder_out: torch.Tensor, frame_lengths: Optional[torch.Tensor] = None) -> List[List[Hypothesis]]:
@@ -313,7 +315,7 @@ class BeamSearcher():
                     pn_out, pn_state = self.predictor(
                         g_tokens, g_states['pn_state']())
                     if use_lm:
-                        lm_out, lm_state = self._lm_step(
+                        lm_out, lm_state = self.lm.get_log_prob(
                             g_tokens, g_states['lm_state']())
                     # add into cache
                     for bid, absidx in enumerate(g_index):
@@ -349,15 +351,6 @@ class BeamSearcher():
             log_prob = self.joiner(
                 expand_enc_out, pn_out).squeeze(1).squeeze(1)
 
-            if self.est_ilm:
-                ilm_log_prob = self.joiner.impl_forward(
-                    torch.zeros_like(expand_enc_out), pn_out).squeeze(1).squeeze(1)
-                if self.blank_id == 0:
-                    ilm_log_prob[:, 1:] = \
-                        ilm_log_prob[:, 1:].log_softmax(dim=1)
-                else:
-                    raise NotImplementedError
-
             if use_lm:
                 # lm_out: (n_beams, 1, V)
                 lm_out = torch.cat(group_lm_out, dim=0)
@@ -368,6 +361,19 @@ class BeamSearcher():
                 combine_score[:, self.blank_id] = log_prob[:, self.blank_id]
             else:
                 combine_score = log_prob.clone()
+
+            if self.est_ilm:
+                ilm_score = self.joiner.impl_forward(
+                    torch.zeros_like(expand_enc_out), pn_out).squeeze(1).squeeze(1)
+                if self.blank_id == 0:
+                    # rm the blank symbol
+                    ilm_score[:, 0] = 0.
+                    ilm_score[:, 1:] = self.ilm_weight * \
+                        ilm_score[:, 1:].log_softmax(dim=1)
+                else:
+                    raise NotImplementedError
+
+                combine_score[:, 1:] += ilm_score[:, 1:]
 
             V = combine_score.size(-1)
             combine_score += collect_scores(
@@ -392,7 +398,7 @@ class BeamSearcher():
                     cur_hypo = batched_beams[idxbeam2srcidx[b]].clone()
                     cur_hypo.log_prob += log_prob[b, tok_]
                     if self.est_ilm:
-                        cur_hypo.ilm_log_prob += ilm_log_prob[b, tok_]
+                        cur_hypo.ilm_score += ilm_score[b, tok_]
                     if tok_ == self.blank_id:
                         A.append(cur_hypo)
                         continue
@@ -413,12 +419,6 @@ class BeamSearcher():
 
         return [sorted(B_, key=lambda item: item.score, reverse=True)[
             :self.nbest] for B_ in Beams]
-
-    def _lm_step(self, inp_tokens, hidden):
-        """Forward a step of LM module, this equals to self.lm.forward() + log_softmax()"""
-        logits, hs = self.lm(inp_tokens, hidden=hidden)
-        log_probs = torch.log_softmax(logits, dim=-1)
-        return log_probs, hs
 
 
 def collect_scores(hypos: List[Hypothesis], dummy_tensor: torch.Tensor = None) -> torch.Tensor:

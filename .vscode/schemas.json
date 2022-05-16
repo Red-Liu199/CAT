@@ -466,10 +466,11 @@
                     "examples": [
                         "AbsDecoder",
                         "CausalTransformer",
+                        "EmbeddingPN",
                         "ILM",
                         "LSTM",
+                        "MultiDecoder",
                         "NGram",
-                        "PlainPN",
                         "ZeroDecoder"
                     ]
                 },
@@ -513,10 +514,12 @@
                                         "default": -1
                                     },
                                     "n_emb": {
-                                        "type": "number"
+                                        "type": "number",
+                                        "default": -1
                                     },
                                     "num_classes": {
-                                        "type": "number"
+                                        "type": "number",
+                                        "default": -1
                                     }
                                 }
                             }
@@ -558,6 +561,47 @@
                                         "type": "number"
                                     },
                                     "num_classes": {
+                                        "type": "number"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "type": {
+                                "const": "EmbeddingPN"
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "kwargs": {
+                                "type": "object",
+                                "properties": {
+                                    "with_head": {
+                                        "type": "boolean",
+                                        "default": true
+                                    },
+                                    "tied": {
+                                        "type": "boolean",
+                                        "default": false
+                                    },
+                                    "padding_idx": {
+                                        "type": "number",
+                                        "default": -1
+                                    },
+                                    "n_hid": {
+                                        "type": "number",
+                                        "default": -1
+                                    },
+                                    "num_classes": {
+                                        "type": "number",
+                                        "default": -1
+                                    },
+                                    "n_emb": {
                                         "type": "number"
                                     }
                                 }
@@ -630,6 +674,27 @@
                     "if": {
                         "properties": {
                             "type": {
+                                "const": "MultiDecoder"
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "kwargs": {
+                                "type": "object",
+                                "properties": {
+                                    "f_checks": {},
+                                    "f_configs": {},
+                                    "weights": {}
+                                }
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "type": {
                                 "const": "NGram"
                             }
                         }
@@ -658,47 +723,6 @@
                                         "type": "number"
                                     },
                                     "gram_order": {
-                                        "type": "number"
-                                    }
-                                }
-                            }
-                        }
-                    }
-                },
-                {
-                    "if": {
-                        "properties": {
-                            "type": {
-                                "const": "PlainPN"
-                            }
-                        }
-                    },
-                    "then": {
-                        "properties": {
-                            "kwargs": {
-                                "type": "object",
-                                "properties": {
-                                    "with_head": {
-                                        "type": "boolean",
-                                        "default": true
-                                    },
-                                    "tied": {
-                                        "type": "boolean",
-                                        "default": false
-                                    },
-                                    "padding_idx": {
-                                        "type": "number",
-                                        "default": -1
-                                    },
-                                    "n_hid": {
-                                        "type": "number",
-                                        "default": -1
-                                    },
-                                    "num_classes": {
-                                        "type": "number",
-                                        "default": -1
-                                    },
-                                    "n_emb": {
                                         "type": "number"
                                     }
                                 }

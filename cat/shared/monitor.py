@@ -432,6 +432,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if len(args.log) == 1:
+        assert os.path.isfile(args.log[0]), args.log[0]
         plot_monitor(args.log[0], title=args.title,
                      o_path=args.o_path)
     else:

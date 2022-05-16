@@ -28,8 +28,10 @@ class AbsDecoder(nn.Module):
 
     """
 
-    def __init__(self, num_classes: int, n_emb: int,  n_hid: int = -1, padding_idx: int = -1, tied: bool = False, with_head: bool = True) -> None:
+    def __init__(self, num_classes: int = -1, n_emb: int = -1,  n_hid: int = -1, padding_idx: int = -1, tied: bool = False, with_head: bool = True) -> None:
         super().__init__()
+        if num_classes == -1:
+            return
         if n_hid == -1:
             n_hid = n_emb
 
@@ -74,11 +76,13 @@ class AbsDecoder(nn.Module):
         score = log_prob.sum(dim=-1)
         return score
 
-    @staticmethod
+    def get_log_prob(self, *args, **kwargs):
+        logits, states = self.forward(*args, **kwargs)
+        return logits.log_softmax(dim=-1), states
+
     def batching_states(*args, **kwargs) -> 'AbsStates':
         raise NotImplementedError
 
-    @staticmethod
     def get_state_from_batch(*args, **kwargs) -> Union['AbsStates', List['AbsStates']]:
         """Get state of given index (or index list) from the batched states"""
         raise NotImplementedError
@@ -91,10 +95,16 @@ class AbsDecoder(nn.Module):
 class AbsStates():
     def __init__(self, state, decoder: AbsDecoder) -> None:
         self._state = state
-        self.batching = decoder.batching_states
+        self._dec = decoder
+
+    def batching(self, *args, **kwargs):
+        return self._dec.batching_states(*args, **kwargs)
 
     def __call__(self, *args: Any, **kwds: Any) -> Any:
         return self._state
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}({self._dec.__class__.__name__})"
 
 
 class LSTM(AbsDecoder):
@@ -232,7 +242,9 @@ class LSTM(AbsDecoder):
         return AbsStates((h_0, c_0), self)
 
 
-class PlainPN(AbsDecoder):
+class EmbeddingPN(AbsDecoder):
+    """Prediction network with embedding layer only."""
+
     def __init__(self, n_emb: int, num_classes: int = -1, n_hid: int = -1, padding_idx: int = -1, tied: bool = False, with_head: bool = True) -> None:
         super().__init__(n_emb, num_classes=num_classes, n_hid=n_hid,
                          padding_idx=padding_idx, tied=tied, with_head=with_head)
@@ -353,9 +365,7 @@ class NGram(AbsDecoder):
                  bos_id: int = 0,
                  eos_id: int = -1,
                  unk_id: int = 1) -> None:
-        super().__init__(1, n_emb=1, with_head=False)
-        del self.embedding
-        del self.classifier
+        super().__init__()
         self.gram_order = gram_order
         self.vocab = {x: str(x) for x in range(num_classes)}
         # set 0 -> </s>, 1 -> <unk>
@@ -455,9 +465,7 @@ class NGram(AbsDecoder):
 
 class ZeroDecoder(AbsDecoder):
     def __init__(self, hdim: int, *args, **kwargs) -> None:
-        super().__init__(num_classes=1, n_emb=1, with_head=False)
-        del self.embedding
-        del self.classifier
+        super().__init__()
         self._dummy_hdim = hdim
 
     def forward(self, x: torch.Tensor, *args):
@@ -490,9 +498,7 @@ class ILM(AbsDecoder):
     """
 
     def __init__(self, f_rnnt_config: str, f_check: str):
-        super().__init__(1, 1)
-        del self.embedding
-        del self.classifier
+        super().__init__()
         from cat.rnnt import rnnt_builder
         from cat.shared import coreutils
         cfg = coreutils.readjson(f_rnnt_config)
@@ -500,7 +506,7 @@ class ILM(AbsDecoder):
         coreutils.load_checkpoint(rnntmodel, f_check)
         self._stem = rnntmodel.decoder
         self._head = rnntmodel.joiner
-        self._dim_enc_out = cfg['joiner']['kwargs']['odim_encoder']
+        self._dim_enc_out = cfg['joiner']['kwargs']['odim_enc']
         del rnntmodel
 
     def forward(self, x, input_lengths):
@@ -512,6 +518,91 @@ class ILM(AbsDecoder):
             decoder_out).squeeze(1)
         logits[:, :, 0].fill_(logits.min() - 1e9)
         return logits, None
+
+
+class MultiDecoder(AbsDecoder):
+    def __init__(self, weights: List[float], f_configs: List[str], f_checks: Optional[List[Union[str, None]]] = None) -> None:
+        super().__init__()
+
+        assert len(weights) == len(f_configs)
+        if f_checks is None:
+            f_checks = [None]*len(weights)
+        else:
+            assert len(weights) == len(f_checks)
+        self._num_decs = len(weights)
+
+        from cat.lm import lm_builder
+        from cat.shared import coreutils
+
+        self._weights = weights
+        self._decs = nn.ModuleList()
+        zeroweight = []
+        for i in range(self._num_decs):
+            if self._weights[i] == 0.:
+                zeroweight.append(i)
+                continue
+            _dec = lm_builder(coreutils.readjson(
+                f_configs[i]), dist=False, wrapper=True)
+            if f_checks[i] is not None:
+                coreutils.load_checkpoint(_dec, f_checks[i])
+            self._decs.append(_dec.lm)
+        for i in zeroweight[::-1]:
+            self._weights.pop(i)
+        self._num_decs -= len(zeroweight)
+
+    def forward(self, *args, **kwargs):
+        raise NotImplementedError
+
+    def get_log_prob(self, x, hidden, *args, **kwargs):
+        out = 0.
+        state = []
+        for i in range(self._num_decs):
+            part_out, part_state = self._decs[i].get_log_prob(
+                x, hidden[i], *args, **kwargs)
+            out += part_out * self._weights[i]
+            state.append(part_state)
+        return out, tuple(state)
+
+    def batching_states(self, states: List[AbsStates]) -> AbsStates:
+        shard_states = list(zip(*[s() for s in states]))
+        assert len(shard_states) == self._num_decs
+
+        batched_state = tuple(
+            self._decs[i].batching_states(
+                [
+                    AbsStates(shard_shard_state, self._decs[i])
+                    for shard_shard_state in shard_states[i]
+                ]
+            )()
+            for i in range(self._num_decs)
+        )
+        return AbsStates(batched_state, self)
+
+    def get_state_from_batch(self, raw_batched_states: Tuple[Any], index: Union[int, List[int]]) -> Union[AbsStates, List[AbsStates]]:
+        if isinstance(index, int):
+            return AbsStates(
+                tuple(
+                    self._decs[i].get_state_from_batch(
+                        raw_batched_states[i], index)()
+                    for i in range(self._num_decs)
+                ), self)
+        else:
+            return [
+                AbsStates(
+                    tuple(
+                        self._decs[i].get_state_from_batch(
+                            raw_batched_states[i], _idx)()
+                        for i in range(self._num_decs)
+                    ), self)
+                for _idx in index
+            ]
+
+    def init_states(self, N: int = 1) -> 'AbsStates':
+        return AbsStates(
+            tuple(
+                self._decs[i].init_states(N)()
+                for i in range(self._num_decs)
+            ), self)
 
 
 def init_state(model: kenlm.Model, pre_toks: List[str]):

@@ -101,8 +101,8 @@ def dataserver(args, q: mp.Queue):
         In some cases (decoding with large beam size or large LMs like Transformer), 
         ... the decoding consumes too much memory and would probably causes OOV error.
         So I add checkpointing output in the nbest list. However, things would be
-        ... complicated when first decoding w/o --estimate-ILM, save the checkpoint to nbest list
-        ... then continue decoding w/ --estimate-ILM.
+        ... complicated when first decoding w/o lm, save the checkpoint to nbest list
+        ... then continue decoding w/ lm.
         I just assume users won't do that.
         """
         if key not in nbest:
@@ -148,8 +148,6 @@ def consumer_output(args, q: mp.Queue):
     # write the 1-best result to text file.
     with open(args.output_prefix, 'w') as fo:
         for k, hypo_items in nbest.items():
-            if args.estimate_ILM and k[-4:] == "-ilm":
-                continue
             best_hypo = max(hypo_items.values(), key=lambda item: item[0])[1]
             fo.write(f"{k} {best_hypo}\n")
 
@@ -175,7 +173,7 @@ def main_worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_nbest: m
         torch.cuda.set_device(device)
         model, ext_lm = build_model(args, device)
 
-    est_ilm = args.estimate_ILM
+    est_ilm = (args.ilm_weight != 0.)
     searcher = BeamSearcher(
         predictor=model.predictor,
         joiner=model.joiner,
@@ -186,7 +184,8 @@ def main_worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_nbest: m
         lm_module=ext_lm,
         alpha=args.alpha,
         beta=args.beta,
-        est_ilm=est_ilm)
+        est_ilm=est_ilm,
+        ilm_weight=args.ilm_weight)
 
     tokenizer = tknz.load(args.tokenizer)
     nbest = {}
@@ -198,15 +197,11 @@ def main_worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_nbest: m
             key, x, x_lens = batch
             x = x.to(device)
             batched_output = searcher(*(model.encoder(x, x_lens)))
-            for k, (hypos, scores, ilm_scores) in zip(key, batched_output):
+            for k, (hypos, scores) in zip(key, batched_output):
                 nbest[k] = {
                     nid: (scores[nid], tokenizer.decode(hypos[nid]))
                     for nid in range(len(hypos))
                 }
-                if est_ilm:
-                    nbest[k+'-ilm'] = {
-                        nid: (ilm_scores[nid], trans) for nid, (_, trans) in nbest[k].items()
-                    }
 
             q_nbest.put(nbest, block=True)
             nbest = {}
@@ -235,9 +230,13 @@ def build_model(args, device) -> Tuple[torch.nn.Module, Union[torch.nn.Module, N
     else:
         lm_configures = coreutils.readjson(args.lm_config)
         ext_lm_model = lm_builder(lm_configures, args, dist=False)
-        if lm_configures['decoder']['type'] != "NGram":
-            ext_lm_model = coreutils.load_checkpoint(
-                ext_lm_model.to(device), args.lm_check)
+        if args.lm_check is not None:
+            if os.path.isfile(args.lm_check):
+                coreutils.load_checkpoint(
+                    ext_lm_model.to(device), args.lm_check)
+            else:
+                print(f"warning: --lm-check={args.lm_check} does not exist. \n"
+                      "skip loading params. this is OK if the model is NGram.")
         ext_lm_model = ext_lm_model.lm
         ext_lm_model.eval()
         return model, ext_lm_model
@@ -258,6 +257,10 @@ def DecoderParser():
                         help="Weight of external LM.")
     parser.add_argument("--beta", type=float, default=0.,
                         help="Penalty value of external LM.")
+    parser.add_argument("--ilm-weight", type=float, default=0.,
+                        help="ILM weight."
+                        "ilm weight != 0 would enable internal language model estimation. "
+                        "This would slightly slow down the decoding.")
 
     parser.add_argument("--input_scp", type=str, default=None)
     parser.add_argument("--output_prefix", type=str, default='./decode')
@@ -266,10 +269,6 @@ def DecoderParser():
                         help="Tokenizer model location. See cat/shared/tokenizer.py for details.")
     parser.add_argument("--nj", type=int, default=-1)
     parser.add_argument("--thread-per-woker", type=int, default=1)
-    parser.add_argument("--estimate-ILM", action="store_true",
-                        help="Enable internal language model estimation. "
-                        "This would slightly slow down the decoding. "
-                        "With this option, the N-best list file would contains ILM scores too. See utils/dispatch_ilm.py")
     parser.add_argument("--cpu", action='store_true', default=False)
     parser.add_argument("--silience", action='store_true', default=False)
     return parser
