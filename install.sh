@@ -21,7 +21,7 @@ echo "install module:cat and its requirements done."
 
 # install ctcdecode is annoying...
 $(python -c "import ctcdecode" >/dev/null 2>&1) || (
-    [ ! -d src/ctcdecode ] && git clone --recursive https://github.com/parlance/ctcdecode.git src/ctcdecode
+    [ ! -d src/ctcdecode ] && git clone --recursive https://github.com/pe-trik/ctcdecode.git src/ctcdecode
     wget http://www.openfst.org/twiki/pub/FST/FstDownload/openfst-1.6.7.tar.gz \
         -O src/ctcdecode/third_party/openfst-1.6.7.tar.gz
     wget https://boostorg.jfrog.io/artifactory/main/release/1.67.0/source/boost_1_67_0.tar.gz \

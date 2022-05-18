@@ -86,8 +86,8 @@ def build_model(
     assert 'decoder' in cfg
     # when training standalone LM,
     # one usually forget to set the `with_head=True`
-    if not cfg['decoder']['kwargs'].get('with_head', False):
-        print("warning: 'with_head' in field:decoder:kwargs is False/not set.")
+    if not cfg['decoder']['kwargs'].get('with_head', True):
+        print("warning: 'with_head' in field:decoder:kwargs is False.")
 
     LMNet = getattr(model_zoo, cfg['decoder']['type'])  # type: AbsDecoder
     decoder = LMNet(**cfg['decoder']['kwargs'])
