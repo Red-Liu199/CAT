@@ -58,9 +58,7 @@ class OpusData(Dataset):
             .append(FBankProcessor(16000, 80))
         )
         if apply_cmvn:
-            self.cmvn_processor = CMVNProcessor()
-        else:
-            self.cmvn_processor = None
+            self.processor.append(CMVNProcessor())
 
     def __len__(self) -> int:
         return len(self._uttlist)
@@ -74,8 +72,6 @@ class OpusData(Dataset):
             duration=(s_end-s_beg),
             force_opus_sampling_rate=16000
         )
-        if self.cmvn_processor is not None:
-            u_feat = self.cmvn_processor(u_feat)
 
         return uid, u_feat
 

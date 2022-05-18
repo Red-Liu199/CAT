@@ -117,8 +117,10 @@ class ResampleProcessor(Processor):
 class CMVNProcessor(Processor):
     """Processor to apply CMVN"""
 
-    def __init__(self) -> None:
+    def __init__(self, eps: float = 1e-7, norm_var: bool = True) -> None:
         super().__init__()
+        self._eps = eps
+        self._norm_var = norm_var
 
     def _process_fn(self, spectrum: torch.Tensor) -> torch.Tensor:
         """
@@ -127,8 +129,12 @@ class CMVNProcessor(Processor):
             D is the number of the spectrum bins.
         """
         _mean = torch.mean(spectrum, dim=0)
-        _std = torch.std(spectrum, dim=0)
-        return (spectrum - _mean) / _std
+
+        if self._norm_var:
+            _std = torch.std(spectrum, dim=0)
+            return (spectrum - _mean) / (_std + self._eps)
+        else:
+            return (spectrum - _mean)
 
 
 def process_feat_as_kaldi(raw_audios: List[Tuple[str, str]], f_scp: str, f_ark: str, processor: Processor, desc: str = ''):
