@@ -5,6 +5,7 @@ set -e
 set -u
 
 data="/mnt/nas3_workspace/spmiData/WenetSpeech"
+nj=48
 
 [ ! -d $data ] && (
     echo "Download the data from https://wenet.org.cn/WenetSpeech/ "
@@ -26,4 +27,9 @@ python local/extract_meta.py \
 
 python local/prep_fbank.py data/thaudio \
     --subset M DEV TEST_MEETING TEST_NET \
-    --cmvn || exit 1
+    --nj=$nj --cmvn || exit 1
+
+python utils/data/resolvedata.py
+
+echo "$0 done."
+exit 0

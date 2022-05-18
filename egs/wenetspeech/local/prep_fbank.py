@@ -3,6 +3,14 @@ Prepare the FBank feats.
 Author: Zheng Huahuan
 """
 
+# FIXME: loading the .opus file with torchaudio is too slow, see https://github.com/pytorch/audio/issues/1994
+try:
+    import lhotse
+except ModuleNotFoundError:
+    print("Module 'lhotse' is not found. Install with:\n"
+          "pip install lhotse")
+finally:
+    from lhotse.audio import read_opus
 
 import os
 import pickle
@@ -12,6 +20,9 @@ from typing import List, Dict, Any, Tuple
 
 import torch
 import kaldiio
+
+from torch.utils.data import DataLoader, Dataset
+from cat.utils.data.data_prep_kaldi import *
 
 
 valid_subsets = [
@@ -23,6 +34,50 @@ valid_subsets = [
     'TEST_MEETING',
     'TEST_NET'
 ]
+
+
+class OpusReadProcessor(Processor):
+    def _process_fn(self, opus_file, *args, **kwargs) -> torch.Tensor:
+        return torch.from_numpy(read_opus(opus_file, *args, **kwargs)[0])
+
+
+class OpusData(Dataset):
+    def __init__(self, f_utt2dur: str, uttlist: List[str], apply_cmvn=False) -> None:
+        super().__init__()
+        with open(f_utt2dur, 'rb') as fib:
+            # type: Dict[str, Tuple[str, int, int]]
+            utt2audio = pickle.load(fib)
+
+        self._uttlist = uttlist
+        self._uttinfo = [utt2audio[uid] for uid in uttlist]
+        assert len(self._uttinfo) == len(self._uttlist)
+        del utt2audio
+
+        self.processor = (
+            OpusReadProcessor()
+            .append(FBankProcessor(16000, 80))
+        )
+        if apply_cmvn:
+            self.cmvn_processor = CMVNProcessor()
+        else:
+            self.cmvn_processor = None
+
+    def __len__(self) -> int:
+        return len(self._uttlist)
+
+    def __getitem__(self, index: int):
+        uid = self._uttlist[index]
+        path, s_beg, s_end = self._uttinfo[index]
+        u_feat = self.processor(
+            path,
+            offset=s_beg,
+            duration=(s_end-s_beg),
+            force_opus_sampling_rate=16000
+        )
+        if self.cmvn_processor is not None:
+            u_feat = self.cmvn_processor(u_feat)
+
+        return uid, u_feat
 
 
 def touch(fname):
@@ -40,6 +95,8 @@ if __name__ == "__main__":
                         help="Subsets to be prepared.")
     parser.add_argument("--cmvn", action="store_true",
                         help="Apply CMVN by utterance.")
+    parser.add_argument("--nj", type=int, default=16,
+                        help="Number of jobs to read the audios.")
     args = parser.parse_args()
 
     annotations = {}
@@ -58,42 +115,25 @@ if __name__ == "__main__":
         if _s not in args.subset:
             del subset2utt[_s]
 
-    with open(f"{args.data}/audiodur.pkl", 'rb') as fib:
-        # type: Dict[str, List[Tuple[str, int, int]]]
-        audio2dur = pickle.load(fib)
-        utt2audio = pickle.load(fib)    # type: Dict[str, str]
-    # filter the audio2dur
-    uttlist = sum(subset2utt.values(), [])
-    audiofiles = {
-        utt2audio[_utt]: None
-        for _utt in uttlist
-    }
-    audio2dur = {aid: audio2dur[aid] for aid in audiofiles}
-
-    with open(os.path.join(args.data, 'wav'), 'r') as fit_wavs:
-        for line in fit_wavs:
-            aid, path = line.strip().split()
-            if aid in audiofiles:
-                audiofiles[aid] = path
-
     ark_file = 'data/.ark/feats.ark'
     scp_file = 'data/.ark/feats.scp'
     if not os.path.exists('data/.ark/.done'):
-        from cat.utils.data.data_prep_kaldi import *
+        assert not os.path.isfile(ark_file), ark_file
+
+        uttlist = sum(subset2utt.values(), [])
 
         os.makedirs(os.path.dirname(ark_file), exist_ok=True)
-        assert not os.path.isfile(ark_file), ark_file
-        processor = ReadProcessor().append(FBankProcessor(16000, 80))
-        if args.cmvn:
-            cmvn_processor = CMVNProcessor()
+        dataloader = DataLoader(OpusData(
+            f_utt2dur=f"{args.data}/utt2dur.pkl",
+            uttlist=uttlist,
+            apply_cmvn=args.cmvn
+        ), shuffle=False, num_workers=args.nj, batch_size=None)
+        p_bar = tqdm(desc='Extract FBank', leave=False, total=len(uttlist))
         with kaldiio.WriteHelper(f'ark,scp:{ark_file},{scp_file}') as writer:
-            for aid, _audio in tqdm(audiofiles.items(), desc='Extract FBank', leave=False):
-                feat = processor(_audio)    # type: torch.Tensor
-                for uid, s_beg, s_end in audio2dur[aid]:
-                    u_feat = feat[s_beg:s_end]
-                    if args.cmvn:
-                        u_feat = cmvn_processor(u_feat)
-                    writer(uid, u_feat.numpy())
+            for uid, feat in dataloader:
+                writer(uid, feat.numpy())
+                p_bar.update()
+        p_bar.close()
 
         touch('data/.ark/.done')
         print("> FBank extracted.")

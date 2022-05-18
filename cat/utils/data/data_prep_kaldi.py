@@ -11,8 +11,9 @@ import kaldiio
 
 import torch
 import torchaudio
+import torchaudio.transforms as T
 
-__all__ = ["Processor", "ReadProcessor",
+__all__ = ["Processor", "ReadProcessor", "ResampleProcessor",
            "SpeedPerturbationProcessor", "FBankProcessor", "CMVNProcessor"]
 
 
@@ -27,8 +28,8 @@ class Processor:
     def _process_fn(self, inarg: Any) -> torch.Tensor:
         raise NotImplementedError
 
-    def __call__(self, inarg: Any) -> torch.Tensor:
-        output = self._process_fn(inarg)
+    def __call__(self, *args: Any, **kwargs: Any) -> torch.Tensor:
+        output = self._process_fn(*args,  **kwargs)
         for p_ in self._next:
             output = p_(output)
         return output
@@ -63,8 +64,8 @@ class Processor:
 class ReadProcessor(Processor):
     """Processor wrapper to read from audio file."""
 
-    def _process_fn(self, file: str) -> torch.Tensor:
-        return torchaudio.load(file)[0]
+    def _process_fn(self, file: str, *args, **kwargs) -> torch.Tensor:
+        return torchaudio.load(file, *args, **kwargs)[0]
 
 
 class SpeedPerturbationProcessor(Processor):
@@ -100,6 +101,17 @@ class FBankProcessor(Processor):
             waveform,
             sample_frequency=self._sample_rate,
             num_mel_bins=self._num_mel_bins)
+
+
+class ResampleProcessor(Processor):
+    def __init__(self, orin_sample_rate: int, new_sample_rate: int) -> None:
+        super().__init__()
+        self._orin_rate = orin_sample_rate
+        self._new_rate = new_sample_rate
+        self.resampler = T.Resample(orin_sample_rate, new_sample_rate)
+
+    def _process_fn(self, inarg: Any) -> torch.Tensor:
+        return self.resampler(inarg)
 
 
 class CMVNProcessor(Processor):

@@ -9,6 +9,8 @@ import argparse
 import pickle
 from typing import List, Dict, Any, Tuple
 
+import torchaudio
+
 
 def touch(fname):
     if os.path.exists(fname):
@@ -21,7 +23,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "data", type=str, help="Directory to the WenetSpeech data.")
-    parser.add_argument("meta_json", type=str, 
+    parser.add_argument("meta_json", type=str,
                         help="The JSON file contains meta information.")
     parser.add_argument("-o", type=str, dest='output_dir', default='data/thaudio',
                         help="Ouput directory. default: 'data/thaudio'")
@@ -111,31 +113,30 @@ if __name__ == "__main__":
         )
         del utt_in_subset
 
-    if not os.path.exists(f"{args.output_dir}/audiodur.pkl"):
+    if not os.path.exists(f"{args.output_dir}/utt2dur.pkl"):
         print("> map audio files to durations...")
-        audio2uttdur = {}   # type: Dict[str, List[Tuple[str, int, int]]]
-        utt2audio = {}      # type: Dict[str, str]
+        utt2audio = {}      # type: Dict[str, Tuple[str, int, int]]
+        audiopath = {}
+        with open(os.path.join(args.output_dir, 'wav'), 'r') as fit_wav:
+            for line in fit_wav:
+                aid, path = line.strip().split()
+                audiopath[aid] = path
+
         with open(os.path.join(args.output_dir, 'segments'), 'r') as fit_seg:
             for line in fit_seg:
                 # e.g. Y0000000000_--5llN02F84_S00000  Y0000000000_--5llN02F84 20.08   24.4
                 uid, aid, s_beg, s_end = line.strip().split()
-                if aid not in audio2uttdur:
-                    audio2uttdur[aid] = [
-                        (uid, int(float(s_beg)*100), int(float(s_end)*100))]
-                else:
-                    audio2uttdur[aid].append(
-                        (uid, int(float(s_beg)*100), int(float(s_end)*100))
-                    )
-                utt2audio[uid] = aid
+                s_beg = float(s_beg)
+                s_end = float(s_end)
+                utt2audio[uid] = (audiopath[aid], s_beg, s_end)
 
-        with open(f"{args.output_dir}/audiodur.pkl", 'wb') as fob:
-            pickle.dump(audio2uttdur, fob)
+        with open(f"{args.output_dir}/utt2dur.pkl", 'wb') as fob:
             pickle.dump(utt2audio, fob)
         print(
-            "> mapping done.\n"
-            f"  {len(audio2uttdur)} audios mapped."
+            "> mapping done."
         )
-        del audio2uttdur
+        del utt2audio
+        del audiopath
 
     if not os.path.exists(f"{args.output_dir}/corpus.pkl"):
         print("> Prepare text corpus...")
