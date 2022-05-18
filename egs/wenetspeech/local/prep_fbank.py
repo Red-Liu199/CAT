@@ -139,7 +139,6 @@ if __name__ == "__main__":
         print("> FBank extracted.")
 
     print("> Prepare text...")
-    assert not os.path.exists('data/src')
     with open(f"{args.data}/corpus.pkl", 'rb') as fib:
         text_corpus = pickle.load(fib)      # type: Dict[str, str]
 
@@ -148,6 +147,8 @@ if __name__ == "__main__":
         if os.path.exists(f_text):
             print(f"{f_text} exists, skip.")
             continue
+        else:
+            os.makedirs(os.path.dirname(f_text), exist_ok=True)
 
         with open(f_text, 'w') as fot:
             for uid in subset2utt[_set]:
@@ -162,8 +163,9 @@ if __name__ == "__main__":
             uid, ark_loc = line.split(maxsplit=1)
             scps[uid] = ark_loc
 
+    os.makedirs('data/src/all_ark', exist_ok=True)
     for _set in args.subset:
-        f_scp = f"data/all_ark/{annotations[_set]}.scp"
+        f_scp = f"data/src/all_ark/{annotations[_set]}.scp"
         with open(f_scp, 'w') as fot:
             for uid in subset2utt[_set]:
                 fot.write(f"{uid}\t{scps[uid]}")

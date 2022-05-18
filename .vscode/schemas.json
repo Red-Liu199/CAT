@@ -1561,6 +1561,9 @@
                                         "type": "boolean",
                                         "default": false
                                     },
+                                    "min_step": {
+                                        "default": -1
+                                    },
                                     "gamma": {
                                         "type": "number",
                                         "default": 0.1
