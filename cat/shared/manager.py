@@ -65,7 +65,7 @@ class Manager(object):
 
         coreutils.check_parser(args, ['rank', 'gpu', 'workers', 'trset', 'devset', 'databalance',
                                       'batch_size', 'grad_accum_fold', 'config', 'dir', 'debug',
-                                      'logsdir', 'checksdir', 'resume', 'init_model'])
+                                      'logdir', 'checkdir', 'resume', 'init_model'])
 
         # setup dataloader
         val_set = Dataset(args.devset)
@@ -208,17 +208,17 @@ class Manager(object):
                 cfg['scheduler'], self.model.parameters())
 
         self.cm = CheckpointManager(
-            os.path.join(args.checksdir, F_CHECKLIST),
+            os.path.join(args.checkdir, F_CHECKLIST),
             header=f"created at {datetime.today().strftime('%Y-%m-%d %H:%M:%S')}"
         )
-        self.monitor = MonitorWriter(args.logsdir)
+        self.monitor = MonitorWriter(args.logdir)
         self.monitor.addWriter(BASE_METRIC)
         if extra_tracks is not None:
             self.monitor.addWriter(extra_tracks)
 
         if args.rank == 0:
             self.writer = SummaryWriter(os.path.join(
-                args.logsdir, "{0:%Y%m%d-%H%M%S/}".format(datetime.now())))
+                args.logdir, "{0:%Y%m%d-%H%M%S/}".format(datetime.now())))
         else:
             self.writer = None
 
@@ -265,7 +265,7 @@ class Manager(object):
     def run(self, args: argparse.Namespace):
 
         coreutils.check_parser(
-            args, ['checksdir', 'rank', 'gpu', 'dir'])
+            args, ['checkdir', 'rank', 'gpu', 'dir'])
 
         self.model.train()
         terminated = False
@@ -286,7 +286,7 @@ class Manager(object):
                 self.model.train()
 
                 checkpoint = os.path.join(
-                    args.checksdir,
+                    args.checkdir,
                     f"checkpoint.{self.epoch}e{self.step}s.pt"
                 )
                 # inside self.save(), there maybe all_reduce OP, don't put it in rank==0 block.
@@ -307,7 +307,7 @@ class Manager(object):
                     # backup the last checkpoint
                     if self.rank == 0 and not self.DEBUG:
                         shutil.copyfile(checkpoint, os.path.join(
-                            args.checksdir, "checkpoint.pt"))
+                            args.checkdir, "checkpoint.pt"))
                     print("Terminated: GPU[%d]" % self.rank)
                     terminated = True
                     dist.barrier()

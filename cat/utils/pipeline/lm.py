@@ -146,7 +146,7 @@ if __name__ == "__main__":
             # do model averaging
             checkpoint, _ = model_average(
                 setting=infer_setting['avgmodel'],
-                checkdir=os.path.join(args.expdir, 'checks'),
+                checkdir=os.path.join(args.expdir, 'check'),
                 returnifexist=True)
         else:
             checkpoint = None

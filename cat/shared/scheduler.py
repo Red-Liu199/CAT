@@ -393,12 +393,16 @@ class SchedulerNoamEarlyStop(SchedulerEarlyStop):
             stop_lr: float = 0.00001,
             n_tol: int = 0,
             gamma: float = 0.1,
+            min_step: Optional[int] = -1,
             reverse: bool = False):
-        super().__init__(optimizer, warmup_step, stop_lr, n_tol, gamma, reverse)
-
         assert dim_model > 0
         assert warmup_step > 0
         assert peak_factor > 0.
+        if min_step == -1:
+            min_step = warmup_step
+        assert min_step >= warmup_step
+        super().__init__(optimizer, min_step, stop_lr, n_tol, gamma, reverse)
+
         self.ref_lr = peak_factor / math.sqrt(dim_model)
         self._den_in_warmup = 1./math.sqrt(warmup_step)/warmup_step
         self.update_lr_step(1)

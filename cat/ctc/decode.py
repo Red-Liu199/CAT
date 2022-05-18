@@ -103,17 +103,18 @@ def worker(pid: int, args: argparse.Namespace, q: mp.Queue, fmt: str, model: Abs
     torch.set_num_threads(args.thread_per_woker)
 
     tokenizer = tknz.load(args.tokenizer)
-    labels = list(tokenizer.dump_vocab().values())
-
     if args.lm_path is None:
+        # w/o LM, labels won't be used in decoding.
+        labels = [''] * tokenizer.vocab_size
         searcher = CTCBeamDecoder(
             labels, beam_width=args.beam_size, num_processes=1)
     else:
-        if args.alpha is None:
-            args.alpha = 0.0
-        if args.beta is None:
-            args.beta = 0.0
-
+        if pid == 0:
+            print(
+                "warning: ctc decoding with an ext. LM assumes <s> -> 0 and <unk> -> 1.")
+        labels = [str(i) for i in range(tokenizer.vocab_size)]
+        labels[0] = '<s>'
+        labels[1] = '<unk>'
         searcher = CTCBeamDecoder(
             labels, model_path=args.lm_path, alpha=args.alpha, beta=args.beta,
             beam_width=args.beam_size, num_processes=1, is_token_based=True)

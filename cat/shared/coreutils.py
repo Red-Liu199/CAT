@@ -431,7 +431,7 @@ def main_spawner(args, _main_worker: Callable[[int, int, argparse.Namespace], No
 
 def setup_path(args: argparse.Namespace):
     """
-    Set args.checksdir and args.logsdir
+    Set args.checkdir and args.logdir
     """
 
     # set checkpoint path and log files path
@@ -439,30 +439,30 @@ def setup_path(args: argparse.Namespace):
         if not os.path.isdir(args.dir):
             raise RuntimeError(
                 f"--dir={args.dir} is not a valid directory.")
-        # ckpt -> checks
-        checksdir = os.path.join(args.dir, 'checks')
-        logsdir = os.path.join(args.dir, 'logs')
-        os.makedirs(checksdir, exist_ok=True)
-        os.makedirs(logsdir, exist_ok=True)
+        # ckpt -> check
+        checkdir = os.path.join(args.dir, 'check')
+        logdir = os.path.join(args.dir, 'log')
+        os.makedirs(checkdir, exist_ok=True)
+        os.makedirs(logdir, exist_ok=True)
     else:
         highlight_msg("Debugging")
         # This is a hack, we won't read/write anything in debug mode.
-        logsdir = os.path.join('./', 'tmp_debug_folder')
-        checksdir = logsdir
-        os.makedirs(logsdir, exist_ok=True)
+        logdir = os.path.join('./', 'tmp_debug_folder')
+        checkdir = logdir
+        os.makedirs(logdir, exist_ok=True)
 
     if args.config is None:
         args.config = os.path.join(args.dir, 'config.json')
 
-    setattr(args, 'checksdir', checksdir)
-    setattr(args, 'logsdir', logsdir)
+    setattr(args, 'checkdir', checkdir)
+    setattr(args, 'logdir', logdir)
     if not args.debug and args.resume is None:
-        if glob.glob(os.path.join(args.checksdir, "*.pt")) != []:
+        if glob.glob(os.path.join(args.checkdir, "*.pt")) != []:
             raise FileExistsError(
-                f"{args.checksdir} is not empty!")
+                f"{args.checkdir} is not empty!")
 
         from .monitor import FILE_WRITER
-        logfile = os.path.join(logsdir, FILE_WRITER)
+        logfile = os.path.join(logdir, FILE_WRITER)
         if os.path.isfile(logfile):
             raise FileExistsError(
                 f"{logfile} exists!")

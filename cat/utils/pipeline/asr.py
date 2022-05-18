@@ -712,7 +712,7 @@ if __name__ == "__main__":
                 f"Unknown topology: {hyper_settings['topo']}, expect one of ['rnnt', 'ctc']")
 
         inference_settings = hyper_settings['inference']
-        checkdir = os.path.join(args.expdir, 'checks')
+        checkdir = os.path.join(args.expdir, 'check')
 
         # decode
         assert 'decode' in inference_settings, "missing 'decode' in field:inference"
@@ -785,7 +785,7 @@ if __name__ == "__main__":
                     lmdir, 'config.json')
                 checkExist('f', decode_settings['lm-config'])
                 decode_settings['lm-check'] = os.path.join(
-                    lmdir, 'checks/bestckpt.pt')
+                    lmdir, 'check/bestckpt.pt')
                 sys.stdout.write(fmt.format(
                     f"set 'lm-config' to {decode_settings['lm-config']}"))
                 sys.stdout.write(fmt.format(
