@@ -54,18 +54,25 @@ def main(args):
 
     q_data_producer = mp.Queue(maxsize=world_size)
     q_nbest_saver = mp.Queue(maxsize=world_size)
+    producer = mp.Process(target=dataserver, args=(args, q_data_producer))
+    consumer = mp.Process(target=consumer_output, args=(args, q_nbest_saver))
+    producer.start()
+    consumer.start()
+
     if args.cpu:
         model, ext_lm = build_model(args, 'cpu')
         model.share_memory()
         if ext_lm is not None:
             ext_lm.share_memory()
 
-        mp.spawn(main_worker, nprocs=world_size+2,
+        mp.spawn(main_worker, nprocs=world_size,
                  args=(args, q_data_producer, q_nbest_saver, (model, ext_lm)))
     else:
-        mp.spawn(main_worker, nprocs=world_size+2,
+        mp.spawn(main_worker, nprocs=world_size,
                  args=(args, q_data_producer, q_nbest_saver))
 
+    producer.join()
+    consumer.join()
     del q_nbest_saver
     del q_data_producer
 
@@ -94,7 +101,7 @@ def dataserver(args, q: mp.Queue):
         nbest = {}
 
     t_beg = time.time()
-    for batch in tqdm(testloader, total=len(testloader), disable=(args.silience)):
+    for batch in tqdm(testloader, desc="RNN-T decode", total=len(testloader), disable=(args.silience), leave=False):
         key = batch[0][0]
         """
         NOTE: 
@@ -113,9 +120,8 @@ def dataserver(args, q: mp.Queue):
     t_dur = time.time() - t_beg
 
     if not args.silience:
-        print("\nTime = {:.2f} s | RTF = {:.2f} ".format(
+        print("Time = {:.2f} s | RTF = {:.2f} ".format(
             t_dur, t_dur*args.world_size / n_frames * 100))
-    time.sleep(2)
 
 
 def consumer_output(args, q: mp.Queue):
@@ -155,10 +161,6 @@ def consumer_output(args, q: mp.Queue):
 
 
 def main_worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_nbest: mp.Queue, models=None):
-    if pid == args.world_size:
-        return dataserver(args, q_data)
-    elif pid == args.world_size + 1:
-        return consumer_output(args, q_nbest)
 
     args.gpu = pid
     # only support one node

@@ -71,15 +71,18 @@ def main(args):
         if args.verbose:
             print(re)
     q = mp.Queue(maxsize=world_size)
+    producer = mp.Process(target=dataserver, args=(args, q))
+    producer.start()
 
     if args.cpu:
         model = build_lm(args.config, args.resume, 'cpu')
         model.share_memory()
-        mp.spawn(main_worker, nprocs=world_size+1,
+        mp.spawn(main_worker, nprocs=world_size,
                  args=(args, q, fmt, model))
     else:
-        mp.spawn(main_worker, nprocs=world_size+1,
+        mp.spawn(main_worker, nprocs=world_size,
                  args=(args, q, fmt))
+    producer.join()
     del q
 
     with open(args.output, 'w') as fo:
@@ -112,7 +115,7 @@ def dataserver(args, q: mp.Queue):
         collate_fn=NbestListCollate(tokenizer))
 
     t_beg = time.time()
-    for batch in tqdm(testloader, total=len(testloader), disable=(not args.verbose)):
+    for batch in tqdm(testloader, desc="LM rescore", total=len(testloader), disable=(not args.verbose), leave=False):
         for k in batch:
             if isinstance(k, torch.Tensor):
                 k.share_memory_()
@@ -121,13 +124,11 @@ def dataserver(args, q: mp.Queue):
     for i in range(args.world_size*2):
         q.put(None, block=True)
     if args.verbose:
-        print("\nTime = {:.2f} s".format(time.time() - t_beg))
-    time.sleep(2)
+        print("Time = {:.2f} s".format(time.time() - t_beg))
 
 
 def main_worker(pid: int, args: argparse.Namespace, q: mp.Queue, fmt: str = "rescore.{}.tmp", model=None):
-    if pid == args.world_size:
-        return dataserver(args, q)
+
     args.pid = pid
     args.rank = pid
     world_size = args.world_size

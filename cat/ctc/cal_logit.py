@@ -41,11 +41,15 @@ def main(args: argparse.Namespace):
         mp.set_start_method('spawn')
     except RuntimeError as re:
         print(re)
+
     q = mp.Queue(maxsize=world_size)
+    producer = mp.Process(target=dataserver, args=(args, q))
+    producer.start()
+
     model = build_model(args)
     model.share_memory()
-    mp.spawn(worker, nprocs=world_size+1, args=(args, q, model))
-
+    mp.spawn(worker, nprocs=world_size, args=(args, q, model))
+    producer.join()
     del q
 
 
@@ -58,7 +62,7 @@ def dataserver(args, q: mp.Queue):
         collate_fn=sortedScpPadCollate())
 
     t_beg = time.time()
-    for batch in tqdm(testloader, total=len(testloader)):
+    for batch in tqdm(testloader, desc="Cal logit", total=len(testloader), leave=False):
         for k in batch:
             if isinstance(k, torch.Tensor):
                 k.share_memory_()
@@ -68,14 +72,11 @@ def dataserver(args, q: mp.Queue):
         q.put(None, block=True)
     t_dur = time.time() - t_beg
 
-    print("\nTime = {:.2f} s | RTF = {:.2f} ".format(
+    print("Time = {:.2f} s | RTF = {:.2f} ".format(
         t_dur, t_dur*args.world_size / n_frames * 100))
-    time.sleep(2)
 
 
 def worker(pid: int, args: argparse.Namespace, q: mp.Queue, model: AbsEncoder):
-    if pid == args.world_size:
-        return dataserver(args, q)
 
     torch.set_num_threads(1)
 

@@ -58,6 +58,8 @@ def main(args: argparse.Namespace):
     except RuntimeError as re:
         print(re)
     q = mp.Queue(maxsize=world_size)
+    consumer = mp.Process(target=consume_worker, args=(world_size, q, args))
+    consumer.start()
 
     args.usegpu = usegpu
     processed_files = []
@@ -70,27 +72,28 @@ def main(args: argparse.Namespace):
         processed_files.append(binfile)
 
     if usegpu:
-        mp.spawn(evaluate_nnlm, nprocs=(world_size+1),
+        mp.spawn(evaluate_nnlm, nprocs=world_size,
                  args=(world_size, q, args, processed_files))
     else:
         model = build_model(args, 'cpu')
         model.share_memory()
         if isngram:
-            mp.spawn(evaluate_ngram, nprocs=(world_size+1),
+            mp.spawn(evaluate_ngram, nprocs=world_size,
                      args=(world_size, q, args, processed_files, model))
         else:
-            mp.spawn(evaluate_nnlm, nprocs=(world_size+1),
+            mp.spawn(evaluate_nnlm, nprocs=world_size,
                      args=(world_size, q, args, processed_files, model))
 
     if cachedir is not None:
         shutil.rmtree(cachedir)
 
+    consumer.join()
+    del q
+
 
 @torch.no_grad()
 def evaluate_ngram(pid: int, wsize: int, q: mp.Queue, args: argparse.Namespace, testsets: List[str], model):
     """Evaluate datasets and return sum of logprobs and tokens."""
-    if pid == wsize:
-        return consumer(wsize, q, args)
 
     torch.set_num_threads(1)
     output = []     # type: List[Tuple[float, int]]
@@ -110,8 +113,6 @@ def evaluate_ngram(pid: int, wsize: int, q: mp.Queue, args: argparse.Namespace, 
 @torch.no_grad()
 def evaluate_nnlm(pid: int, wsize: int, q: mp.Queue, args: argparse.Namespace, testsets: List[str], model=None):
     """Evaluate datasets and return sum of logprobs and tokens."""
-    if pid == wsize:
-        return consumer(wsize, q, args)
 
     if args.usegpu:
         device = pid
@@ -156,7 +157,7 @@ def evaluate_nnlm(pid: int, wsize: int, q: mp.Queue, args: argparse.Namespace, t
     # time.sleep(10)
 
 
-def consumer(wsize: int, q: mp.Queue, args):
+def consume_worker(wsize: int, q: mp.Queue, args):
     output = []     # type: List[List[Tuple[float, int]]]
     for i in range(wsize):
         data = q.get(block=True)

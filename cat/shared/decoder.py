@@ -83,8 +83,8 @@ class AbsDecoder(nn.Module):
     def batching_states(*args, **kwargs) -> 'AbsStates':
         raise NotImplementedError
 
-    def get_state_from_batch(*args, **kwargs) -> Union['AbsStates', List['AbsStates']]:
-        """Get state of given index (or index list) from the batched states"""
+    def get_state_from_batch(*args, **kwargs) -> 'AbsStates':
+        """Get state of given index from the batched states"""
         raise NotImplementedError
 
     def init_states(self, N: int = 1) -> 'AbsStates':
@@ -216,23 +216,11 @@ class LSTM(AbsDecoder):
         return AbsStates((h_0, c_0), LSTM)
 
     @staticmethod
-    def get_state_from_batch(raw_batched_states, index: Union[int, List[int]]) -> Union[AbsStates, List[AbsStates]]:
+    def get_state_from_batch(raw_batched_states, index: int) -> AbsStates:
 
-        if isinstance(index, int):
-            flag_squeeze = True
-            index = [index]
-        else:
-            flag_squeeze = False
-
-        o_states = []
-        for _i in index:
-            h_0 = raw_batched_states[0][:, _i:_i+1, :]
-            c_0 = raw_batched_states[1][:, _i:_i+1, :]
-            o_states.append(AbsStates((h_0, c_0), LSTM))
-        if flag_squeeze:
-            return o_states[0]
-        else:
-            return o_states
+        h_0 = raw_batched_states[0][:, index:index+1, :]
+        c_0 = raw_batched_states[1][:, index:index+1, :]
+        return AbsStates((h_0, c_0), LSTM)
 
     def init_states(self, N: int = 1) -> AbsStates:
         device = next(iter(self.parameters())).device
@@ -330,28 +318,16 @@ class CausalTransformer(AbsDecoder):
         return AbsStates(tuple(batched_states), CausalTransformer)
 
     @staticmethod
-    def get_state_from_batch(raw_batched_states, index: Union[int, List[int]]) -> Union[AbsStates, List[AbsStates]]:
-
-        if isinstance(index, int):
-            flag_squeeze = True
-            index = [index]
-        else:
-            flag_squeeze = False
+    def get_state_from_batch(raw_batched_states, index: int) -> AbsStates:
 
         n_layers = len(raw_batched_states)
-        o_states = []
-        for _i in index:
-            _o_state = []
-            for l in range(n_layers):
-                s_0 = raw_batched_states[l][0][_i:_i+1, :, :, :]
-                s_1 = raw_batched_states[l][1][_i:_i+1, :, :, :]
-                _o_state.append((s_0, s_1))
-            o_states.append(AbsStates(tuple(_o_state), CausalTransformer))
+        _o_state = []
+        for l in range(n_layers):
+            s_0 = raw_batched_states[l][0][index:index+1, :, :, :]
+            s_1 = raw_batched_states[l][1][index:index+1, :, :, :]
+            _o_state.append((s_0, s_1))
 
-        if flag_squeeze:
-            return o_states[0]
-        else:
-            return o_states
+        return AbsStates(tuple(_o_state), CausalTransformer)
 
     def init_states(self, N: int = 1) -> AbsStates:
         return AbsStates(None, CausalTransformer)
@@ -412,7 +388,7 @@ class NGram(AbsDecoder):
         return log_prob
 
     def forward(self, src_ids: torch.Tensor, hidden: torch.Tensor = None, input_lengths: Optional[torch.Tensor] = None):
-        """This is non-standar interface, only designed for inference. The n-gram model will take input as context and 
+        """This is a non-standar interface, only designed for inference. The n-gram model will take input as context and 
             predict the probability for next token, so the output is always (N, 1, V)
         """
         if self.training:
@@ -452,12 +428,8 @@ class NGram(AbsDecoder):
         return AbsStates(o_state, NGram)
 
     @staticmethod
-    def get_state_from_batch(raw_batched_states, index: Union[int, List[int]]) -> Union[AbsStates, List[AbsStates]]:
-
-        if isinstance(index, int):
-            return AbsStates(raw_batched_states[index:index+1, :], NGram)
-        else:
-            return [AbsStates(raw_batched_states[i:i+1, :], NGram) for i in index]
+    def get_state_from_batch(raw_batched_states, index: int) -> AbsStates:
+        return AbsStates(raw_batched_states[index:index+1, :], NGram)
 
     def init_states(self, N: int = 1):
         return AbsStates(None, self)
@@ -479,12 +451,9 @@ class ZeroDecoder(AbsDecoder):
         return AbsStates(None, ZeroDecoder)
 
     @staticmethod
-    def get_state_from_batch(raw_batched_states, index: Union[int, List[int]]) -> Union[AbsStates, List[AbsStates]]:
+    def get_state_from_batch(raw_batched_states, index: int) -> AbsStates:
 
-        if isinstance(index, int):
-            return AbsStates(None, ZeroDecoder)
-        else:
-            return [AbsStates(None, ZeroDecoder) for i in index]
+        return AbsStates(None, ZeroDecoder)
 
     def init_states(self, N: int = 1) -> 'AbsStates':
         return AbsStates(None, ZeroDecoder)
@@ -578,24 +547,14 @@ class MultiDecoder(AbsDecoder):
         )
         return AbsStates(batched_state, self)
 
-    def get_state_from_batch(self, raw_batched_states: Tuple[Any], index: Union[int, List[int]]) -> Union[AbsStates, List[AbsStates]]:
-        if isinstance(index, int):
-            return AbsStates(
-                tuple(
-                    self._decs[i].get_state_from_batch(
-                        raw_batched_states[i], index)()
-                    for i in range(self._num_decs)
-                ), self)
-        else:
-            return [
-                AbsStates(
-                    tuple(
-                        self._decs[i].get_state_from_batch(
-                            raw_batched_states[i], _idx)()
-                        for i in range(self._num_decs)
-                    ), self)
-                for _idx in index
-            ]
+    def get_state_from_batch(self, raw_batched_states, index: int) -> AbsStates:
+
+        return AbsStates(
+            tuple(
+                self._decs[i].get_state_from_batch(
+                    raw_batched_states[i], index)()
+                for i in range(self._num_decs)
+            ), self)
 
     def init_states(self, N: int = 1) -> 'AbsStates':
         return AbsStates(

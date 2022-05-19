@@ -217,7 +217,7 @@ def draw_time(ax: plt.Axes, smr: BaseSummary, prop_box=True):
             speed = speed * 60
             if speed < 1.:
                 speed = speed * 60
-                timestr = f"{speed:.0f} sec/step"
+                timestr = f"{speed:.1f} sec/step"
             else:
                 timestr = f"{speed:.1f} min/step"
         else:
