@@ -1,0 +1,70 @@
+{
+    "specaug_config": {
+        "freq_mask_width_range": 0.34,
+        "num_freq_mask": 2,
+        "num_time_mask": 5,
+        "time_mask_width_range": 0.1,
+        "time_warp_window": 0.2
+    },
+    "transducer": {
+        "compact": true
+    },
+    "encoder": {
+        "type": "ConformerNet",
+        "kwargs": {
+            "num_cells": 12,
+            "idim": 80,
+            "hdim": 512,
+            "conv": "conv2d",
+            "num_heads": 4,
+            "dropout": 0.3,
+            "dropout_attn": 0.3,
+            "kernel_size": 15,
+            "with_head": false
+        }
+    },
+    "decoder": {
+        "type": "LSTM",
+        "kwargs": {
+            "num_classes": 5536,
+            "hdim": 512,
+            "num_layers": 1,
+            "with_head": false,
+            "variational_noise": [
+                0.0,
+                0.075
+            ]
+        }
+    },
+    "joiner": {
+        "type": "JointNet",
+        "kwargs": {
+            "odim_enc": 512,
+            "odim_pred": 512,
+            "hdim": 512,
+            "num_classes": 5536
+        }
+    },
+    "scheduler": {
+        "type": "SchedulerNoamEarlyStop",
+        "optimizer": {
+            "type": "Adam",
+            "use_zero": true,
+            "kwargs": {
+                "lr": 0.0003,
+                "betas": [
+                    0.9,
+                    0.98
+                ],
+                "weight_decay": 1e-06
+            }
+        },
+        "kwargs": {
+            "dim_model": 512,
+            "n_tol": 5,
+            "warmup_step": 25000,
+            "min_step": 200000,
+            "stop_lr": 1e-06
+        }
+    }
+}

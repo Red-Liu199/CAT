@@ -37,19 +37,20 @@ dev     %SER 62.11 | %CER 7.82 [ 25849 / 330498, 3724 ins, 7889 del, 14236 sub ]
 test_net        %SER 55.67 | %CER 9.32 [ 38747 / 415746, 4977 ins, 6444 del, 27326 sub ]
 test_meeting    %SER 87.32 | %CER 14.66 [ 32312 / 220385, 4403 ins, 10774 del, 17135 sub ]
 aishell-test    %SER 38.38 | %CER 5.12 [ 5368 / 104765, 802 ins, 92 del, 4474 sub ]
-
-average 10 best
-dev     %SER 66.18 | %CER 9.69 [ 32009 / 330498, 1460 ins, 16758 del, 13791 sub ]
-test_net        %SER 56.99 | %CER 9.67 [ 40187 / 415746, 1753 ins, 11844 del, 26590 sub ]
-test_meeting    %SER 88.83 | %CER 18.14 [ 39971 / 220385, 1060 ins, 24078 del, 14833 sub ]
-aishell-test    %SER 38.87 | %CER 5.13 [ 5371 / 104765, 273 ins, 219 del, 4879 sub ]
 ```
 
 adapt to aishell
+
+| Method | test |
+|:------:|:----:|
+| no lm  | 5.13 |
+|   SF   | 4.29 |
+|  ILME  | 4.19 |
+|  LODR  | 4.01 |
+
 ```
 SF 0.5 1.38
 aishell-test    %SER 33.15 | %CER 4.29 [ 4493 / 104765, 210 ins, 345 del, 3938 sub ]
-
 
 ILME -0.12 0.5 1.12
 aishell-test    %SER 33.07 | %CER 4.19 [ 4386 / 104765, 193 ins, 262 del, 3931 sub ]

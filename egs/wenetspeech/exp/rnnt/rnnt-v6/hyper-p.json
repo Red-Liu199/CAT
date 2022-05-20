@@ -1,0 +1,46 @@
+{
+    "data": {
+        "train": "train_m",
+        "dev": [
+            "dev",
+            "test_net",
+            "test_meeting"
+        ],
+        "test": [
+            "dev",
+            "test_net",
+            "test_meeting"
+        ],
+        "filter": "10:1200",
+        "lang": "zh-cn"
+    },
+    "tokenizer": {
+        "type": "SentencePieceTokenizer",
+        "location": "exp/rnnt/rnnt-v4/tokenizer.tknz"
+    },
+    "train": {
+        "batch-size": 512,
+        "grad-norm": 5.0,
+        "databalance": true,
+        "check-freq": 1000,
+        "amp": true
+    },
+    "inference": {
+        "avgmodel": {
+            "mode": "last",
+            "num": 20
+        },
+        "decode": {
+            "algo": "rna",
+            "beam-size": 16,
+            "cpu": false,
+            "nj": 40,
+            "resume": "exp/rnnt/rnnt-v6/check/last-20.pt"
+        },
+        "er": {
+            "mode": "cer",
+            "oracle": false
+        }
+    },
+    "commit": "fc2b66f7e7d9404cc5c6d4a397a6a2bd96ec711d"
+}
