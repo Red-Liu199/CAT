@@ -82,5 +82,41 @@ speechio_asr_zh00006    %SER 77.71 | %CER 16.10 [ 4236 / 26318, 658 ins, 499 del
 speechio_asr_zh00007    %SER 85.06 | %CER 17.18 [ 3236 / 18832, 459 ins, 627 del, 2150 sub ]
 ```
 
+LM integration result
+```
+SF 0.25 3.0
+aishell-test            %SER 29.72 | %CER 3.85 [ 4036 / 104765, 730 ins, 92 del, 3214 sub ]
+speechio_asr_zh00000    %SER 61.89 | %CER 7.12 [ 1693 / 23765, 183 ins, 932 del, 578 sub ]
+speechio_asr_zh00001    %SER 22.10 | %CER 1.43 [ 2051 / 143203, 160 ins, 239 del, 1652 sub ]
+speechio_asr_zh00002    %SER 50.82 | %CER 6.08 [ 3132 / 51551, 830 ins, 711 del, 1591 sub ]
+speechio_asr_zh00003    %SER 39.16 | %CER 3.50 [ 1298 / 37064, 290 ins, 47 del, 961 sub ]
+speechio_asr_zh00004    %SER 53.62 | %CER 4.01 [ 1504 / 37506, 299 ins, 400 del, 805 sub ]
+speechio_asr_zh00005    %SER 75.25 | %CER 6.30 [ 5877 / 93322, 741 ins, 2898 del, 2238 sub ]
+speechio_asr_zh00006    %SER 78.67 | %CER 16.24 [ 4274 / 26318, 920 ins, 373 del, 2981 sub ]
+speechio_asr_zh00007    %SER 85.32 | %CER 17.62 [ 3318 / 18832, 636 ins, 546 del, 2136 sub ]
+
+ILME -0.13 0.38 3.0
+aishell-test            %SER 27.88 | %CER 3.63 [ 3801 / 104765, 825 ins, 95 del, 2881 sub ]
+speechio_asr_zh00000    %SER 62.23 | %CER 7.58 [ 1801 / 23765, 178 ins, 1079 del, 544 sub ]
+speechio_asr_zh00001    %SER 20.20 | %CER 1.30 [ 1868 / 143203, 218 ins, 256 del, 1394 sub ]
+speechio_asr_zh00002    %SER 50.99 | %CER 6.13 [ 3161 / 51551, 812 ins, 760 del, 1589 sub ]
+speechio_asr_zh00003    %SER 33.57 | %CER 2.77 [ 1025 / 37064, 176 ins, 47 del, 802 sub ]
+speechio_asr_zh00004    %SER 52.25 | %CER 3.78 [ 1416 / 37506, 206 ins, 454 del, 756 sub ]
+speechio_asr_zh00005    %SER 79.13 | %CER 6.69 [ 6240 / 93322, 592 ins, 3486 del, 2162 sub ]
+speechio_asr_zh00006    %SER 77.26 | %CER 15.75 [ 4146 / 26318, 736 ins, 520 del, 2890 sub ]
+speechio_asr_zh00007    %SER 85.71 | %CER 17.09 [ 3219 / 18832, 533 ins, 638 del, 2048 sub ]
+
+LODR -0.13 0.38 3.0
+aishell-test            %SER 27.81 | %CER 3.61 [ 3781 / 104765, 831 ins, 90 del, 2860 sub ]
+speechio_asr_zh00000    %SER 62.23 | %CER 7.55 [ 1794 / 23765, 197 ins, 1029 del, 568 sub ]
+speechio_asr_zh00001    %SER 20.42 | %CER 1.30 [ 1867 / 143203, 217 ins, 248 del, 1402 sub ]
+speechio_asr_zh00002    %SER 51.19 | %CER 6.12 [ 3155 / 51551, 849 ins, 723 del, 1583 sub ]
+speechio_asr_zh00003    %SER 34.05 | %CER 2.76 [ 1023 / 37064, 185 ins, 46 del, 792 sub ]
+speechio_asr_zh00004    %SER 51.49 | %CER 3.79 [ 1421 / 37506, 235 ins, 419 del, 767 sub ]
+speechio_asr_zh00005    %SER 78.11 | %CER 6.53 [ 6097 / 93322, 629 ins, 3316 del, 2152 sub ]
+speechio_asr_zh00006    %SER 77.19 | %CER 16.18 [ 4258 / 26318, 817 ins, 490 del, 2951 sub ]
+speechio_asr_zh00007    %SER 85.45 | %CER 17.12 [ 3224 / 18832, 557 ins, 623 del, 2044 sub ]
+```
+
 ### Monitor figure
 ![monitor](./monitor.png)

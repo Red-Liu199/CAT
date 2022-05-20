@@ -2,9 +2,8 @@
 
 ## TODO
 
-1. For script processing large dataset (more than 1000 hours), refer to [loading data with webdataset](egs/wenetspeech/local/prepare-wds.py).
+1. For script processing large dataset (more than 1000 hours), refer to [loading data with webdataset](egs/wenetspeech/local/prep_wds.py).
 
-see personal notes.
 
 ## Installation
 

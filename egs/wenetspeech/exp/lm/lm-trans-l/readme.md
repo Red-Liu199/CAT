@@ -1,13 +1,20 @@
 
+train command:
+
+```bash
+utils/pipeline/ngram.sh exp/lm/lm-trans-l --text-corpus
+```
+
 property:
 
-- prune: 0 1 1 2 2
-- type: trie
-- size: 217 MB
+- prune: 
+- type:  trie
+- size:  1.3GB
 
 perplexity:
 
 ```
-Test file: test_meeting.tmp -> ppl: 56.43
-Test file: test_net.tmp -> ppl: 62.83
+Test file: aishell-test.tmp -> ppl: 68.90
+Test file: test_net.tmp -> ppl: 59.07
+Test file: test_meeting.tmp -> ppl: 55.39
 ```

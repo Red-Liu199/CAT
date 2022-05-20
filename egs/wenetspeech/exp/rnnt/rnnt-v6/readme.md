@@ -23,6 +23,7 @@ compared to baseline (feature extraction via kaldi)
 | ------------------- | :---: | :------: | :----------: |
 | kaldi w/ CMVN       | 11.16 | 12.76    | 20.97        |
 | torchaudio w/o CMVN | 11.34 | 13.11    | 20.51        |
+| torchaudio w/ CMVN  | 11.38 | 13.30    | 20.88        |
 
 ```
 best-10
