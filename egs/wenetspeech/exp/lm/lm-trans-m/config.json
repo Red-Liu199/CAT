@@ -2,9 +2,9 @@
     "decoder": {
         "type": "NGram",
         "kwargs": {
-            "f_binlm": "exp/lm-trans/5gram.klm",
+            "f_binlm": "exp/lm/lm-trans-m/5gram.klm",
             "gram_order": 5,
-            "num_classes": 5147
+            "num_classes": 5536
         }
     }
 }

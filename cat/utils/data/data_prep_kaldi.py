@@ -12,6 +12,7 @@ import kaldiio
 import torch
 import torchaudio
 import torchaudio.transforms as T
+from torch.utils.data import DataLoader, Dataset
 
 __all__ = ["Processor", "ReadProcessor", "ResampleProcessor",
            "SpeedPerturbationProcessor", "FBankProcessor", "CMVNProcessor"]
@@ -137,10 +138,50 @@ class CMVNProcessor(Processor):
             return (spectrum - _mean)
 
 
+class AudioData(Dataset):
+    """A small wrapper for preparing audio files.
+    """
+
+    def __init__(self, processor: Processor, audio_list: List[Tuple[str, str]]) -> None:
+        """
+        Args:
+            processor   (Processor) : your custom processor.
+            audio_list  (list[tuple[str, str]]): a list of (uid, audio_file_path) pairs.
+        """
+        super().__init__()
+        try:
+            len(audio_list)
+            iter(audio_list)
+        except:
+            print(
+                f"{self.__class__.__name__}: given audio list is not compatible with requirements.")
+        finally:
+            assert len(audio_list) > 0
+            assert isinstance(audio_list[0][0], str) and isinstance(
+                audio_list[0][1], str), f"{audio_list[0]}"
+
+        assert isinstance(processor, Processor), f"{type(processor)}"
+        self._processor = processor
+        self._meta = audio_list
+
+    def __len__(self) -> int:
+        return len(self._meta)
+
+    def __getitem__(self, index: int):
+        uid, f_audio = self._meta[index]
+        return uid, self._processor(f_audio)
+
+
 def process_feat_as_kaldi(raw_audios: List[Tuple[str, str]], f_scp: str, f_ark: str, processor: Processor, desc: str = ''):
+    dataloader = DataLoader(
+        AudioData(processor=processor, audio_list=raw_audios),
+        # if you have a high speed disk, try increase num_worker to fasten
+        # the dataloding
+        shuffle=False, num_workers=16, batch_size=None
+    )
     with kaldiio.WriteHelper(f'ark,scp:{f_ark},{f_scp}') as writer:
-        for uid, _audio in tqdm(raw_audios, desc=desc):
-            writer(uid, processor(_audio).numpy())
+        for uid, feat in tqdm(dataloader, desc=desc):
+            writer(uid, feat.numpy())
 
 
 def prepare_kaldi_feat(
@@ -177,21 +218,30 @@ def prepare_kaldi_feat(
         os.makedirs(os.path.dirname(f_scp), exist_ok=True)
         os.makedirs(os.path.dirname(f_ark), exist_ok=True)
 
-        # write transcript
-        if os.path.isfile(f_trans):
-            sys.stderr.write(
-                f"warning: transcript {f_trans} exists, skip.\n")
-        else:
-            with open(f_trans, 'w') as fo:
-                for uid, utt in trans[_set]:
-                    fo.write(f"{uid}\t{utt}\n")
+        try:
+            # write transcript
+            if os.path.isfile(f_trans):
+                sys.stderr.write(
+                    f"warning: transcript {f_trans} exists, skip.\n")
+            else:
+                with open(f_trans, 'w') as fo:
+                    for uid, utt in trans[_set]:
+                        fo.write(f"{uid}\t{utt}\n")
 
-        # write feats
-        if os.path.isfile(f_scp):
-            sys.stderr.write(
-                f"warning: scp file {f_scp} exists, skip.\n")
-        else:
-            process_fn(audios[_set], f_scp, f_ark, audio2fbank, desc=_set)
+            # write feats
+            if os.path.isfile(f_scp):
+                sys.stderr.write(
+                    f"warning: scp file {f_scp} exists, skip.\n")
+            else:
+                process_fn(audios[_set], f_scp, f_ark, audio2fbank, desc=_set)
+        except Exception as e:
+            if os.path.isfile(f_scp):
+                os.remove(f_scp)
+            if os.path.isfile(f_ark):
+                os.remove(f_ark)
+            if os.path.isfile(f_trans):
+                os.remove(f_ark)
+            raise RuntimeError(str(e))
 
     for _factor in speed_perturb:
         if _factor == 1.0:
@@ -199,24 +249,33 @@ def prepare_kaldi_feat(
         sp_processor = SpeedPerturbationProcessor(
             _factor).append(fbank_processor)
         for _set in subsets:
-            f_trans = fmt_trans.format(f"{_set}-sp{_factor}")
-            f_scp = fmt_scp.format(f"{_set}-sp{_factor}")
-            f_ark = fmt_ark.format(f"{_set}-sp{_factor}")
-            os.makedirs(os.path.dirname(f_trans), exist_ok=True)
-            os.makedirs(os.path.dirname(f_scp), exist_ok=True)
-            os.makedirs(os.path.dirname(f_ark), exist_ok=True)
-            # write trans
-            if os.path.isfile(f_trans):
-                sys.stderr.write(
-                    f"warning: transcript {f_trans} exists, skip.\n")
-            else:
-                with open(f_trans, 'w') as fo:
-                    for uid, utt in trans[_set]:
-                        fo.write(f"{uid}#sp{_factor}\t{utt}\n")
-            # write feats
-            if os.path.isfile(f_scp):
-                sys.stderr.write(
-                    f"warning: scp file {f_scp} exists, skip.\n")
-            else:
-                process_fn(audios[_set], f_scp, f_ark,
-                           sp_processor, desc=f"{_set} sp {_factor}")
+            try:
+                f_trans = fmt_trans.format(f"{_set}-sp{_factor}")
+                f_scp = fmt_scp.format(f"{_set}-sp{_factor}")
+                f_ark = fmt_ark.format(f"{_set}-sp{_factor}")
+                os.makedirs(os.path.dirname(f_trans), exist_ok=True)
+                os.makedirs(os.path.dirname(f_scp), exist_ok=True)
+                os.makedirs(os.path.dirname(f_ark), exist_ok=True)
+                # write trans
+                if os.path.isfile(f_trans):
+                    sys.stderr.write(
+                        f"warning: transcript {f_trans} exists, skip.\n")
+                else:
+                    with open(f_trans, 'w') as fo:
+                        for uid, utt in trans[_set]:
+                            fo.write(f"{uid}#sp{_factor}\t{utt}\n")
+                # write feats
+                if os.path.isfile(f_scp):
+                    sys.stderr.write(
+                        f"warning: scp file {f_scp} exists, skip.\n")
+                else:
+                    process_fn(audios[_set], f_scp, f_ark,
+                               sp_processor, desc=f"{_set} sp {_factor}")
+            except Exception as e:
+                if os.path.isfile(f_scp):
+                    os.remove(f_scp)
+                if os.path.isfile(f_ark):
+                    os.remove(f_ark)
+                if os.path.isfile(f_trans):
+                    os.remove(f_ark)
+                raise RuntimeError(str(e))

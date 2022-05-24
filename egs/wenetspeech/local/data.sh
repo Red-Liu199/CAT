@@ -27,7 +27,7 @@ python local/extract_meta.py \
 
 python local/prep_fbank.py data/thaudio \
     --subset M DEV TEST_MEETING TEST_NET \
-    --nj=$nj --cmvn || exit 1
+    --nj=$nj || exit 1
 
 python utils/data/resolvedata.py
 

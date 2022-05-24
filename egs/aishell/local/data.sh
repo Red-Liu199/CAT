@@ -19,17 +19,15 @@ set -u
 PARSER
 opts=$(python utils/parseopt.py $0 $*) && eval $opts || exit 1
 
+opt_sp="1.0"
+[ "$sp" != "None" ] && (
+    opt_sp=$sp
+)
+
 # Extract 80-dim FBank features
 python local/extract_meta.py $src/wav \
     $src/transcript/aishell_transcript_v0.8.txt \
-    --subset $subsets_fbank || exit 1
-
-[ "$sp" != "None" ] && (
-    # conduct speed perturbation
-    python local/extract_meta.py $src/wav \
-        $src/transcript/aishell_transcript_v0.8.txt \
-        --subset $subsets_sp --speed-perturbation $sp || exit 1
-)
+    --subset $subsets_fbank --speed-perturbation $opt_sp || exit 1
 
 python utils/data/resolvedata.py
 
