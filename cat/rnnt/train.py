@@ -11,7 +11,6 @@ from ..shared import coreutils
 from ..shared import SpecAug
 from ..shared import encoder as tn_zoo
 from ..shared import decoder as pn_zoo
-from ..shared.layer import TimeReduction
 from ..shared.data import (
     KaldiSpeechDataset,
     sortedPadCollateASR
@@ -23,7 +22,6 @@ import gather
 import argparse
 from collections import OrderedDict
 from warp_rnnt import rnnt_loss as RNNTLoss
-from warp_rnnt import fused_rnnt_loss_ as RNNTFusedLoss
 from typing import *
 
 import torch
@@ -42,8 +40,12 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         backend=args.dist_backend, init_method=args.dist_url,
         world_size=args.world_size, rank=args.rank)
 
-    manager = Manager(KaldiSpeechDataset,
-                      sortedPadCollateASR(), args, build_model)
+    manager = Manager(
+        KaldiSpeechDataset,
+        sortedPadCollateASR(),
+        args,
+        build_model
+    )
 
     # training
     manager.run(args)
@@ -57,12 +59,8 @@ class TransducerTrainer(nn.Module):
         joiner: joiner_zoo.AbsJointNet = None,
         # enable compact layout, would consume less memory and fasten the computation of RNN-T loss.
         compact: bool = False,
-        # enable fused mode for RNN-T loss computation, which would consume less memory but take a little more time
-        fused: bool = False,
         # weight of ILME loss to conduct joiner-training
         ilme_weight: Optional[float] = None,
-        # insert sub-sampling layer between encoder and joiner net
-        time_reduction: int = 1,
         # add mask to predictor output, this specifies the range of mask
         predictor_mask_range: float = 0.1,
         # add mask to predictor output, this specifies the # mask
@@ -74,20 +72,8 @@ class TransducerTrainer(nn.Module):
 
         if sampled_softmax:
             assert bos_id == 0
-            assert not fused
             assert joiner.is_normalize_separated
             joiner._skip_normalize = True
-
-        if fused:
-            if not joiner.is_normalize_separated:
-                raise RuntimeError(
-                    f"TransducerTrainer: {joiner.__class__.__name__} is conflict with fused=True")
-            joiner._skip_normalize = True
-
-        if fused and not compact:
-            print(
-                "TransducerTrainer: setting fused=True and compact=False is conflict. Force compact=True")
-            compact = True
 
         self.ilme_weight = 0.0
         if ilme_weight is not None and ilme_weight != 0.0:
@@ -95,10 +81,9 @@ class TransducerTrainer(nn.Module):
                 raise NotImplementedError(
                     f"TransducerTrainer: \n"
                     f"ILME loss joiner training only support joiner network 'JointNet', instead of {joiner.__class__.__name__}")
-            self._ilme_criterion = nn.CrossEntropyLoss()
+            self._ilme_criterion = nn.CrossEntropyLoss(reduction='sum')
             self.ilme_weight = ilme_weight
 
-        self._fused = fused
         self._compact = compact
         self._sampled_softmax = sampled_softmax
 
@@ -106,11 +91,11 @@ class TransducerTrainer(nn.Module):
         self.predictor = predictor
         self.joiner = joiner
 
-        assert isinstance(time_reduction, int) and time_reduction >= 1
-        if time_reduction == 1:
-            self._t_reduction = None
+        if not hasattr(self.joiner, 'iscompact') and compact:
+            print(
+                "warning: it seems the joiner network might not be compatible with 'compact=Ture'.")
         else:
-            self._t_reduction = TimeReduction(time_reduction)
+            assert self.joiner.iscompact == compact
 
         if num_predictor_mask != -1:
             self._pn_mask = SpecAug(
@@ -134,22 +119,18 @@ class TransducerTrainer(nn.Module):
 
     def compute_join(self, enc_out: torch.Tensor, pred_out: torch.Tensor, targets: torch.Tensor, enc_out_lens: torch.Tensor, target_lens: torch.Tensor) -> torch.FloatTensor:
         enc_out_lens = enc_out_lens.to(torch.int)
-        # introduce time reduction layer if required
-        if self._t_reduction is not None:
-            enc_out, enc_out_lens = self._t_reduction(enc_out, enc_out_lens)
 
         if self._pn_mask is not None:
             pred_out = self._pn_mask(pred_out, target_lens+1)[0]
 
         if self._compact:
-            packed_enc = gather.cat(enc_out, enc_out_lens)
-            packed_pred = gather.cat(pred_out, target_lens+1)
             # squeeze targets to 1-dim
             targets = targets.to(enc_out.device, non_blocking=True)
             if targets.dim() == 2:
                 targets = gather.cat(targets, target_lens)
-            joinout = self.joiner(packed_enc, packed_pred,
-                                  enc_out_lens, target_lens+1)
+
+            joinout = self.joiner(
+                enc_out, pred_out, enc_out_lens, target_lens+1)
             if self._sampled_softmax:
                 indices_sampled, targets = torch.unique(
                     targets, sorted=True, return_inverse=True)
@@ -190,24 +171,16 @@ class TransducerTrainer(nn.Module):
                 raise ValueError(
                     f"{self.__class__.__name__}: invalid dimension of targets '{targets.dim()}', expected 1 or 2.")
 
-            loss += self.ilme_weight * \
+            loss += self.ilme_weight / enc_out.size(0) * \
                 self._ilme_criterion(ilm_log_probs, ilm_targets)
 
         with autocast(enabled=False):
-            if self._fused:
-                loss += RNNTFusedLoss(
-                    joinout.float(), targets.to(dtype=torch.int32),
-                    enc_out_lens.to(device=joinout.device, dtype=torch.int32),
-                    target_lens.to(device=joinout.device, dtype=torch.int32),
-                    reduction='mean'
-                )
-            else:
-                loss += RNNTLoss(
-                    joinout.float(), targets.to(dtype=torch.int32),
-                    enc_out_lens.to(device=joinout.device, dtype=torch.int32),
-                    target_lens.to(device=joinout.device, dtype=torch.int32),
-                    reduction='mean', gather=True, compact=self._compact
-                )
+            loss += RNNTLoss(
+                joinout.float(), targets.to(dtype=torch.int32),
+                enc_out_lens.to(device=joinout.device, dtype=torch.int32),
+                target_lens.to(device=joinout.device, dtype=torch.int32),
+                reduction='mean', gather=True, compact=self._compact
+            )
 
         return loss
 

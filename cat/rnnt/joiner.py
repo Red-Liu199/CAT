@@ -60,7 +60,8 @@ class JointNet(AbsJointNet):
             hdim: int = -1,
             join_mode: Literal['add', 'cat'] = 'add',
             act: Literal['tanh', 'relu'] = 'tanh',
-            skip_normalize: bool = False):
+            skip_normalize: bool = False,
+            compact: bool = False):
         super().__init__(skip_normalize=skip_normalize)
 
         if act == 'tanh':
@@ -90,7 +91,7 @@ class JointNet(AbsJointNet):
             raise RuntimeError(f"Unknown mode for joint net: {join_mode}")
 
         self._mode = join_mode
-        self._V = num_classes
+        self.iscompact = compact
 
     def impl_forward(self, enc_out: torch.Tensor, pred_out: torch.Tensor, enc_out_lens: Optional[torch.IntTensor] = None, pred_out_lens: Optional[torch.IntTensor] = None) -> torch.FloatTensor:
 
@@ -98,9 +99,12 @@ class JointNet(AbsJointNet):
         assert d_enc == pred_out.dim(), \
             f"expect encoder output and decoder output to be the same dimentional, " \
             f"instead {d_enc} != {pred_out.dim()}"
-        assert d_enc <= 3, f"only support input dimension <= 3, instead {d_enc}"
-        if d_enc == 2:
-            assert enc_out_lens is not None and pred_out_lens is not None
+        assert d_enc == 1 or d_enc == 3, f"only support input dimension is 1 or 3, instead {d_enc}"
+
+        if d_enc == 3 and self.iscompact and enc_out_lens is not None and pred_out_lens is not None:
+            enc_out = gather.cat(enc_out, enc_out_lens)
+            pred_out = gather.cat(pred_out, pred_out_lens)
+            d_enc = 2
 
         if self._mode == 'add':
             enc_out = self.fc_enc(enc_out)
@@ -135,6 +139,21 @@ class JointNet(AbsJointNet):
                 f"Unknown joint mode: {self._mode}, expect one of ['add', 'cat']")
 
         return self.fc(expanded_out)
+
+    def forward_pred_only(self, pred_out: torch.Tensor, raw_logit: bool = False):
+        if self._mode == 'add':
+            cast_pred = self.fc(self.fc_enc(pred_out))
+        elif self._mode == 'cat':
+            pred_out = torch.nn.functional.pad(
+                pred_out, (0, self.fc[1].in_features - pred_out.size(-1)))
+            cast_pred = self.fc(pred_out)
+        else:
+            raise ValueError(self._mode)
+
+        if raw_logit:
+            return cast_pred
+        else:
+            return cast_pred.log_softmax(dim=-1)
 
 
 class HAT(JointNet):

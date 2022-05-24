@@ -466,25 +466,27 @@ class ILM(AbsDecoder):
     https://arxiv.org/abs/2011.01991
     """
 
-    def __init__(self, f_rnnt_config: str, f_check: str):
+    def __init__(self, f_rnnt_config: str = None, f_check: str = None, lazy_init: bool = False):
         super().__init__()
+        if lazy_init:
+            self._stem = None
+            self._head = None
+            return
+
         from cat.rnnt import rnnt_builder
         from cat.shared import coreutils
-        cfg = coreutils.readjson(f_rnnt_config)
-        rnntmodel = rnnt_builder(cfg, dist=False)
+
+        rnntmodel = rnnt_builder(coreutils.readjson(f_rnnt_config), dist=False)
         coreutils.load_checkpoint(rnntmodel, f_check)
         self._stem = rnntmodel.decoder
         self._head = rnntmodel.joiner
-        self._dim_enc_out = cfg['joiner']['kwargs']['odim_enc']
         del rnntmodel
 
     def forward(self, x, input_lengths):
         # [N, U, H]
         decoder_out, _ = self._stem(x, input_lengths=input_lengths)
-        # [N, U, H] + [N, 1, H] -> [N, 1, U, V] -> [N, U, V]
-        logits = self._head.impl_forward(
-            decoder_out.new_zeros((decoder_out.size(0), 1, self._dim_enc_out)),
-            decoder_out).squeeze(1)
+        # [N, U, H] -> [N, U, V]
+        logits = self._head.forward_pred_only(decoder_out, raw_logit=True)
         logits[:, :, 0].fill_(logits.min() - 1e9)
         return logits, None
 

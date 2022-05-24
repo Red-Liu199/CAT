@@ -239,8 +239,12 @@ class ConformerNet(AbsEncoder):
             dropout_attn: float = 0.0,
             delta_feats: bool = False,
             with_head: bool = True,
-            subsample_norm: str = 'none'):
+            subsample_norm: str = 'none',
+            time_reduction_factor: int = 1,
+            time_reduction_pos: int = -1):
         super().__init__(with_head=with_head, num_classes=num_classes, n_hid=hdim)
+        assert isinstance(time_reduction_factor, int)
+        assert time_reduction_factor >= 1
 
         if delta_feats:
             in_channel = 3
@@ -267,10 +271,16 @@ class ConformerNet(AbsEncoder):
 
         self.cells = nn.ModuleList()
         pe = c_layers.PositionalEncoding(hdim)
-        for _ in range(num_cells):
-            cell = c_layers.ConformerCell(
-                hdim, pe, res_factor, d_head, num_heads, kernel_size, multiplier, dropout, dropout_attn)
+        for i in range(num_cells):
+            if i == time_reduction_pos and time_reduction_factor > 1:
+                cell = c_layers.TimeReduction(time_reduction_factor)
+            else:
+                cell = c_layers.ConformerCell(
+                    hdim, pe, res_factor, d_head, num_heads, kernel_size, multiplier, dropout, dropout_attn)
             self.cells.append(cell)
+        
+        if time_reduction_factor > 1 and time_reduction_pos == -1:
+            self.cells.append(c_layers.TimeReduction(time_reduction_factor))
 
     def impl_forward(self, x: torch.Tensor, lens: torch.Tensor):
         x_subsampled, ls_subsampled = self.conv_subsampling(x, lens)

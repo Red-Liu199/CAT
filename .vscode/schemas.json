@@ -25,15 +25,7 @@
                     "type": "number",
                     "default": 0.1
                 },
-                "time_reduction": {
-                    "type": "number",
-                    "default": 1
-                },
                 "ilme_weight": {},
-                "fused": {
-                    "type": "boolean",
-                    "default": false
-                },
                 "compact": {
                     "type": "boolean",
                     "default": false
@@ -183,6 +175,14 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
+                                    "time_reduction_pos": {
+                                        "type": "number",
+                                        "default": -1
+                                    },
+                                    "time_reduction_factor": {
+                                        "type": "number",
+                                        "default": 1
+                                    },
                                     "subsample_norm": {
                                         "type": "string",
                                         "default": "none"
@@ -622,6 +622,10 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
+                                    "lazy_init": {
+                                        "type": "boolean",
+                                        "default": false
+                                    },
                                     "f_check": {
                                         "type": "string"
                                     },
@@ -889,6 +893,10 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
+                                    "compact": {
+                                        "type": "boolean",
+                                        "default": false
+                                    },
                                     "skip_normalize": {
                                         "type": "boolean",
                                         "default": false
