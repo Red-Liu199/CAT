@@ -91,14 +91,7 @@ def text2bin(arguments: Tuple[argparse.Namespace, str, int, int]):
     with open(binfile, 'wb') as fo:
         pickle.dump(dataset, fo)
 
-    if args.quiet:
-        return
-    elif args.truncate != -1:
-        print("Truncate by {}, # {} -> {}".format(
-            args.truncate, tot_line, cnt_process))
-    elif args.concat != -1:
-        print("Concat by {}, # {} -> {}".format(
-            args.concat, tot_line, cnt_process))
+    return
 
 
 def main(args: argparse.Namespace):

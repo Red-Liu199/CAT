@@ -266,7 +266,7 @@ def DecoderParser():
 
     parser.add_argument("--input_scp", type=str, default=None)
     parser.add_argument("--output_prefix", type=str, default='./decode')
-    parser.add_argument("--beam_size", type=int, default=3)
+    parser.add_argument("--beam-size", type=int, default=3)
     parser.add_argument("--tokenizer", type=str,
                         help="Tokenizer model location. See cat/shared/tokenizer.py for details.")
     parser.add_argument("--nj", type=int, default=-1)
