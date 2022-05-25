@@ -17,6 +17,7 @@ from . import rnnt_builder
 from .beam_search import BeamSearcher
 
 import os
+import sys
 import time
 import pickle
 import argparse

@@ -765,13 +765,12 @@ if __name__ == "__main__":
                 f"set 'nj' to {decode_settings['nj']}"))
         if hyper_settings['topo'] == 'rnnt' and 'alpha' in decode_settings:
 
-            if 'lmdir' not in inference_settings and \
-                    ('lm-config' not in decode_settings or 'lm-check' not in decode_settings):
+            if 'lmdir' not in inference_settings and 'lm-config' not in decode_settings:
                 sys.stderr.write(
                     "\n"
                     "To use external LM with RNN-T topo, at least one option is required:\n"
                     "  1 (higer priority): set 'lmdir' in field:inference ;\n"
-                    "  2: set both 'lm-config' and 'lm-check' in field:inference:decode\n\n")
+                    "  2: set 'lm-config' (and 'lm-check', optional) in field:inference:decode\n\n")
                 exit(1)
 
             if 'beta' in decode_settings:

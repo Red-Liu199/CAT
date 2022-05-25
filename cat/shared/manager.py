@@ -393,7 +393,7 @@ NOTE (Huahuan):
 '''
 
 
-def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook: Callable = None):
+def train(trainloader, args: argparse.Namespace, manager: Manager, hook_func: Callable = None):
     """
     The default train function.
 
@@ -412,12 +412,12 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, _trainer_hook
 
         # we divide loss with fold since we want the gradients to be divided by fold
         with autocast(enabled=enableAMP):
-            if _trainer_hook is None:
+            if hook_func is None:
                 loss = model(feats, labels, frame_lens, label_lens)
             else:
                 # you could custom model forward, tracks logging and metric calculation in the hook
-                loss = _trainer_hook(
-                    manager, model, args, (i+1) % fold,
+                loss = hook_func(
+                    manager, model, args, (i+1) // fold,
                     (feats, labels, frame_lens, label_lens)
                 )
 

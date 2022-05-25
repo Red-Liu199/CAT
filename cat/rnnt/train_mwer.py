@@ -13,7 +13,6 @@ from .train import build_model as rnnt_builder
 from .train import TransducerTrainer
 
 from warp_rnnt import rnnt_loss as RNNTLoss
-from warp_rnnt import fused_rnnt_loss_ as RNNTFusedLoss
 
 import os
 import jiwer
@@ -45,14 +44,14 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
     manager.run(args)
 
 
-def cnt_we(gt: List[int], hy: List[int]) -> List[int]:
+def cnt_we(gt: List[str], hy: List[str]) -> List[int]:
     def _cnt_error_word(_gt, _hy):
         measure = jiwer.compute_measures(_gt, _hy)
         return measure['substitutions'] + measure['deletions'] + measure['insertions']
     return [_cnt_error_word(_gt, _hy) for _gt, _hy in zip(gt, hy)]
 
 
-class MWERTrainer(TransducerTrainer):
+class MWERTransducerTrainer(TransducerTrainer):
     def __init__(self, beamdecoder: RNNTDecoder, mle_weight: float, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.searcher = beamdecoder
@@ -197,7 +196,7 @@ class MWERTrainer(TransducerTrainer):
             return loss_mbr + self.mle_weight * loss_mle
 
 
-def build_model(cfg: dict, args: argparse.Namespace, dist: bool = True) -> MWERTrainer:
+def build_model(cfg: dict, args: argparse.Namespace, dist: bool = True) -> MWERTransducerTrainer:
     """
     cfg:
         MWER:
@@ -219,7 +218,7 @@ def build_model(cfg: dict, args: argparse.Namespace, dist: bool = True) -> MWERT
         joiner=joiner,
         **cfg['MWER']['decoder']
     )
-    model = MWERTrainer(
+    model = MWERTransducerTrainer(
         rnnt_decoder,
         encoder=encoder,
         predictor=predictor,

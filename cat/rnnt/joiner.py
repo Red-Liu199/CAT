@@ -142,7 +142,7 @@ class JointNet(AbsJointNet):
 
     def forward_pred_only(self, pred_out: torch.Tensor, raw_logit: bool = False):
         if self._mode == 'add':
-            cast_pred = self.fc(self.fc_enc(pred_out))
+            cast_pred = self.fc(self.fc_dec(pred_out))
         elif self._mode == 'cat':
             pred_out = torch.nn.functional.pad(
                 pred_out, (0, self.fc[1].in_features - pred_out.size(-1)))

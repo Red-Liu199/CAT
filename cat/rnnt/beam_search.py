@@ -79,12 +79,12 @@ class Hypothesis():
         new_hypo.pred = self.pred[:]
         return new_hypo
 
-    def __add__(self, rhypo):
+    def __add__(self, rhypo: "Hypothesis"):
         new_hypo = self.clone()
         new_hypo.log_prob = logaddexp(new_hypo.log_prob, rhypo.log_prob)
         return new_hypo
 
-    def add_(self, rhypo):
+    def add_(self, rhypo: "Hypothesis"):
         '''in-place version of __add__'''
         self.log_prob = logaddexp(self.log_prob, rhypo.log_prob)
         return self
@@ -228,14 +228,16 @@ class BeamSearcher():
         else:
             fixlen_state = False
 
-        n_batches, n_max_frame_length = encoder_out.shape[:2]
+        n_batches = encoder_out.size(0)
         dummy_token = encoder_out.new_empty(1, dtype=torch.long)
         idx_seq = torch.arange(n_batches)
         if frame_lens is None:
+            n_max_frame_length = encoder_out.size(1)
             frame_lens = dummy_token.new_full(
                 n_batches, fill_value=n_max_frame_length)
         else:
             frame_lens = frame_lens.clone()
+            n_max_frame_length = frame_lens.max()
 
         Beams = [
             [
@@ -249,8 +251,8 @@ class BeamSearcher():
         ]
 
         if use_lm:
-            for idx_beam[i] in range(n_batches):
-                Beams[idx_beam[i]][0].cache.update(
+            for idx in range(n_batches):
+                Beams[idx][0].cache.update(
                     {'lm_state': self.lm.init_states()})
         pref_cache = PrefixCacheDict()
 
@@ -329,19 +331,20 @@ class BeamSearcher():
             log_prob = self.joiner(
                 expand_enc_out, pn_out).squeeze(1).squeeze(1)
 
+            # combine_score: (n_beams, V)
             combine_score = log_prob + 0.
             for i, b in enumerate(idxbeam2srcidx):
                 combine_score[i] += batched_beams[b].log_prob + \
                     batched_beams[b].lm_score
 
             if use_lm:
-                # lm_out: (n_beams, 1, V)
-                lm_out = torch.cat(group_lm_out, dim=0)
-                lm_score = self.alpha_ * \
-                    lm_out.squeeze(1) + self.beta_
-                # combine_score: (n_beams, V)
-                combine_score += lm_score
-                combine_score[:, self.blank_id] = log_prob[:, self.blank_id]
+                # lm_score: (n_beams, V)
+                lm_score = self.beta_ + self.alpha_ * \
+                    torch.cat(group_lm_out, dim=0).squeeze(1)
+                if self.blank_id == 0:
+                    combine_score[:, 1:] += lm_score[:, 1:]
+                else:
+                    raise NotImplementedError
 
             if self.est_ilm:
                 ilm_score = self.joiner.impl_forward(

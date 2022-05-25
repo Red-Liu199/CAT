@@ -236,10 +236,7 @@ def build_model(
             _model.load_state_dict(
                 _load_and_immigrate(c_cfg['pretrained'], prefix, ''), strict=False)
 
-        if 'freeze' in c_cfg and c_cfg['freeze']:
-            if 'pretrained' not in c_cfg:
-                raise RuntimeError(
-                    "freeze=True while 'pretrained' is empty is not allowed. In {} init".format(component))
+        if cfg.get('freeze', False):
             _model.requires_grad_(False)
             setattr(_model, 'freeze', True)
         else:
