@@ -21,7 +21,7 @@ egs/<task>/exp/template
         "test": ...,
         // "filter" is for ASR task only, filter out utterances shorter than 10 and longer than 2000 (frames)
         "filter": "10:2000",
-        // "text_processing" is for LM task only. code: utils/data/transText2Bin.py
+        // "text_processing" is for LM task only. code: cat/utils/data/corpus2index.py
         "text_processing": {
             // truncate the utterances by 128 (tokens)
             "truncate": 128
@@ -34,12 +34,11 @@ egs/<task>/exp/template
                             // for SentencePiece tokenizer, please refer to:
                             // https://github.com/google/sentencepiece/blob/master/doc/options.md
     },
-    // NN training related setting, for supported options (in egs/<task>/):
-    // RNN-T: run 'python -m cat.rnnt -h'
-    // CTC: run 'python -m cat.ctc -h'
-    // LM: run 'python -m cat.lm -h'
+    // NN training related setting:
     "train": {
-        ...
+        "bin": ...          // any module with main() and _parser() function.
+                            // e.g. cat.ctc.train | cat.rnnt.train | cat.lm.train
+        "option": ...       // options to the module
     },
     // inference related setting
     "inference": {
@@ -48,22 +47,12 @@ egs/<task>/exp/template
             "mode": "best",  // 'best' of 'last'
             "num": 10        // number of checkpoints to be averaged
         },
-        // perplexity computation for LM, for support optionsrun (in egs/<task>/):
-        // run 'python -m cat.lm.ppl_compute -h'
-        "ppl": {
-            ...
+        "infer": {
+            "bin": ...       // inference module interface
+                             // e.g. cat.ctc.decode | cat.rnnt.decode | cat.lm.ppl_compute
+            "option": ...    // options to the module
         },
-        // ASR only, decoding setting, for support options (in egs/<task>/):
-        // RNN-T: run 'python -m cat.rnnt.decode -h'
-        // CTC: run 'python -m cat.ctc.decode -h'
-        "decode": {
-            ...
-        },
-        // ASR only, WER/CER computing setting, run `python utils/wer.py -h` for more options
-        "er": {
-            "mode": "wer",  // 'wer' or 'cer'
-            "oracle": true  // compute oracle wer for N-best list or not
-        }
+        "er": ...            // check cat/utils/wer.py for supported options.
     },
     // the git commit hash, useful to reproduce the experiment
     "commit": "60aa5175c9630bcb5ea1790444732fc948b05865"

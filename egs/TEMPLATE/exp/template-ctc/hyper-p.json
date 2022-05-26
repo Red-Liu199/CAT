@@ -17,24 +17,27 @@
             "vocab_size": 4
         }
     },
-    "topo": "ctc",
     "train": {
-        "amp": true,
-        "batch-size": 4,
-        "check-freq": 50,
-        "databalance": true
+        "bin": "cat.ctc.train",
+        "option": {
+            "amp": true,
+            "batch_size": 4,
+            "check_freq": 50
+        }
     },
     "inference": {
         "avgmodel": {
             "mode": "best",
             "num": 2
         },
-        "decode": {
-            "beam-size": 16,
-            "nj": 2
+        "infer": {
+            "bin": "cat.ctc.decode",
+            "option": {
+                "beam_size": 16,
+                "nj": 2
+            }
         },
         "er": {
-            "mode": "wer",
             "oracle": false
         }
     }

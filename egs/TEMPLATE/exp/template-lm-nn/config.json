@@ -14,7 +14,7 @@
         "type": "SchedulerCosineAnnealing",
         "kwargs": {
             "min_lr": 1e-05,
-            "stop_step": 5000
+            "stop_step": 2000
         },
         "optimizer": {
             "type": "Adam",

@@ -214,7 +214,7 @@
                                     },
                                     "unk_surface": {
                                         "type": "string",
-                                        "default": " ⁇ "
+                                        "default": " \u2047 "
                                     },
                                     "train_extremely_large_corpus": {
                                         "type": "boolean",
@@ -259,13 +259,6 @@
                 }
             ]
         },
-        "topo": {
-            "type": "string",
-            "examples": [
-                "rnnt",
-                "ctc"
-            ]
-        },
         "env": {
             "description": "Configure any environment variable if needed.",
             "type": "object",
@@ -282,55 +275,657 @@
             }
         },
         "train": {
-            "description": "Basic configuration of NN Training",
             "type": "object",
             "properties": {
-                "debug": {
-                    "type": "boolean",
-                    "default": false
-                },
-                "batch-size": {
-                    "type": "number",
-                    "default": 256
-                },
-                "grad-accum-fold": {
-                    "type": "number",
-                    "default": 1
-                },
-                "grad-norm": {
-                    "type": "number",
-                    "default": 0.0
-                },
-                "amp": {
-                    "type": "boolean",
-                    "default": false
-                },
-                "databalance": {
-                    "type": "boolean",
-                    "default": false
-                },
-                "check-freq": {
-                    "type": "number",
-                    "default": -1
-                },
-                "print-freq": {
-                    "type": "number",
-                    "default": 10
-                },
-                "seed": {
-                    "type": "number",
-                    "default": 0
-                },
-                "resume": {
-                    "type": "string"
-                },
-                "init-model": {
-                    "type": "string"
-                },
-                "verbose": {
-                    "type": "boolean"
+                "bin": {
+                    "type": "string",
+                    "description": "Modules that provides training interface.",
+                    "examples": [
+                        "cat.rnnt.train_mwer",
+                        "cat.rnnt.train_nce",
+                        "cat.rnnt.train",
+                        "cat.lm.train",
+                        "cat.ctc.train"
+                    ]
                 }
-            }
+            },
+            "description": "Configuration of NN training",
+            "required": [
+                "bin",
+                "option"
+            ],
+            "allOf": [
+                {
+                    "if": {
+                        "properties": {
+                            "bin": {
+                                "const": "cat.rnnt.train_mwer"
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "option": {
+                                "type": "object",
+                                "description": "MWER Transducer Training options",
+                                "properties": {
+                                    "workers": {
+                                        "type": "number",
+                                        "description": "number of data loading workers (default: 1)",
+                                        "default": 1
+                                    },
+                                    "rank": {
+                                        "type": "number",
+                                        "description": "node rank for distributed training",
+                                        "default": 0
+                                    },
+                                    "dist_url": {
+                                        "type": "string",
+                                        "description": "url used to set up distributed training",
+                                        "default": "tcp://localhost:13457"
+                                    },
+                                    "dist_backend": {
+                                        "type": "string",
+                                        "description": "distributed backend",
+                                        "default": "nccl"
+                                    },
+                                    "world_size": {
+                                        "type": "number",
+                                        "description": "number of nodes for distributed training",
+                                        "default": 1
+                                    },
+                                    "gpu": {
+                                        "type": "number",
+                                        "description": "GPU id to use."
+                                    },
+                                    "print_freq": {
+                                        "type": "number",
+                                        "description": "print frequency (default: 10)",
+                                        "default": 10
+                                    },
+                                    "batch_size": {
+                                        "type": "number",
+                                        "description": "mini-batch size (default: 256), this is the total batch size of all GPUs on the current node when using Distributed Data Parallel",
+                                        "default": 256
+                                    },
+                                    "seed": {
+                                        "type": "number",
+                                        "description": "Manual seed.",
+                                        "default": 0
+                                    },
+                                    "amp": {
+                                        "description": "Enable automatic mixed precision training.",
+                                        "default": false
+                                    },
+                                    "grad_accum_fold": {
+                                        "type": "number",
+                                        "description": "Utilize gradient accumulation for K times. Default: K=1",
+                                        "default": 1
+                                    },
+                                    "grad_norm": {
+                                        "type": "number",
+                                        "description": "Max norm of the gradients. Default: 0.0 (Disable grad-norm).",
+                                        "default": 0.0
+                                    },
+                                    "debug": {
+                                        "description": "Configure to debug settings, would overwrite most of the options.",
+                                        "default": false
+                                    },
+                                    "verbose": {
+                                        "description": "Configure to print out more detailed info.",
+                                        "default": false
+                                    },
+                                    "check_freq": {
+                                        "type": "number",
+                                        "description": "Interval of checkpoints by steps (# of minibatches). Default: -1 (by epoch).",
+                                        "default": -1
+                                    },
+                                    "trset": {
+                                        "type": "string",
+                                        "description": "Location of training data. Default: <data>/[pickle|hdf5]/tr.[pickle|hdf5]"
+                                    },
+                                    "devset": {
+                                        "type": "string",
+                                        "description": "Location of dev data. Default: <data>/[pickle|hdf5]/cv.[pickle|hdf5]"
+                                    },
+                                    "dir": {
+                                        "type": "string",
+                                        "description": "Directory to save the log and model files."
+                                    },
+                                    "databalance": {
+                                        "description": "Load data batches according to sequence lenth.",
+                                        "default": false
+                                    },
+                                    "tokenizer": {
+                                        "type": "string",
+                                        "description": "Specify tokenizer. Currently, only used with --large-dataset."
+                                    },
+                                    "large_dataset": {
+                                        "description": "Use webdataset to load data in POSIX tar format. Be careful with this option, it would change many things than you might think.",
+                                        "default": false
+                                    },
+                                    "config": {
+                                        "type": "string",
+                                        "description": "Path to configuration file of backbone."
+                                    },
+                                    "resume": {
+                                        "type": "string",
+                                        "description": "Path to location of checkpoint."
+                                    },
+                                    "init_model": {
+                                        "type": "string",
+                                        "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself (w/o optimizer)"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "bin": {
+                                "const": "cat.rnnt.train_nce"
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "option": {
+                                "type": "object",
+                                "description": "NCE Transducer Training options",
+                                "properties": {
+                                    "workers": {
+                                        "type": "number",
+                                        "description": "number of data loading workers (default: 1)",
+                                        "default": 1
+                                    },
+                                    "rank": {
+                                        "type": "number",
+                                        "description": "node rank for distributed training",
+                                        "default": 0
+                                    },
+                                    "dist_url": {
+                                        "type": "string",
+                                        "description": "url used to set up distributed training",
+                                        "default": "tcp://localhost:13457"
+                                    },
+                                    "dist_backend": {
+                                        "type": "string",
+                                        "description": "distributed backend",
+                                        "default": "nccl"
+                                    },
+                                    "world_size": {
+                                        "type": "number",
+                                        "description": "number of nodes for distributed training",
+                                        "default": 1
+                                    },
+                                    "gpu": {
+                                        "type": "number",
+                                        "description": "GPU id to use."
+                                    },
+                                    "print_freq": {
+                                        "type": "number",
+                                        "description": "print frequency (default: 10)",
+                                        "default": 10
+                                    },
+                                    "batch_size": {
+                                        "type": "number",
+                                        "description": "mini-batch size (default: 256), this is the total batch size of all GPUs on the current node when using Distributed Data Parallel",
+                                        "default": 256
+                                    },
+                                    "seed": {
+                                        "type": "number",
+                                        "description": "Manual seed.",
+                                        "default": 0
+                                    },
+                                    "amp": {
+                                        "description": "Enable automatic mixed precision training.",
+                                        "default": false
+                                    },
+                                    "grad_accum_fold": {
+                                        "type": "number",
+                                        "description": "Utilize gradient accumulation for K times. Default: K=1",
+                                        "default": 1
+                                    },
+                                    "grad_norm": {
+                                        "type": "number",
+                                        "description": "Max norm of the gradients. Default: 0.0 (Disable grad-norm).",
+                                        "default": 0.0
+                                    },
+                                    "debug": {
+                                        "description": "Configure to debug settings, would overwrite most of the options.",
+                                        "default": false
+                                    },
+                                    "verbose": {
+                                        "description": "Configure to print out more detailed info.",
+                                        "default": false
+                                    },
+                                    "check_freq": {
+                                        "type": "number",
+                                        "description": "Interval of checkpoints by steps (# of minibatches). Default: -1 (by epoch).",
+                                        "default": -1
+                                    },
+                                    "trset": {
+                                        "type": "string",
+                                        "description": "Location of training data. Default: <data>/[pickle|hdf5]/tr.[pickle|hdf5]"
+                                    },
+                                    "devset": {
+                                        "type": "string",
+                                        "description": "Location of dev data. Default: <data>/[pickle|hdf5]/cv.[pickle|hdf5]"
+                                    },
+                                    "dir": {
+                                        "type": "string",
+                                        "description": "Directory to save the log and model files."
+                                    },
+                                    "databalance": {
+                                        "description": "Load data batches according to sequence lenth.",
+                                        "default": false
+                                    },
+                                    "tokenizer": {
+                                        "type": "string",
+                                        "description": "Specify tokenizer. Currently, only used with --large-dataset."
+                                    },
+                                    "large_dataset": {
+                                        "description": "Use webdataset to load data in POSIX tar format. Be careful with this option, it would change many things than you might think.",
+                                        "default": false
+                                    },
+                                    "config": {
+                                        "type": "string",
+                                        "description": "Path to configuration file of backbone."
+                                    },
+                                    "resume": {
+                                        "type": "string",
+                                        "description": "Path to location of checkpoint."
+                                    },
+                                    "init_model": {
+                                        "type": "string",
+                                        "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself (w/o optimizer)"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "bin": {
+                                "const": "cat.rnnt.train"
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "option": {
+                                "type": "object",
+                                "description": "Transducer training options",
+                                "properties": {
+                                    "workers": {
+                                        "type": "number",
+                                        "description": "number of data loading workers (default: 1)",
+                                        "default": 1
+                                    },
+                                    "rank": {
+                                        "type": "number",
+                                        "description": "node rank for distributed training",
+                                        "default": 0
+                                    },
+                                    "dist_url": {
+                                        "type": "string",
+                                        "description": "url used to set up distributed training",
+                                        "default": "tcp://localhost:13457"
+                                    },
+                                    "dist_backend": {
+                                        "type": "string",
+                                        "description": "distributed backend",
+                                        "default": "nccl"
+                                    },
+                                    "world_size": {
+                                        "type": "number",
+                                        "description": "number of nodes for distributed training",
+                                        "default": 1
+                                    },
+                                    "gpu": {
+                                        "type": "number",
+                                        "description": "GPU id to use."
+                                    },
+                                    "print_freq": {
+                                        "type": "number",
+                                        "description": "print frequency (default: 10)",
+                                        "default": 10
+                                    },
+                                    "batch_size": {
+                                        "type": "number",
+                                        "description": "mini-batch size (default: 256), this is the total batch size of all GPUs on the current node when using Distributed Data Parallel",
+                                        "default": 256
+                                    },
+                                    "seed": {
+                                        "type": "number",
+                                        "description": "Manual seed.",
+                                        "default": 0
+                                    },
+                                    "amp": {
+                                        "description": "Enable automatic mixed precision training.",
+                                        "default": false
+                                    },
+                                    "grad_accum_fold": {
+                                        "type": "number",
+                                        "description": "Utilize gradient accumulation for K times. Default: K=1",
+                                        "default": 1
+                                    },
+                                    "grad_norm": {
+                                        "type": "number",
+                                        "description": "Max norm of the gradients. Default: 0.0 (Disable grad-norm).",
+                                        "default": 0.0
+                                    },
+                                    "debug": {
+                                        "description": "Configure to debug settings, would overwrite most of the options.",
+                                        "default": false
+                                    },
+                                    "verbose": {
+                                        "description": "Configure to print out more detailed info.",
+                                        "default": false
+                                    },
+                                    "check_freq": {
+                                        "type": "number",
+                                        "description": "Interval of checkpoints by steps (# of minibatches). Default: -1 (by epoch).",
+                                        "default": -1
+                                    },
+                                    "trset": {
+                                        "type": "string",
+                                        "description": "Location of training data. Default: <data>/[pickle|hdf5]/tr.[pickle|hdf5]"
+                                    },
+                                    "devset": {
+                                        "type": "string",
+                                        "description": "Location of dev data. Default: <data>/[pickle|hdf5]/cv.[pickle|hdf5]"
+                                    },
+                                    "dir": {
+                                        "type": "string",
+                                        "description": "Directory to save the log and model files."
+                                    },
+                                    "databalance": {
+                                        "description": "Load data batches according to sequence lenth.",
+                                        "default": false
+                                    },
+                                    "tokenizer": {
+                                        "type": "string",
+                                        "description": "Specify tokenizer. Currently, only used with --large-dataset."
+                                    },
+                                    "large_dataset": {
+                                        "description": "Use webdataset to load data in POSIX tar format. Be careful with this option, it would change many things than you might think.",
+                                        "default": false
+                                    },
+                                    "config": {
+                                        "type": "string",
+                                        "description": "Path to configuration file of backbone."
+                                    },
+                                    "resume": {
+                                        "type": "string",
+                                        "description": "Path to location of checkpoint."
+                                    },
+                                    "init_model": {
+                                        "type": "string",
+                                        "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself (w/o optimizer)"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "bin": {
+                                "const": "cat.lm.train"
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "option": {
+                                "type": "object",
+                                "description": "Language model trainer. options",
+                                "properties": {
+                                    "workers": {
+                                        "type": "number",
+                                        "description": "number of data loading workers (default: 1)",
+                                        "default": 1
+                                    },
+                                    "rank": {
+                                        "type": "number",
+                                        "description": "node rank for distributed training",
+                                        "default": 0
+                                    },
+                                    "dist_url": {
+                                        "type": "string",
+                                        "description": "url used to set up distributed training",
+                                        "default": "tcp://localhost:13457"
+                                    },
+                                    "dist_backend": {
+                                        "type": "string",
+                                        "description": "distributed backend",
+                                        "default": "nccl"
+                                    },
+                                    "world_size": {
+                                        "type": "number",
+                                        "description": "number of nodes for distributed training",
+                                        "default": 1
+                                    },
+                                    "gpu": {
+                                        "type": "number",
+                                        "description": "GPU id to use."
+                                    },
+                                    "print_freq": {
+                                        "type": "number",
+                                        "description": "print frequency (default: 10)",
+                                        "default": 10
+                                    },
+                                    "batch_size": {
+                                        "type": "number",
+                                        "description": "mini-batch size (default: 256), this is the total batch size of all GPUs on the current node when using Distributed Data Parallel",
+                                        "default": 256
+                                    },
+                                    "seed": {
+                                        "type": "number",
+                                        "description": "Manual seed.",
+                                        "default": 0
+                                    },
+                                    "amp": {
+                                        "description": "Enable automatic mixed precision training.",
+                                        "default": false
+                                    },
+                                    "grad_accum_fold": {
+                                        "type": "number",
+                                        "description": "Utilize gradient accumulation for K times. Default: K=1",
+                                        "default": 1
+                                    },
+                                    "grad_norm": {
+                                        "type": "number",
+                                        "description": "Max norm of the gradients. Default: 0.0 (Disable grad-norm).",
+                                        "default": 0.0
+                                    },
+                                    "debug": {
+                                        "description": "Configure to debug settings, would overwrite most of the options.",
+                                        "default": false
+                                    },
+                                    "verbose": {
+                                        "description": "Configure to print out more detailed info.",
+                                        "default": false
+                                    },
+                                    "check_freq": {
+                                        "type": "number",
+                                        "description": "Interval of checkpoints by steps (# of minibatches). Default: -1 (by epoch).",
+                                        "default": -1
+                                    },
+                                    "trset": {
+                                        "type": "string",
+                                        "description": "Location of training data. Default: <data>/[pickle|hdf5]/tr.[pickle|hdf5]"
+                                    },
+                                    "devset": {
+                                        "type": "string",
+                                        "description": "Location of dev data. Default: <data>/[pickle|hdf5]/cv.[pickle|hdf5]"
+                                    },
+                                    "dir": {
+                                        "type": "string",
+                                        "description": "Directory to save the log and model files."
+                                    },
+                                    "databalance": {
+                                        "description": "Load data batches according to sequence lenth.",
+                                        "default": false
+                                    },
+                                    "tokenizer": {
+                                        "type": "string",
+                                        "description": "Specify tokenizer. Currently, only used with --large-dataset."
+                                    },
+                                    "large_dataset": {
+                                        "description": "Use webdataset to load data in POSIX tar format. Be careful with this option, it would change many things than you might think.",
+                                        "default": false
+                                    },
+                                    "config": {
+                                        "type": "string",
+                                        "description": "Path to configuration file of backbone."
+                                    },
+                                    "resume": {
+                                        "type": "string",
+                                        "description": "Path to location of checkpoint."
+                                    },
+                                    "init_model": {
+                                        "type": "string",
+                                        "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself (w/o optimizer)"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "bin": {
+                                "const": "cat.ctc.train"
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "option": {
+                                "type": "object",
+                                "description": "CTC trainer. options",
+                                "properties": {
+                                    "workers": {
+                                        "type": "number",
+                                        "description": "number of data loading workers (default: 1)",
+                                        "default": 1
+                                    },
+                                    "rank": {
+                                        "type": "number",
+                                        "description": "node rank for distributed training",
+                                        "default": 0
+                                    },
+                                    "dist_url": {
+                                        "type": "string",
+                                        "description": "url used to set up distributed training",
+                                        "default": "tcp://localhost:13457"
+                                    },
+                                    "dist_backend": {
+                                        "type": "string",
+                                        "description": "distributed backend",
+                                        "default": "nccl"
+                                    },
+                                    "world_size": {
+                                        "type": "number",
+                                        "description": "number of nodes for distributed training",
+                                        "default": 1
+                                    },
+                                    "gpu": {
+                                        "type": "number",
+                                        "description": "GPU id to use."
+                                    },
+                                    "print_freq": {
+                                        "type": "number",
+                                        "description": "print frequency (default: 10)",
+                                        "default": 10
+                                    },
+                                    "batch_size": {
+                                        "type": "number",
+                                        "description": "mini-batch size (default: 256), this is the total batch size of all GPUs on the current node when using Distributed Data Parallel",
+                                        "default": 256
+                                    },
+                                    "seed": {
+                                        "type": "number",
+                                        "description": "Manual seed.",
+                                        "default": 0
+                                    },
+                                    "amp": {
+                                        "description": "Enable automatic mixed precision training.",
+                                        "default": false
+                                    },
+                                    "grad_accum_fold": {
+                                        "type": "number",
+                                        "description": "Utilize gradient accumulation for K times. Default: K=1",
+                                        "default": 1
+                                    },
+                                    "grad_norm": {
+                                        "type": "number",
+                                        "description": "Max norm of the gradients. Default: 0.0 (Disable grad-norm).",
+                                        "default": 0.0
+                                    },
+                                    "debug": {
+                                        "description": "Configure to debug settings, would overwrite most of the options.",
+                                        "default": false
+                                    },
+                                    "verbose": {
+                                        "description": "Configure to print out more detailed info.",
+                                        "default": false
+                                    },
+                                    "check_freq": {
+                                        "type": "number",
+                                        "description": "Interval of checkpoints by steps (# of minibatches). Default: -1 (by epoch).",
+                                        "default": -1
+                                    },
+                                    "trset": {
+                                        "type": "string",
+                                        "description": "Location of training data. Default: <data>/[pickle|hdf5]/tr.[pickle|hdf5]"
+                                    },
+                                    "devset": {
+                                        "type": "string",
+                                        "description": "Location of dev data. Default: <data>/[pickle|hdf5]/cv.[pickle|hdf5]"
+                                    },
+                                    "dir": {
+                                        "type": "string",
+                                        "description": "Directory to save the log and model files."
+                                    },
+                                    "databalance": {
+                                        "description": "Load data batches according to sequence lenth.",
+                                        "default": false
+                                    },
+                                    "tokenizer": {
+                                        "type": "string",
+                                        "description": "Specify tokenizer. Currently, only used with --large-dataset."
+                                    },
+                                    "large_dataset": {
+                                        "description": "Use webdataset to load data in POSIX tar format. Be careful with this option, it would change many things than you might think.",
+                                        "default": false
+                                    },
+                                    "config": {
+                                        "type": "string",
+                                        "description": "Path to configuration file of backbone."
+                                    },
+                                    "resume": {
+                                        "type": "string",
+                                        "description": "Path to location of checkpoint."
+                                    },
+                                    "init_model": {
+                                        "type": "string",
+                                        "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself (w/o optimizer)"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            ]
         },
         "inference": {
             "description": "Basic configuration of NN Training",
@@ -357,45 +952,385 @@
                         }
                     }
                 },
-                "lmdir": {
-                    "type": "string"
-                },
-                "ppl": {
-                    "description": "configuration of LM perplexity calculation. For LM only.",
-                    "type": "object",
-                    "properties": {
-                        "resume": {
-                            "type": "string"
-                        },
-                        "nj": {
-                            "type": "number",
-                            "default": 1
-                        }
-                    }
-                },
-                "decode": {
-                    "description": "Configuration of decoding. Run 'python -m cat.[topo].decode -h' for support options",
-                    "type": "object"
-                },
                 "er": {
                     "type": "object",
-                    "required": [
-                        "mode"
-                    ],
                     "properties": {
-                        "mode": {
+                        "gt": {
                             "type": "string",
-                            "examples": [
-                                "wer",
-                                "cer"
-                            ],
-                            "default": "wer"
+                            "description": "Ground truth sequences."
+                        },
+                        "hy": {
+                            "type": "string",
+                            "description": "Hypothesis of sequences."
+                        },
+                        "noid": {
+                            "description": "Process the text as raw without utterance id. When --oracle, this will be ignored.",
+                            "default": false
+                        },
+                        "cer": {
+                            "description": "Compute CER. Default: False",
+                            "default": false
+                        },
+                        "force_cased": {
+                            "description": "Force text to be the same cased.",
+                            "default": false
                         },
                         "oracle": {
-                            "type": "boolean",
+                            "description": "Compute Oracle WER/CER. This requires the `hy` to be N-best list instead of text. Default: False",
                             "default": false
                         }
                     }
+                },
+                "infer": {
+                    "type": "object",
+                    "properties": {
+                        "bin": {
+                            "type": "string",
+                            "description": "Modules that provides training interface.",
+                            "examples": [
+                                "cat.rnnt.decode",
+                                "cat.lm.ppl_compute",
+                                "cat.lm.rescore",
+                                "cat.ctc.cal_logit",
+                                "cat.ctc.decode"
+                            ]
+                        }
+                    },
+                    "description": "Configuration for inference.",
+                    "required": [
+                        "bin",
+                        "option"
+                    ],
+                    "allOf": [
+                        {
+                            "if": {
+                                "properties": {
+                                    "bin": {
+                                        "const": "cat.rnnt.decode"
+                                    }
+                                }
+                            },
+                            "then": {
+                                "properties": {
+                                    "option": {
+                                        "type": "object",
+                                        "description": "RNN-Transducer decoder. options",
+                                        "properties": {
+                                            "workers": {
+                                                "type": "number",
+                                                "description": "number of data loading workers (default: 1)",
+                                                "default": 1
+                                            },
+                                            "rank": {
+                                                "type": "number",
+                                                "description": "node rank for distributed training",
+                                                "default": 0
+                                            },
+                                            "dist_url": {
+                                                "type": "string",
+                                                "description": "url used to set up distributed training",
+                                                "default": "tcp://localhost:13457"
+                                            },
+                                            "dist_backend": {
+                                                "type": "string",
+                                                "description": "distributed backend",
+                                                "default": "nccl"
+                                            },
+                                            "world_size": {
+                                                "type": "number",
+                                                "description": "number of nodes for distributed training",
+                                                "default": 1
+                                            },
+                                            "gpu": {
+                                                "type": "number",
+                                                "description": "GPU id to use."
+                                            },
+                                            "config": {
+                                                "type": "string",
+                                                "description": "Path to configuration file of backbone."
+                                            },
+                                            "resume": {
+                                                "type": "string",
+                                                "description": "Path to location of checkpoint."
+                                            },
+                                            "init_model": {
+                                                "type": "string",
+                                                "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself (w/o optimizer)"
+                                            },
+                                            "lm_config": {
+                                                "type": "string",
+                                                "description": "Config of external LM."
+                                            },
+                                            "lm_check": {
+                                                "type": "string",
+                                                "description": "Checkpoint of external LM."
+                                            },
+                                            "alpha": {
+                                                "type": "number",
+                                                "description": "Weight of external LM.",
+                                                "default": 0.0
+                                            },
+                                            "beta": {
+                                                "type": "number",
+                                                "description": "Penalty value of external LM.",
+                                                "default": 0.0
+                                            },
+                                            "ilm_weight": {
+                                                "type": "number",
+                                                "description": "ILM weight.ilm weight != 0 would enable internal language model estimation. This would slightly slow down the decoding.",
+                                                "default": 0.0
+                                            },
+                                            "input_scp": {
+                                                "type": "string"
+                                            },
+                                            "output_prefix": {
+                                                "type": "string",
+                                                "default": "./decode"
+                                            },
+                                            "beam_size": {
+                                                "type": "number",
+                                                "default": 3
+                                            },
+                                            "tokenizer": {
+                                                "type": "string",
+                                                "description": "Tokenizer model location. See cat/shared/tokenizer.py for details."
+                                            },
+                                            "nj": {
+                                                "type": "number",
+                                                "default": -1
+                                            },
+                                            "thread_per_woker": {
+                                                "type": "number",
+                                                "default": 1
+                                            },
+                                            "cpu": {
+                                                "default": false
+                                            },
+                                            "silent": {
+                                                "default": false
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "if": {
+                                "properties": {
+                                    "bin": {
+                                        "const": "cat.lm.ppl_compute"
+                                    }
+                                }
+                            },
+                            "then": {
+                                "properties": {
+                                    "option": {
+                                        "type": "object",
+                                        "description": "Compute perplexity to evaluate LM. options",
+                                        "properties": {
+                                            "config": {
+                                                "type": "string",
+                                                "description": "Path to the configuration file, usually 'path/to/config.json"
+                                            },
+                                            "nj": {
+                                                "type": "number",
+                                                "default": -1
+                                            },
+                                            "evaluate": {
+                                                "type": "string",
+                                                "description": "Evaluate test sets. w/o --tokenizer, -e inputs are assumed to be CorpusDataset format binary data."
+                                            },
+                                            "tokenizer": {
+                                                "type": "string",
+                                                "description": "Use tokenizer to encode the evaluation sets. If passed, would take -e inputs as text files."
+                                            },
+                                            "resume": {
+                                                "type": "string",
+                                                "description": "Path to the checkpoint of NNLM, not required for N-gram LM."
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "if": {
+                                "properties": {
+                                    "bin": {
+                                        "const": "cat.lm.rescore"
+                                    }
+                                }
+                            },
+                            "then": {
+                                "properties": {
+                                    "option": {
+                                        "type": "object",
+                                        "description": "Rescore with give n-best list and LM options",
+                                        "properties": {
+                                            "config": {
+                                                "type": "string",
+                                                "description": "Path to configuration file of backbone."
+                                            },
+                                            "resume": {
+                                                "type": "string",
+                                                "description": "Path to location of checkpoint."
+                                            },
+                                            "init_model": {
+                                                "type": "string",
+                                                "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself (w/o optimizer)"
+                                            },
+                                            "nbestlist": {
+                                                "type": "string",
+                                                "description": "Path to N-best list files."
+                                            },
+                                            "output": {
+                                                "type": "string",
+                                                "description": "The output text file. "
+                                            },
+                                            "alpha": {
+                                                "type": "number",
+                                                "description": "The 'alpha' value for LM integration, a.k.a. the LM weight",
+                                                "default": 0.0
+                                            },
+                                            "beta": {
+                                                "type": "number",
+                                                "description": "The 'beta' value for LM integration, a.k.a. the penalty of tokens.",
+                                                "default": 0.0
+                                            },
+                                            "tokenizer": {
+                                                "type": "string",
+                                                "description": "Tokenizer model location. See cat/shared/tokenizer.py for details."
+                                            },
+                                            "save_lm_nbest": {
+                                                "type": "string",
+                                                "description": "Path to save the LM N-best scores."
+                                            },
+                                            "nj": {
+                                                "type": "number",
+                                                "default": -1
+                                            },
+                                            "cpu": {
+                                                "default": false
+                                            },
+                                            "verbose": {
+                                                "default": false
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "if": {
+                                "properties": {
+                                    "bin": {
+                                        "const": "cat.ctc.cal_logit"
+                                    }
+                                }
+                            },
+                            "then": {
+                                "properties": {
+                                    "option": {
+                                        "type": "object",
+                                        "description": "CTC logit generator. options",
+                                        "properties": {
+                                            "config": {
+                                                "type": "string",
+                                                "description": "Path to configuration file of backbone."
+                                            },
+                                            "resume": {
+                                                "type": "string",
+                                                "description": "Path to location of checkpoint."
+                                            },
+                                            "init_model": {
+                                                "type": "string",
+                                                "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself (w/o optimizer)"
+                                            },
+                                            "input_scp": {
+                                                "type": "string"
+                                            },
+                                            "output_dir": {
+                                                "type": "string",
+                                                "description": "Ouput directory."
+                                            },
+                                            "nj": {
+                                                "type": "number",
+                                                "default": -1
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        {
+                            "if": {
+                                "properties": {
+                                    "bin": {
+                                        "const": "cat.ctc.decode"
+                                    }
+                                }
+                            },
+                            "then": {
+                                "properties": {
+                                    "option": {
+                                        "type": "object",
+                                        "description": "CTC decoder. options",
+                                        "properties": {
+                                            "config": {
+                                                "type": "string",
+                                                "description": "Path to configuration file of backbone."
+                                            },
+                                            "resume": {
+                                                "type": "string",
+                                                "description": "Path to location of checkpoint."
+                                            },
+                                            "init_model": {
+                                                "type": "string",
+                                                "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself (w/o optimizer)"
+                                            },
+                                            "input_scp": {
+                                                "type": "string"
+                                            },
+                                            "output_prefix": {
+                                                "type": "string",
+                                                "default": "./decode"
+                                            },
+                                            "lm_path": {
+                                                "type": "string",
+                                                "description": "Path to KenLM model."
+                                            },
+                                            "alpha": {
+                                                "type": "number",
+                                                "description": "The 'alpha' value for LM integration, a.k.a. the LM weight",
+                                                "default": 0.0
+                                            },
+                                            "beta": {
+                                                "type": "number",
+                                                "description": "The 'beta' value for LM integration, a.k.a. the penalty of tokens.",
+                                                "default": 0.0
+                                            },
+                                            "beam_size": {
+                                                "type": "number",
+                                                "default": 3
+                                            },
+                                            "tokenizer": {
+                                                "type": "string",
+                                                "description": "Tokenizer model location. See cat/shared/tokenizer.py for details."
+                                            },
+                                            "nj": {
+                                                "type": "number",
+                                                "default": -1
+                                            },
+                                            "thread_per_woker": {
+                                                "type": "number",
+                                                "default": 1
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    ]
                 }
             }
         }

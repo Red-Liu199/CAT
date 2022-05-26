@@ -1,12 +1,7 @@
 {
-    "description": "Settings of NN training.",
     "type": "object",
-    "required": [
-        "scheduler"
-    ],
     "properties": {
         "transducer": {
-            "description": "Configuration of Transducer",
             "type": "object",
             "properties": {
                 "sampled_softmax": {
@@ -33,15 +28,11 @@
                 "joiner": {},
                 "predictor": {},
                 "encoder": {}
-            }
+            },
+            "description": "Configuration of Transducer."
         },
         "encoder": {
-            "description": "Configuration of Transducer transcription network",
             "type": "object",
-            "required": [
-                "type",
-                "kwargs"
-            ],
             "properties": {
                 "type": {
                     "type": "string",
@@ -66,6 +57,11 @@
                     "default": false
                 }
             },
+            "description": "Configuration of Transducer transcription network.",
+            "required": [
+                "type",
+                "kwargs"
+            ],
             "allOf": [
                 {
                     "if": {
@@ -454,12 +450,7 @@
             ]
         },
         "decoder": {
-            "description": "Configuration of Transducer prediction network",
             "type": "object",
-            "required": [
-                "type",
-                "kwargs"
-            ],
             "properties": {
                 "type": {
                     "type": "string",
@@ -480,9 +471,14 @@
                 },
                 "pretrained": {
                     "type": "string",
-                    "default": ""
+                    "default": false
                 }
             },
+            "description": "Configuration of Transducer prediction network.",
+            "required": [
+                "type",
+                "kwargs"
+            ],
             "allOf": [
                 {
                     "if": {
@@ -758,7 +754,6 @@
             ]
         },
         "specaug_config": {
-            "description": "Configuration of SpecAugument",
             "type": "object",
             "properties": {
                 "delta_feats": {
@@ -801,15 +796,11 @@
                     "type": "boolean",
                     "default": true
                 }
-            }
+            },
+            "description": "Configuration of SpecAugument."
         },
         "joiner": {
-            "description": "Configuration of Transducer joiner network",
             "type": "object",
-            "required": [
-                "type",
-                "kwargs"
-            ],
             "properties": {
                 "type": {
                     "type": "string",
@@ -820,6 +811,11 @@
                     ]
                 }
             },
+            "description": "Configuration of Transducer joiner network.",
+            "required": [
+                "type",
+                "kwargs"
+            ],
             "allOf": [
                 {
                     "if": {
@@ -928,12 +924,7 @@
             ]
         },
         "scheduler": {
-            "description": "Configuration of Scheduler",
             "type": "object",
-            "required": [
-                "type",
-                "kwargs"
-            ],
             "properties": {
                 "type": {
                     "type": "string",
@@ -950,10 +941,6 @@
                 },
                 "optimizer": {
                     "type": "object",
-                    "required": [
-                        "type",
-                        "kwargs"
-                    ],
                     "properties": {
                         "type": {
                             "type": "string",
@@ -979,6 +966,11 @@
                             "default": true
                         }
                     },
+                    "description": "Configuration of optimizer.",
+                    "required": [
+                        "type",
+                        "kwargs"
+                    ],
                     "allOf": [
                         {
                             "if": {
@@ -1311,6 +1303,11 @@
                     ]
                 }
             },
+            "description": "Configuration of Scheduler.",
+            "required": [
+                "type",
+                "kwargs"
+            ],
             "allOf": [
                 {
                     "if": {
@@ -1602,5 +1599,9 @@
                 }
             ]
         }
-    }
+    },
+    "description": "Settings of NN training.",
+    "required": [
+        "scheduler"
+    ]
 }

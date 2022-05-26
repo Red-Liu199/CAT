@@ -2,19 +2,23 @@
 # Author: Huahuan Zheng (maxwellzh@outlook.com)
 # NCE training of RNN-T
 
-from ..shared import Manager
-from ..shared import coreutils
+__all__ = ["NCETransducerTrainer", "build_model", "_parser", "main"]
+
 from ..shared.encoder import AbsEncoder
 from ..shared.decoder import AbsDecoder, ILM
 from ..shared.manager import train as default_train_func
-from ..shared.monitor import DefaultDict
 from ..shared.data import (
     KaldiSpeechDataset,
     sortedPadCollateASR
 )
+from ..shared import (
+    Manager,
+    coreutils
+)
 from ..lm import lm_builder
 from .train import build_model as rnnt_builder
 from .train import TransducerTrainer
+
 from .joiner import AbsJointNet
 from .beam_search import BeamSearcher as RNNTDecoder
 
@@ -439,9 +443,18 @@ def build_model(cfg: dict, args: argparse.Namespace, dist: bool = True) -> NCETr
     return model
 
 
-if __name__ == "__main__":
-    parser = coreutils.basic_trainer_parser()
-    args = parser.parse_args()
+def _parser():
+    return coreutils.basic_trainer_parser("NCE Transducer Training")
+
+
+def main(args: argparse.Namespace = None):
+    if args is None:
+        parser = _parser()
+        args = parser.parse_args()
 
     coreutils.setup_path(args)
     coreutils.main_spawner(args, main_worker)
+
+
+if __name__ == "__main__":
+    main()

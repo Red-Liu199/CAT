@@ -1,7 +1,7 @@
 '''
 This script is used for parsing the json schema for experiment settings.
 '''
-# %%
+
 
 from cat.shared import decoder as pn_zoo
 from cat.shared import encoder as tn_zoo
@@ -11,25 +11,31 @@ from cat.rnnt import joiner as joiner_zoo
 from cat.rnnt.joiner import AbsJointNet
 from cat.rnnt.train import TransducerTrainer
 
+import os
+import argparse
 import inspect
 import json
 import typing
 from collections import OrderedDict
+from typing import *
 
 import torch
 import torch.nn as nn
 from torch.optim import Optimizer
 
 
-# %%
-def gen_object(type, default=None, recursive_item: OrderedDict = None) -> OrderedDict:
+def add_property(d: Union[Dict, OrderedDict], new_property: Dict[str, Any]):
+    if 'properties' not in d:
+        d['properties'] = OrderedDict()
+    d['properties'].update(new_property)
+    return d
+
+
+def gen_object(type, default=None, desc: str = None) -> OrderedDict:
     _out = OrderedDict()
     if type == dict or type == OrderedDict:
-        _out['description'] = None
         _out['type'] = 'object'
-        _out['required'] = None
         _out['properties'] = OrderedDict()
-        return _out
     elif type == int or type == float:
         _out['type'] = 'number'
     elif type == str:
@@ -38,42 +44,18 @@ def gen_object(type, default=None, recursive_item: OrderedDict = None) -> Ordere
         _out['type'] = 'boolean'
     elif type == list or type == tuple:
         _out['type'] = 'array'
-        _out['items'] = recursive_item
 
-    _out['default'] = default
+    if desc is not None:
+        _out['description'] = desc
+    if default is not None:
+        _out['default'] = default
     return _out
 
 
-def post_process(schema: typing.Union[dict, OrderedDict, list]):
-    if isinstance(schema, list):
-        torm = []
-        for i, v in enumerate(schema):
-            if isinstance(v, (dict, list, OrderedDict)):
-                schema[i] = post_process(v)
-            elif v is None:
-                torm.append(i)
-
-        for i in torm[::-1]:
-            schema.pop(i)
-        return schema
-    elif isinstance(schema, (dict, OrderedDict)):
-        ptr_org = dict(schema)
-        torm = []
-        for k, v in ptr_org.items():
-            if isinstance(v, (dict, list, OrderedDict)):
-                ptr_org[k] = post_process(v)
-            elif v is None:
-                torm.append(k)
-        for k in torm:
-            del ptr_org[k]
-        return ptr_org
-
-
-def parse_processing(processing: typing.Union[dict, OrderedDict], module_list: list):
-    processing['required'] = ['type', 'kwargs']
-    properties = processing['properties']
-    properties['type'] = gen_object(str)
-    properties['type']['examples'] = [m.__name__ for m in module_list]
+def module_processing(processing: typing.Union[dict, OrderedDict], module_list: list):
+    module_options = gen_object(str)
+    module_options['examples'] = [m.__name__ for m in module_list]
+    add_property(processing, {'type': module_options})
 
     # setup kwargs
     allOf = []
@@ -107,127 +89,211 @@ def parse_processing(processing: typing.Union[dict, OrderedDict], module_list: l
         ]))
 
     if len(module_list) == 1:
-        processing['required'] = None
         processing['properties'] = allOf[0]['then']['properties']['kwargs']['properties']
     else:
+        processing['required'] = ['type', 'kwargs']
         processing['allOf'] = allOf
     return processing
 
-# %% [markdown]
-# # Overall setting
+
+def parser_processing(parser: argparse.ArgumentParser):
+    options = OrderedDict()
+    for action in parser._actions[1:]:
+        k = action.__dict__['dest']
+        options[k] = gen_object(
+            type=action.__dict__['type'],
+            default=action.__dict__['default'],
+            desc=action.__dict__['help']
+        )
+        if action.__dict__['choices'] is not None:
+            options[k]['examples'] = action.__dict__['choices']
+    return options
 
 
-# %%
-schema = gen_object(dict)
-schema['description'] = 'Settings of NN training.'
+def bin_processing(d_bin_parser: Dict[str, argparse.ArgumentParser], desc: str = None):
+    _schema = gen_object(dict, desc=desc)
+
+    bin_options = gen_object(
+        str, desc="Modules that provides training interface.")
+    bin_options['examples'] = list(d_bin_parser.keys())
+    add_property(_schema, {'bin': bin_options})
+
+    allOf = []
+    for _bin, _parser in d_bin_parser.items():
+        allOf.append({
+            'if': {'properties': {'bin': {'const': _bin}}},
+            "then": {
+                "properties": {
+                    "option": {
+                        "type": "object",
+                        "description": _parser.prog + ' options',
+                        "properties": parser_processing(_parser)
+                    }
+                }
+            }
+        })
+
+    if len(allOf) == 1:
+        _schema['properties'] = allOf[0]['then']['properties']['option']['properties']
+    else:
+        _schema['required'] = ['bin', 'option']
+        _schema['allOf'] = allOf
+
+    return _schema
+
+
+# Neural network schema
+schema = gen_object(dict, desc="Settings of NN training.")
 schema['required'] = ['scheduler']
 
-# %% [markdown]
-# ## Transducer
+# Transducer
+processing = gen_object(dict, desc="Configuration of Transducer.")
+module_processing(processing, [TransducerTrainer])
+add_property(schema, {'transducer': processing})
 
-# %%
 
-processing = gen_object(dict)
-parse_processing(processing, [TransducerTrainer])
-processing['description'] = 'Configuration of Transducer'
-schema['properties']['transducer'] = processing
-
-# %% [markdown]
-# ## Encoder
-
-# %%
-
-processing = gen_object(dict)  # type:OrderedDict
+# Encoder
+processing = gen_object(
+    dict, desc="Configuration of Transducer transcription network.")  # type:OrderedDict
 modules = []
 for m in dir(tn_zoo):
     _m = getattr(tn_zoo, m)
     if inspect.isclass(_m) and issubclass(_m, tn_zoo.AbsEncoder):
         modules.append(_m)
 
-parse_processing(processing, modules)
-processing['description'] = 'Configuration of Transducer transcription network'
-processing['properties']['freeze'] = gen_object(bool, default=False)
-processing['properties']['pretrained'] = gen_object(str, default=False)
-schema['properties']['encoder'] = processing
+module_processing(processing, modules)
+add_property(processing, {
+    'freeze': gen_object(bool, default=False),
+    'pretrained': gen_object(str, default=False)
+})
+add_property(schema, {'encoder': processing})
 
-# %% [markdown]
-# ## Decoder
 
-# %%
-processing = gen_object(dict)  # type:OrderedDict
+# Predictor
+processing = gen_object(
+    dict, desc="Configuration of Transducer prediction network.")  # type:OrderedDict
 modules = []
 for m in dir(pn_zoo):
     _m = getattr(pn_zoo, m)
     if inspect.isclass(_m) and issubclass(_m, pn_zoo.AbsDecoder):
         modules.append(_m)
 
-parse_processing(processing, modules)
-processing['description'] = 'Configuration of Transducer prediction network'
-processing['properties']['freeze'] = gen_object(bool, default=False)
-processing['properties']['pretrained'] = gen_object(str, default="")
-schema['properties']['decoder'] = processing
-
-# %% [markdown]
-# ## SpecAug
-
-# %%
-
-processing = gen_object(dict)  # type:OrderedDict
-parse_processing(processing, [SpecAug])
-
-processing['description'] = 'Configuration of SpecAugument'
-schema['properties']['specaug_config'] = processing
-
-# %% [markdown]
-# ## Joint network
-
-# %%
+module_processing(processing, modules)
+add_property(processing, {
+    'freeze': gen_object(bool, default=False),
+    'pretrained': gen_object(str, default=False)
+})
+add_property(schema, {'decoder': processing})
 
 
-processing = gen_object(dict)  # type:OrderedDict
+# SpecAug
+processing = gen_object(dict,
+                        desc="Configuration of SpecAugument.")  # type:OrderedDict
+module_processing(processing, [SpecAug])
+add_property(schema, {'specaug_config': processing})
+
+
+# Joint network
+processing = gen_object(dict,
+                        desc="Configuration of Transducer joiner network.")  # type:OrderedDict
 modules = []
 for m in dir(joiner_zoo):
     _m = getattr(joiner_zoo, m)
     if inspect.isclass(_m) and issubclass(_m, AbsJointNet):
         modules.append(_m)
-parse_processing(processing, modules)
+module_processing(processing, modules)
+add_property(schema, {'joiner': processing})
 
-processing['description'] = 'Configuration of Transducer joiner network'
-schema['properties']['joiner'] = processing
 
-# %% [markdown]
-# ## Scheduler
-
-# %%
-
-processing = gen_object(dict)  # type:OrderedDict
+# Scheduler
+processing = gen_object(
+    dict, desc="Configuration of Scheduler.")  # type:OrderedDict
 modules = []
 for m in dir(scheduler):
     _m = getattr(scheduler, m)
     if inspect.isclass(_m) and issubclass(_m, Scheduler):
         modules.append(_m)
-
-parse_processing(processing, modules)
-processing['description'] = 'Configuration of Scheduler'
+module_processing(processing, modules)
 
 # setup the optimizer
-optim = gen_object(dict)
+optim = gen_object(dict, desc="Configuration of optimizer.")
 modules = []
 for m in dir(torch.optim):
     _m = getattr(torch.optim, m)
     if inspect.isclass(_m) and issubclass(_m, Optimizer):
         modules.append(_m)
-parse_processing(optim, modules)
-optim['properties']['zeroredundancy'] = gen_object(bool, default=True)
-processing['properties']['optimizer'] = optim
+module_processing(optim, modules)
+add_property(optim, {'zeroredundancy': gen_object(bool, default=True)})
+add_property(processing, {'optimizer': optim})
+add_property(schema, {'scheduler': processing})
 
-schema['properties']['scheduler'] = processing
-
-# %% [markdown]
-# # Post processing and dump
-
-# %%
-
-schema = post_process(schema)
+# dump
 with open('.vscode/schemas.json', 'w') as fo:
     json.dump(schema, fo, indent=4)
+
+
+# hyper-parameter schema
+# most of the settings in this schema is handcrafted
+# except the fields 'train', 'inference':'infer' and 'inference':'er'
+f_hyper = '.vscode/hyper_schema.json'
+if os.path.isfile(f_hyper):
+    with open(f_hyper, 'r') as fi:
+        hyper_schema = json.load(fi)
+else:
+    hyper_schema = gen_object(dict, desc="Settings of Hyper-parameters.")
+
+# schema for field:train
+# if you want to add a new training script, add it here.
+
+# fmt: off
+from cat.rnnt.train_mwer import _parser as parser_rnnt_mwer
+from cat.rnnt.train_nce import _parser as parser_rnnt_nce
+from cat.rnnt.train import _parser as parser_rnnt
+from cat.lm.train import _parser as parser_lm
+from cat.ctc.train import _parser as parser_ctc
+# fmt: on
+
+add_property(hyper_schema, {
+    'train': bin_processing({
+        'cat.rnnt.train_mwer': parser_rnnt_mwer(),
+        'cat.rnnt.train_nce': parser_rnnt_nce(),
+        'cat.rnnt.train': parser_rnnt(),
+        'cat.lm.train': parser_lm(),
+        'cat.ctc.train': parser_ctc()
+    }, desc="Configuration of NN training")
+})
+
+
+# field:inference:infer
+# fmt: off
+from cat.rnnt.decode import _parser as parser_rnnt_decode
+from cat.lm.ppl_compute import _parser as parser_lm_ppl
+from cat.lm.rescore import _parser as parser_lm_rescore
+from cat.ctc.cal_logit import _parser as parser_ctc_cal_logit
+from cat.ctc.decode import _parser as parser_ctc_decode
+# fmt: on
+
+inference = hyper_schema['properties']['inference']
+add_property(inference, {
+    'infer': bin_processing({
+        'cat.rnnt.decode': parser_rnnt_decode(),
+        'cat.lm.ppl_compute': parser_lm_ppl(),
+        'cat.lm.rescore': parser_lm_rescore(),
+        'cat.ctc.cal_logit': parser_ctc_cal_logit(),
+        'cat.ctc.decode': parser_ctc_decode()
+    }, desc="Configuration for inference.")
+})
+
+# field:inference:er
+# fmt: off
+from cat.utils.wer import _parser as parser_wer
+# fmt: on
+add_property(inference, {
+    'er': bin_processing({
+        'cat.utils.wer': parser_wer()
+    })
+})
+
+# dump
+with open(f_hyper, 'w') as fo:
+    json.dump(hyper_schema, fo, indent=4)

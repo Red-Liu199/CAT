@@ -1,6 +1,7 @@
 # Author: Huahuan Zheng (maxwellzh@outlook.com)
 
 
+import io
 import os
 import sys
 import argparse
@@ -80,14 +81,21 @@ def process_worker(args: argparse.Namespace, p_range: Tuple[int, int], q_out: Qu
         loader = BinLoader()
 
     offset = 0
+    buffer = io.StringIO()
     for file in args.input:
         for tokens in loader(file, idx_beg - offset, idx_end - offset):
             if tokens == [] and rm_empty:
                 continue
-            q_out.put(' '.join(_int2str(x) for x in tokens)+'\n', block=True)
-            offset += countlines(file)
-            if offset >= idx_end:
-                break
+            buffer.write(' '.join(_int2str(x) for x in tokens)+'\n')
+            if buffer.tell() >= 16777216:
+                q_out.put(buffer.getvalue(), block=True)
+                buffer.truncate(0)
+        offset += countlines(file)
+        if offset >= idx_end:
+            break
+
+    q_out.put(buffer.getvalue(), block=True)
+    buffer.close()
     q_out.put(None, block=True)
 
 
@@ -130,7 +138,7 @@ if __name__ == "__main__":
         total_lines = sum(len(CorpusDataset(dataset))
                           for dataset in args.input)
 
-    num_process = max(min(os.cpu_count()//2, total_lines//1000), 1)
+    num_process = max(min(os.cpu_count()//2, total_lines//10000), 1)
     workerloads = dispatch_jobs(total_lines, num_process)
 
     try:
@@ -157,6 +165,7 @@ if __name__ == "__main__":
 
         for _p in p:
             _p.join()
+
     except IOError:
         pass
     finally:

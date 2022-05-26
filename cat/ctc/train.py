@@ -2,6 +2,8 @@
 # Apache 2.0.
 # Author: Zheng Huahuan (maxwellzh@outlook.com)
 
+__all__ = ["AMTrainer", "build_model", "_parser", "main"]
+
 from ..shared import Manager
 from ..shared import coreutils
 from ..shared import encoder as model_zoo
@@ -153,15 +155,24 @@ def build_model(
     return model
 
 
-def CTCParser():
+def _parser():
     parser = coreutils.basic_trainer_parser("CTC trainer.")
     return parser
 
 
 def main(args: argparse.Namespace = None):
     if args is None:
-        parser = CTCParser()
+        parser = _parser()
         args = parser.parse_args()
 
     coreutils.setup_path(args)
     coreutils.main_spawner(args, main_worker)
+
+
+if __name__ == "__main__":
+    print(
+        "NOTE:\n"
+        "    since we import the build_model() function in cat.ctc,\n"
+        "    we should avoid calling `python -m cat.ctc.train`, instead\n"
+        "    running `python -m cat.ctc`"
+    )

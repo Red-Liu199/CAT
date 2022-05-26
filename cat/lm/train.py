@@ -6,6 +6,8 @@
 Language model trainer.
 """
 
+__all__ = ["LMTrainer", "build_model", "_parser", "main"]
+
 from ..shared import Manager
 from ..shared import coreutils
 from ..shared import decoder as model_zoo
@@ -116,15 +118,24 @@ def build_model(
     return model
 
 
-def LMParser():
+def _parser():
     parser = coreutils.basic_trainer_parser('Language model trainer.')
     return parser
 
 
 def main(args: argparse = None):
     if args is None:
-        parser = LMParser()
+        parser = _parser()
         args = parser.parse_args()
 
     coreutils.setup_path(args)
     coreutils.main_spawner(args, main_worker)
+
+
+if __name__ == "__main__":
+    print(
+        "NOTE:\n"
+        "    since we import the build_model() function in cat.lm,\n"
+        "    we should avoid calling `python -m cat.lm.train`, instead\n"
+        "    running `python -m cat.lm`"
+    )

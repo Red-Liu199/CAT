@@ -4,6 +4,22 @@ Uage:
     python utils/pipeline/asr.py
 """
 
+__all__ = [
+    'checkExist',
+    'combine_text',
+    'dumpjson',
+    'get_args',
+    'initial_datainfo',
+    'log_commit',
+    'model_average',
+    'mp_spawn',
+    'readfromjson',
+    'resolve_in_priority',
+    'set_visible_gpus',
+    'train_nn_model',
+    'train_tokenizer'
+]
+
 from cat.utils.data.resolvedata import F_DATAINFO
 from cat.utils.data import resolvedata
 
@@ -82,7 +98,7 @@ def resolve_sp_path(config: dict, prefix: Optional[str] = None, allow_making: bo
     return config, (config['model_prefix']+'.model', config['model_prefix']+'.vocab')
 
 
-def sentencepiece_train(intext: str, **kwargs):
+def sp_train(intext: str, **kwargs):
     """Train the sentencepiece tokenizer.
 
     Args:
@@ -304,7 +320,7 @@ def recursive_rpl(src_dict: dict, target_key: str, rpl_val):
             recursive_rpl(v, target_key, rpl_val)
 
 
-def updateNamespaceFromDict(src_dict: dict, parser: argparse.ArgumentParser, positionals: List = []):
+def get_args(src_dict: dict, parser: argparse.ArgumentParser, positionals: List = []):
     args = argparse.Namespace()
     processed_dict = {}
     for k, v in src_dict.items():
@@ -332,25 +348,30 @@ def get_free_port():
     return s.getsockname()[1]
 
 
-def TrainNNModel(
-        args: argparse.Namespace,
-        settings: dict,
+def train_nn_model(
+        working_dir: str,
         f_hyper_p: str,
         fmt_data: str,
-        Parser: argparse.ArgumentParser,
-        MainFunc: Callable[[argparse.Namespace], None],
-        promt: str = '{}'):
+        promt: str = '{}\n'):
+
+    checkExist('f', f_hyper_p)
+    settings = readfromjson(f_hyper_p)
     assert 'train' in settings, promt.format("missing 'train' in field:")
+    assert 'bin' in settings['train'], promt.format(
+        "missing 'bin' in field:train:")
+    assert 'option' in settings['train'], promt.format(
+        "missing 'bin' in field:train:")
 
     if 'tokenizer' not in settings:
         sys.stderr.write(
-            f"warning: missing 'tokenizer': {f_hyper_p}\n")
+            f"warning: missing 'tokenizer': {f_hyper_p}.\n"
+            "... You have ensure the 'num_classes' in config is correct.\n")
     else:
         from cat.shared import tokenizer as tknz
         checkExist('f', settings['tokenizer']['location'])
         tokenizer = tknz.load(settings['tokenizer']['location'])
 
-        f_nnconfig = os.path.join(args.expdir, 'config.json')
+        f_nnconfig = os.path.join(working_dir, 'config.json')
         checkExist('f', f_nnconfig)
 
         nnconfig = readfromjson(f_nnconfig)
@@ -359,38 +380,30 @@ def TrainNNModel(
         dumpjson(nnconfig, f_nnconfig)
         del tokenizer
 
-    import subprocess
-    if subprocess.run('command -v git', shell=True, capture_output=True).returncode != 0:
-        sys.stderr.write(
-            "warning: git command not found. Skip saving commit.\n")
-    else:
-        process = subprocess.run(
-            "git log -n 1 --pretty=format:\"%H\"", shell=True, check=True, stdout=subprocess.PIPE)
-
-        orin_settings = readfromjson(f_hyper_p)
-        orin_settings['commit'] = process.stdout.decode('utf-8')
-        dumpjson(orin_settings, f_hyper_p)
-
-    training_settings = settings['train']
-    if 'trset' not in training_settings:
+    train_options = settings['train']['option']
+    if 'trset' not in train_options:
         train_data = fmt_data.format('train')
         checkExist('f', train_data)
-        training_settings['trset'] = train_data
+        train_options['trset'] = train_data
         sys.stdout.write(promt.format(f"set 'trset' to {train_data}"))
-    if 'devset' not in training_settings:
+    if 'devset' not in train_options:
         dev_data = fmt_data.format('dev')
         checkExist('f', dev_data)
-        training_settings['devset'] = dev_data
+        train_options['devset'] = dev_data
         sys.stdout.write(promt.format(f"set 'devset' to {dev_data}"))
-    if 'dir' not in training_settings:
-        training_settings['dir'] = args.expdir
-        sys.stdout.write(promt.format(f"set 'dir' to {args.expdir}"))
-    if 'dist-url' not in training_settings:
-        training_settings['dist-url'] = f"tcp://localhost:{get_free_port()}"
+    if 'dir' not in train_options:
+        train_options['dir'] = working_dir
+        sys.stdout.write(promt.format(f"set 'dir' to {working_dir}"))
+    if 'dist-url' not in train_options:
+        train_options['dist-url'] = f"tcp://localhost:{get_free_port()}"
         sys.stdout.write(promt.format(
-            f"set 'dist-url' to {training_settings['dist-url']}"))
+            f"set 'dist-url' to {train_options['dist-url']}"))
 
-    mp_spawn(MainFunc, updateNamespaceFromDict(training_settings, Parser))
+    import importlib
+    interface = importlib.import_module(settings['train']['bin'])
+
+    mp_spawn(interface.main, get_args(
+        train_options, interface._parser()))
 
 
 def resolve_in_priority(dataset: Union[str, List[str]]) -> Tuple[List[str], List[str]]:
@@ -419,7 +432,7 @@ def resolve_in_priority(dataset: Union[str, List[str]]) -> Tuple[List[str], List
     return local_text, outside_text
 
 
-def combineText(datasets: Union[str, List[str]], f_out: Optional[str] = None) -> str:
+def combine_text(datasets: Union[str, List[str]], f_out: Optional[str] = None) -> str:
     """Combine text files of dataset(s) and return the combined file."""
     text_noid, text_withid = resolve_in_priority(datasets)
     assert len(text_noid) > 0 or len(
@@ -441,7 +454,7 @@ def combineText(datasets: Union[str, List[str]], f_out: Optional[str] = None) ->
     return f_out
 
 
-def TrainTokenizer(f_hyper: str):
+def train_tokenizer(f_hyper: str):
     checkExist('f', f_hyper)
     hyper_settings = readfromjson(f_hyper)
 
@@ -481,10 +494,10 @@ def TrainTokenizer(f_hyper: str):
 
     from cat.shared import tokenizer as tknz
     if tokenizer_type == 'SentencePieceTokenizer':
-        f_corpus_tmp = combineText(hyper_settings['data']['train'])
+        f_corpus_tmp = combine_text(hyper_settings['data']['train'])
         sp_settings, (f_tokenizer, _) = resolve_sp_path(
             hyper_settings['tokenizer']['property'], os.path.basename(os.getcwd()), allow_making=True)
-        sentencepiece_train(f_corpus_tmp, **sp_settings)
+        sp_train(f_corpus_tmp, **sp_settings)
         hyper_settings['tokenizer']['property'] = sp_settings
         tokenizer = tknz.SentencePieceTokenizer(spmodel=f_tokenizer)
         hyper_settings['tokenizer']['property']['vocab_size'] = tokenizer.vocab_size
@@ -543,6 +556,20 @@ def model_average(
     return checkpoint, suffix_avgmodel
 
 
+def log_commit(f_hyper: str):
+    import subprocess
+    if subprocess.run('command -v git', shell=True, capture_output=True).returncode != 0:
+        sys.stderr.write(
+            "warning: git command not found. Skip logging commit.\n")
+    else:
+        process = subprocess.run(
+            "git log -n 1 --pretty=format:\"%H\"", shell=True, check=True, stdout=subprocess.PIPE)
+
+        orin_settings = readfromjson(f_hyper)
+        orin_settings['commit'] = process.stdout.decode('utf-8')
+        dumpjson(orin_settings, f_hyper)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
@@ -566,15 +593,18 @@ if __name__ == "__main__":
     assert s_beg >= 1 and s_beg <= s_end, f"Invalid start stage: {s_beg}"
 
     cwd = os.getcwd()
-    checkExist('d', args.expdir)
-    f_hyper_settings = os.path.join(args.expdir, 'hyper-p.json')
-    checkExist('f', f_hyper_settings)
+    working_dir = args.expdir
+    checkExist('d', working_dir)
+    f_hyper = os.path.join(working_dir, 'hyper-p.json')
+    checkExist('f', f_hyper)
     initial_datainfo()
     datainfo = readfromjson(F_DATAINFO)
-    hyper_cfg = readfromjson(f_hyper_settings)
+    hyper_cfg = readfromjson(f_hyper)
     if "env" in hyper_cfg:
         for k, v in hyper_cfg["env"].items():
             os.environ[k] = v
+    if 'commit' not in hyper_cfg:
+        log_commit(f_hyper)
 
     if args.ngpu > -1:
         set_visible_gpus(args.ngpu)
@@ -584,12 +614,12 @@ if __name__ == "__main__":
         if not args.silent:
             print("{0} {1} {0}".format("="*20, "Stage 1 Tokenizer training"))
         fmt = "# Tokenizer trainin # {}\n" if not args.silent else ""
-        hyper_settings = readfromjson(f_hyper_settings)
-        if 'tokenizer' not in hyper_settings:
+        hyper_cfg = readfromjson(f_hyper)
+        if 'tokenizer' not in hyper_cfg:
             sys.stderr.write(
                 "warning: missing 'tokenizer' in hyper-setting, skip tokenizer training.")
         else:
-            TrainTokenizer(f_hyper_settings)
+            train_tokenizer(f_hyper)
 
     ############ Stage 2  Pickle data ############
     if s_beg <= 2 and s_end >= 2:
@@ -597,37 +627,37 @@ if __name__ == "__main__":
             print("{0} {1} {0}".format("="*20, "Stage 2 Pickle data"))
         fmt = "# Pickle data # {}\n" if not args.silent else ""
 
-        hyper_settings = readfromjson(f_hyper_settings)
-        assert 'data' in hyper_settings, f"missing 'data': {f_hyper_settings}"
+        hyper_cfg = readfromjson(f_hyper)
+        assert 'data' in hyper_cfg, f"missing 'data': {f_hyper}"
 
         from cat.shared import tokenizer as tknz
-        if 'tokenizer' not in hyper_settings:
+        if 'tokenizer' not in hyper_cfg:
             sys.stderr.write(
                 f"warning: missing 'tokenizer', assume the ground truth text files as tokenized ones.")
             istokenized = True
             tokenizer = None
         else:
             # load tokenizer from file
-            assert 'location' in hyper_settings[
-                'tokenizer'], f"missing 'location' in ['tokenizer']: {f_hyper_settings}"
+            assert 'location' in hyper_cfg[
+                'tokenizer'], f"missing 'location' in ['tokenizer']: {f_hyper}"
 
-            f_tokenizer = hyper_settings['tokenizer']['location']
+            f_tokenizer = hyper_cfg['tokenizer']['location']
             checkExist('f', f_tokenizer)
             tokenizer = tknz.load(f_tokenizer)
             istokenized = False
 
-        data_settings = hyper_settings['data']
+        data_settings = hyper_cfg['data']
         if 'filter' not in data_settings:
             data_settings['filter'] = None
 
-        d_pkl = os.path.join(args.expdir, 'pkl')
+        d_pkl = os.path.join(working_dir, 'pkl')
         os.makedirs(d_pkl, exist_ok=True)
         for dataset in ['train', 'dev', 'test']:
             if dataset not in data_settings:
                 sys.stderr.write(
                     f"warning: missing '{dataset}' in ['data'], skip.\n")
                 continue
-            sys.stdout.write(fmt.format(f"parsing {dataset} data..."))
+            sys.stdout.write(fmt.format(f"packing {dataset} data..."))
 
             if dataset == 'train':
                 filter = data_settings['filter']
@@ -656,25 +686,12 @@ if __name__ == "__main__":
             print("{0} {1} {0}".format("="*20, "Stage 3 NN training"))
         fmt = "# NN training # {}\n" if not args.silent else ""
 
-        hyper_settings = readfromjson(f_hyper_settings)
-        if 'topo' not in hyper_settings:
-            hyper_settings['topo'] = 'rnnt'
-            sys.stdout.write(fmt.format(f"set 'topo' to 'rnnt'"))
-
-        if hyper_settings['topo'] == 'rnnt':
-            from cat.rnnt.train import RNNTParser
-            from cat.rnnt.train import main as RNNTMain
-
-            TrainNNModel(args, hyper_settings, f_hyper_settings, os.path.join(
-                args.expdir, 'pkl/{}.pkl'), RNNTParser(), RNNTMain, fmt)
-        elif hyper_settings['topo'] == 'ctc':
-            from cat.ctc.train import CTCParser
-            from cat.ctc.train import main as CTCMain
-            TrainNNModel(args, hyper_settings, f_hyper_settings, os.path.join(
-                args.expdir, 'pkl/{}.pkl'), CTCParser(), CTCMain, fmt)
-        else:
-            raise ValueError(fmt.format(
-                f"Unknown topology: {hyper_settings['topo']}, expect one of ['rnnt', 'ctc']"))
+        train_nn_model(
+            working_dir,
+            f_hyper,
+            f'{working_dir}'+'/pkl/{}.pkl',
+            fmt
+        )
 
     ############ Stage 4  Decode ############
     if s_beg <= 4 and s_end >= 4:
@@ -683,7 +700,7 @@ if __name__ == "__main__":
             os.system(" ".join([
                 sys.executable,     # python interpreter
                 sys.argv[0],        # file script
-                args.expdir,
+                working_dir,
                 "--silent" if args.silent else "",
                 f"--start_stage={4}",
                 f"--stop_stage={args.stage_end}",
@@ -695,196 +712,186 @@ if __name__ == "__main__":
             print("{0} {1} {0}".format("="*20, "Stage 4 Decode"))
         fmt = "# Decode # {}\n" if not args.silent else ""
 
-        hyper_settings = readfromjson(f_hyper_settings)
-        assert 'inference' in hyper_settings, f"missing 'inference': {f_hyper_settings}"
-        assert 'data' in hyper_settings, f"missing 'data': {f_hyper_settings}"
-        assert 'test' in hyper_settings[
-            'data'], "missing 'test' in ['data']: {f_hyper_settings}"
-        if 'topo' not in hyper_settings:
-            hyper_settings['topo'] = 'rnnt'
-            sys.stdout.write(fmt.format(f"set 'topo' to 'rnnt'"))
+        hyper_cfg = readfromjson(f_hyper)
+        assert 'inference' in hyper_cfg, f"missing 'inference' at {f_hyper}"
 
-        if hyper_settings['topo'] not in ['rnnt', 'ctc']:
-            raise ValueError(
-                f"Unknown topology: {hyper_settings['topo']}, expect one of ['rnnt', 'ctc']")
+        cfg_infr = hyper_cfg['inference']
 
-        inference_settings = hyper_settings['inference']
-        checkdir = os.path.join(args.expdir, 'check')
-
-        # decode
-        assert 'decode' in inference_settings, "missing 'decode' in field:inference"
-        decode_settings = inference_settings['decode']
-
-        if 'resume' in decode_settings:
-            sys.stdout.write(fmt.format(
-                "setting 'resume' in decoding would overwrite the model averaging settings."))
-            try:
-                checkExist('f', decode_settings['resume'])
-                checkpoint = decode_settings['resume']
-            except FileNotFoundError:
-                checkExist('f', os.path.join(
-                    checkdir, decode_settings['resume']))
-                checkpoint = os.path.join(checkdir, decode_settings['resume'])
-            # rm dirname and '.pt'
-            suffix_avgmodel = os.path.basename(checkpoint)[:-3]
+        checkdir = os.path.join(working_dir, 'check')
+        # do model averaging
+        if 'avgmodel' in cfg_infr:
+            checkpoint, suffix_model = model_average(
+                setting=cfg_infr['avgmodel'],
+                checkdir=checkdir,
+                returnifexist=True
+            )
         else:
-            # model averaging
-            checkpoint, suffix_avgmodel = model_average(
-                setting=inference_settings.get(
-                    'avgmodel', {'mode': 'best', 'num': 1}),
-                checkdir=checkdir)
+            checkpoint = None
 
-            _hyper = readfromjson(f_hyper_settings)
-            _hyper['inference']['decode']['resume'] = checkpoint
-            dumpjson(_hyper, f_hyper_settings)
+        # infer
+        if 'infer' in cfg_infr:
+            # try to get inference:infer:option
+            assert 'bin' in cfg_infr['infer'], \
+                f"missing 'bin' in inference:infer: at {f_hyper}"
+            assert 'option' in cfg_infr['infer'], \
+                f"missing 'option' in inference:infer: at {f_hyper}"
 
-        checkExist('f', checkpoint)
-        decode_settings['resume'] = checkpoint
-        sys.stdout.write(fmt.format(
-            f"set 'resume' to {checkpoint}"))
+            infr_option = cfg_infr['infer']['option']
+            # find checkpoint
+            if infr_option.get('resume', None) is None:
+                # no avgmodel found, get the best checkpoint
+                if checkpoint is None:
+                    checkpoint, suffix_model = model_average(
+                        setting={'mode': 'best', 'num': 1},
+                        checkdir=checkdir,
+                        returnifexist=True
+                    )
+                # update config to file
+                _hyper = readfromjson(f_hyper)
+                _hyper['inference']['infer']['option']['resume'] = checkpoint
+                dumpjson(_hyper, f_hyper)
+                infr_option['resume'] = checkpoint
+                sys.stdout.write(fmt.format(
+                    f"set inference:infer:option:resume to {checkpoint}"))
+            else:
+                sys.stdout.write(fmt.format(
+                    "setting 'resume' in inference:infer:option would ignore the inference:avgmodel settings."))
+                checkpoint = infr_option['resume']
+                # rm dirname and '.pt'
+                suffix_model = os.path.basename(checkpoint)[:-3]
 
-        if 'config' not in decode_settings:
-            decode_settings['config'] = os.path.join(
-                args.expdir, 'config.json')
-            sys.stdout.write(fmt.format(
-                f"set 'config' to {decode_settings['config']}"))
-            checkExist('f', decode_settings['config'])
+            if 'config' not in infr_option:
+                infr_option['config'] = os.path.join(
+                    working_dir, 'config.json')
+                checkExist('f', infr_option['config'])
 
-        if 'tokenizer' not in decode_settings:
-            assert 'tokenizer' in hyper_settings, (
-                "\nyou should set at least one of:\n"
-                f"1. set 'tokenizer' and ['tokenizer']['location'] in {f_hyper_settings}\n"
-                f"2. set 'tokenizer' in ['inference']['decode'] in {f_hyper_settings}\n")
-            decode_settings['tokenizer'] = hyper_settings['tokenizer']['location']
-        if 'nj' not in decode_settings:
-            decode_settings['nj'] = os.cpu_count()
-            sys.stdout.write(fmt.format(
-                f"set 'nj' to {decode_settings['nj']}"))
-        if hyper_settings['topo'] == 'rnnt' and 'alpha' in decode_settings:
+            intfname = cfg_infr['infer']['bin']
+            # check tokenizer
+            if intfname != "cat.ctc.cal_logit":
+                if 'tokenizer' not in infr_option:
+                    assert hyper_cfg.get('tokenizer', {}).get('location', None) is not None, \
+                        (
+                        "\nyou should set at least one of:\n"
+                        f"1. set tokenizer:location ;\n"
+                        f"2. set inference:infer:option:tokenizer \n"
+                    )
+                    infr_option['tokenizer'] = hyper_cfg['tokenizer']['location']
 
-            if 'lmdir' not in inference_settings and 'lm-config' not in decode_settings:
+            ignore_field_data = False
+            os.makedirs(f"{working_dir}/decode", exist_ok=True)
+            if intfname == 'cat.ctc.cal_logit':
+                if 'input_scp' in infr_option:
+                    ignore_field_data = True
+
+                if 'output_dir' not in infr_option:
+                    assert not ignore_field_data
+                    infr_option['output_dir'] = os.path.join(
+                        working_dir, 'decode/{}')
+                    sys.stdout.write(fmt.format(
+                        f"set inference:infer:option:output_dir to {infr_option['output_dir']}"))
+            elif intfname in ['cat.ctc.decode', 'cat.rnnt.decode']:
+                if 'input_scp' in infr_option:
+                    ignore_field_data = True
+                if 'output_prefix' not in infr_option:
+                    topo = intfname.split('.')[1]
+                    assert not ignore_field_data, f"error: seem you forget to set 'output_prefix'"
+                    prefix = f"{topo}-{infr_option.get('beam_size', 'dft')}"
+                    # set output format
+                    a = infr_option.get('alpha', 0)
+                    b = infr_option.get('beta', 0)
+                    if not (a == 0 and b == 0):
+                        prefix += f'_elm-a{a}b{b}'
+                    if topo == 'rnnt':
+                        ilmw = infr_option.get('ilm_weight', 0)
+                        if ilmw != 0:
+                            prefix += f'_ilm{ilmw}'
+                    infr_option['output_prefix'] = os.path.join(
+                        working_dir,
+                        f"decode/{prefix}"+"_{}"
+                    )
+            else:
+                ignore_field_data = True
                 sys.stderr.write(
-                    "\n"
-                    "To use external LM with RNN-T topo, at least one option is required:\n"
-                    "  1 (higer priority): set 'lmdir' in field:inference ;\n"
-                    "  2: set 'lm-config' (and 'lm-check', optional) in field:inference:decode\n\n")
-                exit(1)
+                    f"warning: interface '{intfname}' only support handcrafted execution.\n")
 
-            if 'beta' in decode_settings:
-                beta_suffix = f"-{decode_settings['beta']}"
+            import importlib
+            interface = importlib.import_module(intfname)
+            assert hasattr(interface, 'main'), \
+                f"{intfname} module does not have method main()"
+            assert hasattr(interface, '_parser'), \
+                f"{intfname} module does not have method _parser()"
+            if ignore_field_data:
+                interface.main(get_args(
+                    infr_option,
+                    interface._parser()
+                ))
             else:
-                beta_suffix = ''
-            if 'lmdir' in inference_settings:
-                lmdir = inference_settings['lmdir']
-                checkExist('d', lmdir)
-                decode_settings['lm-config'] = os.path.join(
-                    lmdir, 'config.json')
-                checkExist('f', decode_settings['lm-config'])
-                decode_settings['lm-check'] = os.path.join(
-                    lmdir, 'check/bestckpt.pt')
-                sys.stdout.write(fmt.format(
-                    f"set 'lm-config' to {decode_settings['lm-config']}"))
-                sys.stdout.write(fmt.format(
-                    f"set 'lm-check' to {decode_settings['lm-check']}"))
+                assert 'data' in hyper_cfg, f"missing 'data' at {f_hyper}"
+                assert 'test' in hyper_cfg[
+                    'data'], f"missing 'test' in data: at {f_hyper}"
 
-            suffix_lm = f"fusion-{decode_settings['alpha']}{beta_suffix}"
+                testsets = hyper_cfg['data']['test']
+                if isinstance(testsets, str):
+                    testsets = [testsets]
+                f_scps = [datainfo[_set]['scp'] for _set in testsets]
+                checkExist('f', f_scps)
 
-        elif hyper_settings['topo'] == 'ctc' and 'lm-path' in decode_settings:
-            checkExist('f', decode_settings['lm-path'])
-            if 'alpha' in decode_settings:
-                alpha = str(decode_settings['alpha'])
-            else:
-                alpha = 'default'
-            if 'beta' in decode_settings:
-                beta = str(decode_settings['beta'])
-            else:
-                beta = 'default'
-            suffix_lm = f"lm-fusion-{alpha}-{beta}"
+                running_option = infr_option.copy()
+                for _set, scp in zip(testsets, f_scps):
+                    for k in infr_option:
+                        if isinstance(infr_option[k], str) and '{}' in infr_option[k]:
+                            running_option[k] = infr_option[k].format(_set)
+                            sys.stdout.write(fmt.format(
+                                f"{_set}: {k} -> {running_option[k]}"))
+                    running_option['input_scp'] = scp
+                    if intfname in ['cat.ctc.decode', 'cat.rnnt.decode']:
+                        if os.path.isfile(running_option['output_prefix']):
+                            sys.stdout.write(fmt.format(
+                                f"{running_option['output_prefix']} exists, skip."))
+                            continue
+
+                    # FIXME: this canonot be spawned via mp_spawn, otherwise error would be raised
+                    #        possibly due to the usage of mp.Queue
+                    interface.main(get_args(
+                        running_option,
+                        interface._parser()
+                    ))
         else:
-            suffix_lm = "nolm"
-
-        if 'output_prefix' not in decode_settings:
-            decodedir = os.path.join(args.expdir, 'decode')
-            os.makedirs(decodedir, exist_ok=True)
-            if hyper_settings['topo'] == 'rnnt':
-                f_text = f"rnnt-{decode_settings['beam-size']}_{suffix_lm}_{suffix_avgmodel}"
-            else:
-                f_text = f"ctc-{decode_settings['beam-size']}_{suffix_lm}_{suffix_avgmodel}"
-            decode_out_prefix = os.path.join(decodedir, f_text)
-            sys.stdout.write(fmt.format(
-                f"set 'output_prefix' to {decode_out_prefix}"))
-        else:
-            decode_out_prefix = decode_settings['output_prefix']
-
-        testsets = hyper_settings['data']['test']
-        if isinstance(testsets, str):
-            testsets = [testsets]
-        f_scps = [datainfo[_set]['scp'] for _set in testsets]
-        checkExist('f', f_scps)
-
-        if hyper_settings['topo'] == 'rnnt':
-            from cat.rnnt.decode import DecoderParser
-            from cat.rnnt.decode import main as DecoderMain
-        elif hyper_settings['topo'] == 'ctc':
-            from cat.ctc.decode import DecoderParser
-            from cat.ctc.decode import main as DecoderMain
-        else:
-            raise RuntimeError(
-                f"Unknown topology: {hyper_settings['topo']}")
-
-        for _set, scp in zip(testsets, f_scps):
-            decode_settings['output_prefix'] = decode_out_prefix+f'_{_set}'
-            decode_settings['input_scp'] = scp
-            sys.stdout.write(fmt.format(
-                f"{_set} -> {decode_settings['output_prefix']}"))
-
-            # FIXME: this canonot be spawned via mp_spawn, otherwise error would be raised
-            #        possibly due to the usage of mp.Queue
-            if os.path.isfile(decode_settings['output_prefix']):
-                sys.stdout.write(fmt.format(
-                    f"{decode_settings['output_prefix']} exists, skip this one."))
-                continue
-
-            DecoderMain(updateNamespaceFromDict(
-                decode_settings, DecoderParser()))
+            infr_option = {}
 
         # compute wer/cer
-        from cat.utils import wer as wercal
-        assert 'er' in inference_settings, "missing 'er' in field:inference"
-        err_settings = inference_settings['er']
-        assert 'mode' in err_settings, "missing 'mode' in field:inference:er"
+        if 'er' in cfg_infr:
+            from cat.utils import wer as wercal
+            err_option = cfg_infr['er']
+            if 'hy' not in err_option:
+                assert infr_option.get('output_prefix', None) is not None, \
+                    "inference:er:hy is not set and cannot be resolved from inference:infer."
 
-        f_texts = [datainfo[_set]['trans'] for _set in testsets]
-        checkExist('f', f_texts)
+                err_option['hy'] = infr_option['output_prefix']
 
-        if 'oracle' not in err_settings:
-            err_settings['oracle'] = True
-            sys.stdout.write(fmt.format(f"set 'oracle' to True"))
+            if err_option.get('oracle', False):
+                err_option['hy'] = err_option['hy'] + '.nbest'
 
-        if 'stripid' not in err_settings:
-            err_settings['stripid'] = True
-            sys.stdout.write(fmt.format(f"set 'stripid' to True"))
-
-        err_settings.update({
-            'cer': True if err_settings['mode'] == 'cer' else False
-        })
-        del err_settings['mode']
-
-        for _set, _text in zip(testsets, f_texts):
-            err_settings.update({
-                'gt': _text,
-                'hy': decode_out_prefix+f'_{_set}'
-            })
-
-            if err_settings['oracle']:
-                err_settings['oracle'] = False
-                # compute non-oracle WER/CER
-                print(_set, end='\t')
-                mp_spawn(wercal.main, updateNamespaceFromDict(err_settings, wercal.WERParser(), [
-                    err_settings['gt'], err_settings['hy']]))
-                err_settings['oracle'] = True
-                err_settings['hy'] += '.nbest'
-
-            print(_set, end='\t')
-            mp_spawn(wercal.main, updateNamespaceFromDict(err_settings, wercal.WERParser(), [
-                err_settings['gt'], err_settings['hy']]))
+            if '{}' in err_option['hy']:
+                # input in format string
+                testsets = hyper_cfg.get('data', {}).get('test', [])
+                if isinstance(testsets, str):
+                    testsets = [testsets]
+                for _set in testsets:
+                    sys.stdout.write(f"{_set}\t")
+                    wercal.main(get_args(
+                        err_option,
+                        wercal._parser(),
+                        [
+                            datainfo[_set]['trans'],
+                            err_option['hy'].format(_set)
+                        ]
+                    ))
+                    sys.stdout.flush()
+            else:
+                assert 'gt' in err_option
+                wercal.main(get_args(
+                    err_option,
+                    wercal._parser(),
+                    [err_option['gt'], err_option['hy']]
+                ))

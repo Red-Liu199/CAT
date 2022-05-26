@@ -2,22 +2,24 @@
 # Author: Huahuan Zheng (maxwellzh@outlook.com)
 # MWER training of RNN-T
 
-from ..shared import Manager
-from ..shared import coreutils
 from ..shared.data import (
     KaldiSpeechDataset,
     sortedPadCollateASR
+)
+from ..shared import (
+    Manager,
+    coreutils
 )
 from .beam_search import BeamSearcher as RNNTDecoder
 from .train import build_model as rnnt_builder
 from .train import TransducerTrainer
 
-from warp_rnnt import rnnt_loss as RNNTLoss
 
 import os
 import jiwer
 import argparse
 from typing import *
+from warp_rnnt import rnnt_loss as RNNTLoss
 
 import torch
 import torch.distributed as dist
@@ -239,9 +241,18 @@ def build_model(cfg: dict, args: argparse.Namespace, dist: bool = True) -> MWERT
     return model
 
 
-if __name__ == "__main__":
-    parser = coreutils.basic_trainer_parser()
-    args = parser.parse_args()
+def _parser():
+    return coreutils.basic_trainer_parser("MWER Transducer Training")
+
+
+def main(args: argparse.Namespace = None):
+    if args is None:
+        parser = _parser()
+        args = parser.parse_args()
 
     coreutils.setup_path(args)
     coreutils.main_spawner(args, main_worker)
+
+
+if __name__ == "__main__":
+    main()

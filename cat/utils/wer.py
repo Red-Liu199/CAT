@@ -98,7 +98,10 @@ def run_oracle_wer_wrapper(args):
     return oracleWER(*args)
 
 
-def main(args: argparse.Namespace):
+def main(args: argparse.Namespace = None):
+    if args is None:
+        parser = _parser()
+        args = parser.parse_args()
 
     ground_truth = args.gt  # type:str
     hypothesis = args.hy  # type:str
@@ -109,8 +112,6 @@ def main(args: argparse.Namespace):
         l_gt = f_gt.readlines()
 
     if args.oracle:
-        # force to maintain ids
-        args.stripid = False
         with open(hypothesis, 'rb') as f_hy:
             # type: Dict[str, Dict[int, Tuple[float, str]]]
             l_hy = pickle.load(f_hy)
@@ -164,7 +165,10 @@ def main(args: argparse.Namespace):
 
         l_hy = sorted(l_hy, key=lambda item: item[0])
         l_gt = sorted(l_gt, key=lambda item: item[0])
-    elif args.stripid:
+    elif args.noid:
+        l_hy = processor(l_hy)
+        l_gt = processor(l_gt)
+    else:
         for i, s in enumerate(l_gt):
             key, g_s = s.split(maxsplit=1)
             l_gt[i] = (key, processor(g_s))
@@ -182,9 +186,6 @@ def main(args: argparse.Namespace):
         l_gt = sorted(l_gt, key=lambda item: item[0])
         l_hy = [seq for _, seq in l_hy]
         l_gt = [seq for _, seq in l_gt]
-    else:
-        l_hy = processor(l_hy)
-        l_gt = processor(l_gt)
 
     # multi-processing compute
     num_threads = max(min(num_lines//16, int(os.cpu_count())), 1)
@@ -231,12 +232,12 @@ def main(args: argparse.Namespace):
         'string': pretty_str}
 
 
-def WERParser():
+def _parser():
     parser = argparse.ArgumentParser('Compute WER/CER')
     parser.add_argument("gt", type=str, help="Ground truth sequences.")
     parser.add_argument("hy", type=str, help="Hypothesis of sequences.")
-    parser.add_argument("--stripid", action="store_true", default=False,
-                        help="Tell whether the sequence start with a id or not. When --oracle, this will be disable. Default: False")
+    parser.add_argument("--noid", action="store_true", default=False,
+                        help="Process the text as raw without utterance id. When --oracle, this will be ignored.")
     parser.add_argument("--cer", action="store_true", default=False,
                         help="Compute CER. Default: False")
     parser.add_argument("--force-cased", action="store_true",
@@ -247,7 +248,4 @@ def WERParser():
 
 
 if __name__ == "__main__":
-    parser = WERParser()
-    args = parser.parse_args()
-
-    main(args)
+    main()

@@ -27,7 +27,10 @@ import torch.multiprocessing as mp
 from torch.utils.data import DataLoader
 
 
-def main(args: argparse.Namespace):
+def main(args: argparse.Namespace = None):
+    if args is None:
+        parser = _parser()
+        args = parser.parse_args()
 
     if args.tokenizer is None or not os.path.isfile(args.tokenizer):
         raise FileNotFoundError(
@@ -166,7 +169,7 @@ def build_model(args: argparse.Namespace):
     return model
 
 
-def DecoderParser():
+def _parser():
     parser = coreutils.basic_trainer_parser(
         prog="CTC decoder.",
         training=False,
@@ -189,6 +192,4 @@ def DecoderParser():
 
 
 if __name__ == '__main__':
-    parser = DecoderParser()
-    args = parser.parse_args()
-    main(args)
+    main()

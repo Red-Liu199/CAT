@@ -30,7 +30,11 @@ from torch.utils.data import DataLoader
 from torch.cuda.amp import autocast
 
 
-def main(args):
+def main(args: argparse.Namespace = None):
+    if args is None:
+        parser = _parser()
+        args = parser.parse_args()
+
     if args.tokenizer is None or not os.path.isfile(args.tokenizer):
         raise FileNotFoundError(
             "Invalid tokenizer model location: {}".format(args.tokenizer))
@@ -244,8 +248,7 @@ def build_model(args, device) -> Tuple[torch.nn.Module, Union[torch.nn.Module, N
         return model, ext_lm_model
 
 
-def DecoderParser():
-
+def _parser():
     parser = coreutils.basic_trainer_parser(
         prog='RNN-Transducer decoder.',
         training=False
@@ -277,6 +280,4 @@ def DecoderParser():
 
 
 if __name__ == '__main__':
-    parser = DecoderParser()
-    args = parser.parse_args()
-    main(args)
+    main()

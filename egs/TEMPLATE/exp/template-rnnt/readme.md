@@ -13,7 +13,7 @@
 ### Result
 ```
 # failed to train RNN-T on yesno
-yesno   %SER 100.00 | %WER 87.71 [ 421 / 480, 0 ins, 420 del, 1 sub ]
+yesno   %SER 100.00 | %WER 75.42 [ 362 / 480, 0 ins, 358 del, 4 sub ]
 ```
 
 ### Monitor figure

@@ -12,8 +12,8 @@
 
 ### Result
 ```
-Test file: data/local-lm/ptb.test.txt -> ppl: 113.17
-Test file: data/local-lm/ptb.valid.txt -> ppl: 119.21
+Test file: data/local-lm/ptb.test.txt -> ppl: 137.15
+Test file: data/local-lm/ptb.valid.txt -> ppl: 143.47
 ```
 
 ### Monitor figure

@@ -14,5 +14,6 @@
             "use_all_vocab": true,
             "model_prefix": "sentencepiece/ptb-word/spm"
         }
-    }
+    },
+    "inference": {}
 }

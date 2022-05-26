@@ -37,7 +37,11 @@ import torch.multiprocessing as mp
 import torch
 
 
-def main(args):
+def main(args: argparse.Namespace = None):
+    if args is None:
+        parser = _parser()
+        args = parser.parse_args()
+
     assert os.path.isfile(
         args.nbestlist), f"N-best list file not found: {args.nbestlist}"
     assert args.tokenizer is not None, "You need to specify --tokenizer."
@@ -190,6 +194,8 @@ def main_worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_out: mp.
                 q_out.put((indiv, None), block=True)
 
             del batch
+
+    time.sleep(0.5)
     q_out.put(None, block=True)
 
 
@@ -205,7 +211,7 @@ def build_lm(f_config: str, f_check: str, device='cuda') -> AbsDecoder:
     return model
 
 
-def RescoreParser():
+def _parser():
     parser = coreutils.basic_trainer_parser(
         prog="Rescore with give n-best list and LM",
         training=False,
@@ -233,7 +239,4 @@ def RescoreParser():
 
 
 if __name__ == "__main__":
-    parser = RescoreParser()
-    args = parser.parse_args()
-
-    main(args)
+    main()

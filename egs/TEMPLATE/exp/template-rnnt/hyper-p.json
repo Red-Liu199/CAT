@@ -18,19 +18,23 @@
         }
     },
     "train": {
-        "amp": true,
-        "batch-size": 1,
-        "check-freq": 100,
-        "databalance": true
+        "bin": "cat.rnnt.train",
+        "option": {
+            "amp": true,
+            "batch_size": 4,
+            "check_freq": 50
+        }
     },
     "inference": {
-        "decode": {
-            "beam-size": 16,
-            "nj": 4,
-            "cpu": true
+        "infer": {
+            "bin": "cat.rnnt.decode",
+            "option": {
+                "beam_size": 16,
+                "cpu": true,
+                "nj": 4
+            }
         },
         "er": {
-            "mode": "wer",
             "oracle": false
         }
     }

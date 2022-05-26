@@ -25,7 +25,11 @@ import torch.multiprocessing as mp
 from torch.utils.data import DataLoader
 
 
-def main(args: argparse.Namespace):
+def main(args: argparse.Namespace = None):
+    if args is None:
+        parser = _parser()
+        args = parser.parse_args()
+
     for _path in args.evaluate:
         if not os.path.isfile(_path):
             raise FileNotFoundError(f"{_path} does not exist!")
@@ -176,10 +180,10 @@ def consume_worker(wsize: int, q: mp.Queue, args):
 
 
 def text2corpusbin(f_text: str, f_bin: str, tokenizer):
-    from ..utils.pipeline.asr import updateNamespaceFromDict
+    from ..utils.pipeline.asr import get_args
     from ..utils.data import pack_corpus as t2b
     t2b.main(
-        updateNamespaceFromDict(
+        get_args(
             {
                 'tokenizer': tokenizer,
                 'quiet': True
@@ -214,17 +218,19 @@ def build_model(args: argparse.Namespace, device):
     return model
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+def _parser():
+    parser = argparse.ArgumentParser(prog="Compute perplexity to evaluate LM.")
     parser.add_argument("config", type=str,
                         help="Path to the configuration file, usually 'path/to/config.json")
     parser.add_argument("--nj", type=int, default=-1)
-    parser.add_argument("-e", "--evaluate", type=str, nargs='+', required=True,
+    parser.add_argument("-e", "--evaluate", type=str, nargs='+',
                         help="Evaluate test sets. w/o --tokenizer, -e inputs are assumed to be CorpusDataset format binary data.")
     parser.add_argument("--tokenizer", type=str,
                         help="Use tokenizer to encode the evaluation sets. If passed, would take -e inputs as text files.")
     parser.add_argument("--resume", type=str,
                         help="Path to the checkpoint of NNLM, not required for N-gram LM.")
-    args = parser.parse_args()
+    return parser
 
-    main(args)
+
+if __name__ == "__main__":
+    main()

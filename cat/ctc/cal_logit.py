@@ -26,9 +26,12 @@ import torch.multiprocessing as mp
 from torch.utils.data import DataLoader
 
 
-def main(args: argparse.Namespace):
-    if not os.path.isdir(args.output_dir):
-        raise RuntimeError(f"{args.output_dir} is not a directory.")
+def main(args: argparse.Namespace = None):
+    if args is None:
+        parser = _parser()
+        args = parser.parse_args()
+
+    os.makedirs(args.output_dir, exist_ok=True)
 
     if args.nj == -1:
         world_size = os.cpu_count()
@@ -108,7 +111,7 @@ def build_model(args: argparse.Namespace):
     return model
 
 
-def DecoderParser():
+def _parser():
     parser = coreutils.basic_trainer_parser(
         prog="CTC logit generator.",
         training=False,
@@ -122,6 +125,4 @@ def DecoderParser():
 
 
 if __name__ == '__main__':
-    parser = DecoderParser()
-    args = parser.parse_args()
-    main(args)
+    main()

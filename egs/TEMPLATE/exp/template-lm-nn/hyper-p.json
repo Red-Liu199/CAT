@@ -17,13 +17,15 @@
             "vocab_size": 10000,
             "use_all_vocab": true,
             "model_prefix": "sentencepiece/ptb-word/spm"
-        },
-        "location": "exp/template-lm-nn/tokenizer.tknz"
+        }
     },
     "train": {
-        "batch_size": 64,
-        "amp": true,
-        "check-freq": 500
+        "bin": "cat.lm.train",
+        "option": {
+            "amp": true,
+            "batch_size": 64,
+            "check-freq": 100
+        }
     },
     "inference": {
         "avgmodel": {

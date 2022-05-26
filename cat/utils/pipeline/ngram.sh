@@ -14,8 +14,8 @@ set -e
 ("--text-corpus", action="store_true", help="Use on-the-fly encoding for text corpus.")
 ("--prune", type=str, default="", nargs='*',
     help="Prune options passed to KenLM lmplz executable. default: ")
-("--type", type=str, default="trie", choices=['trie', 'probing'],
-    help="Binary file structure. default: trie")
+("--type", type=str, default="probing", choices=['trie', 'probing'],
+    help="Binary file structure. default: probing")
 PARSER
 eval $(python utils/parseopt.py $0 $*)
 
