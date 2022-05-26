@@ -385,9 +385,6 @@ def TrainNNModel(
     if 'dir' not in training_settings:
         training_settings['dir'] = args.expdir
         sys.stdout.write(promt.format(f"set 'dir' to {args.expdir}"))
-    if 'workers' not in training_settings:
-        training_settings['workers'] = 2
-        sys.stdout.write(promt.format(f"set 'workers' to 2"))
     if 'dist-url' not in training_settings:
         training_settings['dist-url'] = f"tcp://localhost:{get_free_port()}"
         sys.stdout.write(promt.format(

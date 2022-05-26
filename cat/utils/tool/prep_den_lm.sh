@@ -9,7 +9,7 @@ set -e
 ("-ngram-order", type=int, default=4, help="N-gram LM order.")
 ("-no-prune-ngram-order", type=int, default=3, help="Passed to chain-est-phone-lm tool.")
 PARSER
-opts=$(python utils/parseopt.py $0 $*) && eval $opts || exit 1
+eval $(python utils/parseopt.py $0 $*)
 
 if [ $kaldi_root != "None" ]; then
     export KALDI_ROOT=$kaldi_root

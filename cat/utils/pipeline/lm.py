@@ -60,7 +60,7 @@ if __name__ == "__main__":
         if not args.silent:
             print("{0} {1} {0}".format("="*20, "Stage 2 Pickle data"))
         fmt = "# Pickle data # {}\n" if not args.silent else ""
-        from cat.utils.data import transText2Bin as t2b
+        from cat.utils.data import pack_corpus as t2b
 
         hyper_settings = readfromjson(f_hyper_settings)
         assert 'data' in hyper_settings, f"missing 'data' in hyper-setting file {f_hyper_settings}"

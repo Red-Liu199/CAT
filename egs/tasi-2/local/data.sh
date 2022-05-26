@@ -14,7 +14,7 @@ set -u
 ("-subsets-fbank", type=str, nargs="+", default=[],
     help="Subset(s) for extracting FBanks. Default: all")
 PARSER
-opts=$(python utils/parseopt.py $0 $*) && eval $opts || exit 1
+eval $(python utils/parseopt.py $0 $*)
 
 # Extract 80-dim FBank features
 python local/extract_meta.py \

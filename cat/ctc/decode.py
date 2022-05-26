@@ -40,42 +40,27 @@ def main(args: argparse.Namespace):
     assert world_size > 0
     args.world_size = world_size
 
-    cachedir = '/tmp'
-    if not os.access(cachedir, os.W_OK):
-        raise PermissionError(f"Permission denied for writing to {cachedir}")
-    fmt = os.path.join(cachedir, coreutils.randstr()+r".{}.tmp")
-
     try:
         mp.set_start_method('spawn')
     except RuntimeError as re:
         print(re)
 
-    q = mp.Queue(maxsize=world_size)
-    producer = mp.Process(target=dataserver, args=(args, q))
+    q_data = mp.Queue(maxsize=1)
+    producer = mp.Process(target=dataserver, args=(args, q_data))
     producer.start()
+
+    q_out = mp.Queue(maxsize=1)
+    consumer = mp.Process(target=datawriter, args=(args, q_out))
+    consumer.start()
 
     model = build_model(args)
     model.share_memory()
-    mp.spawn(worker, nprocs=world_size, args=(args, q, fmt, model))
+    mp.spawn(worker, nprocs=world_size, args=(args, q_data, q_out, model))
 
     producer.join()
-    del q
-    with open(args.output_prefix, 'w') as fo:
-        for i in range(world_size):
-            with open(fmt.format(i), 'r') as fi:
-                fo.write(fi.read())
-            os.remove(fmt.format(i))
-
-    with open(args.output_prefix+'.nbest', 'wb') as fo:
-        all_nbest = {}
-        for i in range(world_size):
-            partial_bin = fmt.format(i) + '.nbest'
-            with open(partial_bin, 'rb') as fi:
-                partial_nbest = pickle.load(fi)  # type: dict
-
-            all_nbest.update(partial_nbest)
-            os.remove(partial_bin)
-        pickle.dump(all_nbest, fo)
+    consumer.join()
+    del q_data
+    del q_out
 
 
 def dataserver(args, q: mp.Queue):
@@ -93,7 +78,7 @@ def dataserver(args, q: mp.Queue):
                 k.share_memory_()
         q.put(batch, block=True)
 
-    for _ in range(args.world_size*2):
+    for _ in range(args.world_size+1):
         q.put(None, block=True)
     t_dur = time.time() - t_beg
 
@@ -101,7 +86,29 @@ def dataserver(args, q: mp.Queue):
         t_dur, t_dur*args.world_size / n_frames * 100))
 
 
-def worker(pid: int, args: argparse.Namespace, q: mp.Queue, fmt: str, model: AbsEncoder):
+def datawriter(args, q: mp.Queue):
+    cnt_done = 0
+    nbest = {}
+    with open(args.output_prefix, 'w') as fo:
+        while True:
+            # type: Tuple[str, Dict[int, Tuple[float, str]]]
+            nbestlist = q.get(block=True)
+            if nbestlist is None:
+                cnt_done += 1
+                if cnt_done == args.world_size:
+                    break
+                continue
+            key, content = nbestlist
+            nbest[key] = content
+            del nbestlist
+
+            fo.write(f"{key}\t{content[0][1]}\n")
+
+    with open(args.output_prefix+'.nbest', 'wb') as fo:
+        pickle.dump(nbest, fo)
+
+
+def worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_out: mp.Queue, model: AbsEncoder):
     torch.set_num_threads(args.thread_per_woker)
 
     tokenizer = tknz.load(args.tokenizer)
@@ -121,12 +128,11 @@ def worker(pid: int, args: argparse.Namespace, q: mp.Queue, fmt: str, model: Abs
             labels, model_path=args.lm_path, alpha=args.alpha, beta=args.beta,
             beam_width=args.beam_size, num_processes=1, is_token_based=True)
 
-    local_writer = fmt.format(pid)
     # {'uid': {0: (-10.0, 'a b c'), 1: (-12.5, 'a b c d')}}
     nbest = {}  # type: Dict[str, Dict[int, Tuple[float, str]]]
-    with torch.no_grad(), open(local_writer, 'w') as fi:
+    with torch.no_grad():
         while True:
-            batch = q.get(block=True)
+            batch = q_data.get(block=True)
             if batch is None:
                 break
             key, x, x_lens = batch
@@ -139,16 +145,15 @@ def worker(pid: int, args: argparse.Namespace, q: mp.Queue, fmt: str, model: Abs
             # -log(p) -> log(p)
             beam_scores = -beam_scores
 
-            nbest[key] = {
-                bid: (score.item(), tokenizer.decode(hypo[:_len].tolist()))
-                for bid, (score, hypo, _len) in enumerate(zip(beam_scores[0], beam_results[0], out_lens[0]))
-            }
-            fi.write("{} {}\n".format(key, nbest[key][0][1]))
-            del batch
+            q_out.put(
+                (key, {
+                    bid: (score.item(), tokenizer.decode(
+                        hypo[:_len].tolist()))
+                    for bid, (score, hypo, _len) in enumerate(zip(beam_scores[0], beam_results[0], out_lens[0]))
+                }), block=True)
 
-    with open(f"{local_writer}.nbest", 'wb') as fo:
-        pickle.dump(nbest, fo)
-    q.get()
+            del batch
+    q_out.put(None, block=True)
 
 
 def build_model(args: argparse.Namespace):

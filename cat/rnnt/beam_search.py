@@ -237,7 +237,7 @@ class BeamSearcher():
                 n_batches, fill_value=n_max_frame_length)
         else:
             frame_lens = frame_lens.clone()
-            n_max_frame_length = frame_lens.max()
+            n_max_frame_length = frame_lens.max().int()
 
         Beams = [
             [

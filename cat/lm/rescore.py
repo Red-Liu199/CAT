@@ -31,7 +31,6 @@ import argparse
 from tqdm import tqdm
 from typing import *
 
-
 from torch.cuda.amp import autocast
 from torch.utils.data import DataLoader
 import torch.multiprocessing as mp
@@ -59,48 +58,32 @@ def main(args):
         world_size = torch.cuda.device_count()
     args.world_size = world_size
 
-    cachedir = '/tmp'
-    assert os.path.isdir(cachedir), f"Cache directory not found: {cachedir}"
-    if not os.access(cachedir, os.W_OK):
-        raise PermissionError(f"Permission denied for writing to {cachedir}")
-    fmt = os.path.join(cachedir, coreutils.randstr()+r".{}.tmp")
-
     try:
         mp.set_start_method('spawn')
     except RuntimeError as re:
         if args.verbose:
             print(re)
-    q = mp.Queue(maxsize=world_size)
-    producer = mp.Process(target=dataserver, args=(args, q))
+    q_data = mp.Queue(maxsize=1)
+    producer = mp.Process(target=dataserver, args=(args, q_data))
     producer.start()
+
+    q_out = mp.Queue(maxsize=1)
+    consumer = mp.Process(target=datawriter, args=(args, q_out))
+    consumer.start()
 
     if args.cpu:
         model = build_lm(args.config, args.resume, 'cpu')
         model.share_memory()
         mp.spawn(main_worker, nprocs=world_size,
-                 args=(args, q, fmt, model))
+                 args=(args, q_data, q_out, model))
     else:
         mp.spawn(main_worker, nprocs=world_size,
-                 args=(args, q, fmt))
+                 args=(args, q_data, q_out))
     producer.join()
-    del q
+    consumer.join()
 
-    with open(args.output, 'w') as fo:
-        for worker in range(world_size):
-            path = fmt.format(worker)
-            with open(path, 'r') as fi:
-                fo.write(fi.read())
-            os.remove(path)
-
-    if args.save_lm_nbest is not None:
-        lm_nbest = {}
-        with open(args.save_lm_nbest, 'wb') as fo:
-            for worker in range(world_size):
-                path = fmt.format(worker) + '.lm'
-                with open(path, 'rb') as fi:
-                    lm_nbest.update(pickle.load(fi))
-                os.remove(path)
-            pickle.dump(lm_nbest, fo)
+    del q_data
+    del q_out
 
 
 def dataserver(args, q: mp.Queue):
@@ -121,17 +104,43 @@ def dataserver(args, q: mp.Queue):
                 k.share_memory_()
         q.put(batch, block=True)
 
-    for i in range(args.world_size*2):
+    # put one more None, so that it guarantees
+    # ... all workers get the exit flag.
+    for _ in range(args.world_size+1):
         q.put(None, block=True)
+
     if args.verbose:
         print("Time = {:.2f} s".format(time.time() - t_beg))
 
 
-def main_worker(pid: int, args: argparse.Namespace, q: mp.Queue, fmt: str = "rescore.{}.tmp", model=None):
+def datawriter(args, q: mp.Queue):
+    nbest = {}
+    cnt_done = 0
+    save_also_nbest = (args.save_lm_nbest is not None)
+
+    with open(args.output, 'w') as fo:
+        while True:
+            data = q.get(block=True)
+            if data is None:
+                cnt_done += 1
+                if cnt_done == args.world_size:
+                    break
+                continue
+
+            if save_also_nbest:
+                nbest.update(data[1])
+            for k, (_, t) in data[0].items():
+                fo.write(f"{k}\t{t}\n")
+            del data
+    if save_also_nbest:
+        with open(args.save_lm_nbest, 'wb') as fo:
+            pickle.dump(nbest, fo)
+
+
+def main_worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_out: mp.Queue, model=None):
 
     args.pid = pid
     args.rank = pid
-    world_size = args.world_size
 
     if args.cpu:
         device = 'cpu'
@@ -143,13 +152,12 @@ def main_worker(pid: int, args: argparse.Namespace, q: mp.Queue, fmt: str = "res
     if model is None:
         model = build_lm(args.config, args.resume, device)
 
-    writer = fmt.format(pid)
     lm_nbest = {}   # type: Dict[str, Dict[int, Tuple[float, str]]]
     # rescoring
-    with torch.no_grad(), \
-            autocast(enabled=(True if device != 'cpu' else False)), open(writer, 'w') as fo:
+    with torch.no_grad(),\
+            autocast(enabled=(True if device != 'cpu' else False)):
         while True:
-            batch = q.get(block=True)
+            batch = q_data.get(block=True)
             if batch is None:
                 break
             keys, texts, scores, in_toks, mask = batch
@@ -160,13 +168,6 @@ def main_worker(pid: int, args: argparse.Namespace, q: mp.Queue, fmt: str = "res
             in_lens = in_toks.size(1) - mask.sum(dim=1)
             log_lm_probs = model.score(in_toks, dummy_targets, in_lens)
 
-            if args.save_lm_nbest is not None:
-                for _key, _trans, _score in zip(keys, texts, log_lm_probs):
-                    nid, okey = _key.split('-', maxsplit=1)
-                    if okey not in lm_nbest:
-                        lm_nbest[okey] = {}
-                    lm_nbest[okey][int(nid)] = (_score.item(), _trans)
-
             final_score = scores + args.alpha * log_lm_probs.cpu() + args.beta * in_lens
             indiv = {}
             for k, t, s in zip(keys, texts, final_score):
@@ -175,14 +176,21 @@ def main_worker(pid: int, args: argparse.Namespace, q: mp.Queue, fmt: str = "res
                     indiv[okey] = (s, t)
                 elif indiv[okey][0] < s:
                     indiv[okey] = (s, t)
-            for k, (s, t) in indiv.items():
-                fo.write(f"{k} {t}\n")
-            del batch
 
-    if args.save_lm_nbest is not None:
-        with open(writer+'.lm', 'wb') as fo:
-            pickle.dump(lm_nbest, fo)
-    q.get()
+            if args.save_lm_nbest is not None:
+                for _key, _trans, _score in zip(keys, texts, log_lm_probs):
+                    nid, okey = _key.split('-', maxsplit=1)
+                    if okey not in lm_nbest:
+                        lm_nbest[okey] = {}
+                    lm_nbest[okey][int(nid)] = (_score.item(), _trans)
+
+                q_out.put((indiv, lm_nbest), block=True)
+                lm_nbest.clear()
+            else:
+                q_out.put((indiv, None), block=True)
+
+            del batch
+    q_out.put(None, block=True)
 
 
 def build_lm(f_config: str, f_check: str, device='cuda') -> AbsDecoder:

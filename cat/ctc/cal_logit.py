@@ -42,7 +42,7 @@ def main(args: argparse.Namespace):
     except RuntimeError as re:
         print(re)
 
-    q = mp.Queue(maxsize=world_size)
+    q = mp.Queue(maxsize=1)
     producer = mp.Process(target=dataserver, args=(args, q))
     producer.start()
 
@@ -68,7 +68,7 @@ def dataserver(args, q: mp.Queue):
                 k.share_memory_()
         q.put(batch, block=True)
 
-    for _ in range(args.world_size*2):
+    for _ in range(args.world_size+1):
         q.put(None, block=True)
     t_dur = time.time() - t_beg
 
@@ -96,7 +96,6 @@ def worker(pid: int, args: argparse.Namespace, q: mp.Queue, model: AbsEncoder):
 
     kaldiio.save_ark(os.path.join(
         args.output_dir, f"decode.{pid+1}.ark"), results)
-    q.get()
 
 
 def build_model(args: argparse.Namespace):

@@ -57,7 +57,7 @@ def main(args: argparse.Namespace):
         mp.set_start_method('spawn')
     except RuntimeError as re:
         print(re)
-    q = mp.Queue(maxsize=world_size)
+    q = mp.Queue(maxsize=1)
     consumer = mp.Process(target=consume_worker, args=(world_size, q, args))
     consumer.start()
 
@@ -107,7 +107,7 @@ def evaluate_ngram(pid: int, wsize: int, q: mp.Queue, args: argparse.Namespace, 
             log_probs += scores
             n_tokens += inputs.size(0)
         output.append((log_probs.item(), n_tokens))
-    q.put(output)
+    q.put(output, block=True)
 
 
 @torch.no_grad()
@@ -154,7 +154,6 @@ def evaluate_nnlm(pid: int, wsize: int, q: mp.Queue, args: argparse.Namespace, t
         output.append((-nll.item(), n_tokens))
 
     q.put(output, block=True)
-    # time.sleep(10)
 
 
 def consume_worker(wsize: int, q: mp.Queue, args):
@@ -178,7 +177,7 @@ def consume_worker(wsize: int, q: mp.Queue, args):
 
 def text2corpusbin(f_text: str, f_bin: str, tokenizer):
     from ..utils.pipeline.asr import updateNamespaceFromDict
-    from ..utils.data import transText2Bin as t2b
+    from ..utils.data import pack_corpus as t2b
     t2b.main(
         updateNamespaceFromDict(
             {

@@ -17,7 +17,7 @@ set -u
 ("-subsets-sp", type=str, nargs="+", choices=["train", "dev", "test"],
     default=["train"], help="Subset(s) for conducting speed perturbation. Default: ['train']")
 PARSER
-opts=$(python utils/parseopt.py $0 $*) && eval $opts || exit 1
+eval $(python utils/parseopt.py $0 $*)
 
 opt_sp="1.0"
 [ "$sp" != "None" ] && (

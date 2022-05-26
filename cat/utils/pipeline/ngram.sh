@@ -17,7 +17,7 @@ set -e
 ("--type", type=str, default="trie", choices=['trie', 'probing'],
     help="Binary file structure. default: trie")
 PARSER
-opts=$(python utils/parseopt.py $0 $*) && eval $opts || exit 1
+eval $(python utils/parseopt.py $0 $*)
 
 export PATH=$PATH:../../src/bin/
 [ ! $(command -v lmplz) ] && echo "command not found: lmplz" && exit 1
@@ -44,7 +44,7 @@ export arpa_out="/tmp/$(
 
 # we need to manually rm the bos/eos/unk since lmplz tool would add them
 # and kenlm not support <unk> in corpus,
-# ...so in the `utils/data/readtextbin.py` script we convert 0(<bos>, <eos>) and 1 (<unk>) to white space
+# ...so in the `utils/data/corpus2index.py` script we convert 0(<bos>, <eos>) and 1 (<unk>) to white space
 # ...if your tokenizer set different bos/eos/unk id, you should make that mapping too.
 export tokenizer="$(cat $dir/hyper-p.json |
     python -c "import sys,json;print(json.load(sys.stdin)['tokenizer']['location'])")"
@@ -58,8 +58,9 @@ if [ $text_corpus == "True" ]; then
         [ ! -f $x ] && echo "No such training corpus: '$x'" && exit 1
     done
 
-    python utils/data/readtextbin.py $f_text -o $text_out \
-        -t --tokenizer $tokenizer --map 0: 1:
+    python utils/data/corpus2index.py $f_text \
+        -t --tokenizer $tokenizer --map 0: 1: \
+        >$text_out
 else
     textbin=$dir/lmbin/train.pkl
     if [ ! -f $textbin ]; then
@@ -69,8 +70,8 @@ else
     fi
 
     [ ! -f $textbin ] && echo "No binary text file: '$textbin'" && exit 1
-    python utils/data/readtextbin.py $textbin \
-        -o $text_out --map 0: 1:
+    python utils/data/corpus2index.py $textbin \
+        --map 0: 1: >$text_out
 fi
 
 train_cmd="lmplz <$text_out -o $order $prune -S 20%"

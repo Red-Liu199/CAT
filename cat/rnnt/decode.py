@@ -35,7 +35,7 @@ def main(args):
         raise FileNotFoundError(
             "Invalid tokenizer model location: {}".format(args.tokenizer))
     if args.cpu or not torch.cuda.is_available():
-        if not args.silience:
+        if not args.silent:
             print("> Using CPU")
         args.cpu = True
 
@@ -53,10 +53,10 @@ def main(args):
     except RuntimeError as re:
         print(re)
 
-    q_data_producer = mp.Queue(maxsize=world_size)
-    q_nbest_saver = mp.Queue(maxsize=world_size)
+    q_data_producer = mp.Queue(maxsize=1)
+    q_nbest_saver = mp.Queue(maxsize=1)
     producer = mp.Process(target=dataserver, args=(args, q_data_producer))
-    consumer = mp.Process(target=consumer_output, args=(args, q_nbest_saver))
+    consumer = mp.Process(target=datawriter, args=(args, q_nbest_saver))
     producer.start()
     consumer.start()
 
@@ -89,7 +89,7 @@ def dataserver(args, q: mp.Queue):
     del len_match, testset_ls
     testloader = DataLoader(
         testset,
-        batch_size=8,
+        batch_size=min(8, len(testset)//args.world_size),
         shuffle=False,
         num_workers=1,
         collate_fn=sortedScpPadCollate())
@@ -102,7 +102,7 @@ def dataserver(args, q: mp.Queue):
         nbest = {}
 
     t_beg = time.time()
-    for batch in tqdm(testloader, desc="RNN-T decode", total=len(testloader), disable=(args.silience), leave=False):
+    for batch in tqdm(testloader, desc="RNN-T decode", total=len(testloader), disable=(args.silent), leave=False):
         key = batch[0][0]
         """
         NOTE: 
@@ -116,16 +116,16 @@ def dataserver(args, q: mp.Queue):
         if key not in nbest:
             q.put(batch, block=True)
 
-    for i in range(args.world_size*2):
+    for i in range(args.world_size+1):
         q.put(None, block=True)
     t_dur = time.time() - t_beg
 
-    if not args.silience:
+    if not args.silent:
         print("Time = {:.2f} s | RTF = {:.2f} ".format(
             t_dur, t_dur*args.world_size / n_frames * 100))
 
 
-def consumer_output(args, q: mp.Queue):
+def datawriter(args, q: mp.Queue):
     """Get data from queue and save to file."""
     def load_and_save(_nbest: dict):
         if os.path.isfile(f_nbest):
@@ -156,7 +156,7 @@ def consumer_output(args, q: mp.Queue):
     with open(args.output_prefix, 'w') as fo:
         for k, hypo_items in nbest.items():
             best_hypo = max(hypo_items.values(), key=lambda item: item[0])[1]
-            fo.write(f"{k} {best_hypo}\n")
+            fo.write(f"{k}\t{best_hypo}\n")
 
     del load_and_save
 
@@ -210,8 +210,7 @@ def main_worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_nbest: m
             nbest = {}
             del batch
 
-    q_nbest.put(None)
-    q_data.get()
+    q_nbest.put(None, block=True)
 
 
 def build_model(args, device) -> Tuple[torch.nn.Module, Union[torch.nn.Module, None]]:
@@ -273,7 +272,7 @@ def DecoderParser():
     parser.add_argument("--nj", type=int, default=-1)
     parser.add_argument("--thread-per-woker", type=int, default=1)
     parser.add_argument("--cpu", action='store_true', default=False)
-    parser.add_argument("--silience", action='store_true', default=False)
+    parser.add_argument("--silent", action='store_true', default=False)
     return parser
 
 

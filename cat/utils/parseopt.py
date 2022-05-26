@@ -8,12 +8,7 @@ NOTE:
         in the default of --output, '$input' will be replaced by <input>;
         but note that you can't refer to '$output' in input parser, where
         the '$output' is not initialized yet.
-    3. The line 
-        'opts=$(python utils/parseopt.py $0 $*) && eval $opts || exit 1' in
-        shell script cannot be replace to 
-        'eval $(python utils/parseopt.py $0 $*) || exit 1'
-        the latter would produce some unexpected prompt with 'example.sh -h'
-    4. To flag the start of parser, following statements are all allowed:
+    3. To flag the start of parser, following statements are all allowed:
         4.1 <<"PARSER"  4.2 <<'PARSER'  4.3 <<PARSER  4.4 << "PARSER" ...
 
 Usage: in shell script
@@ -23,12 +18,24 @@ example.sh:
 ("-o", "--output", type=str, default="${input}_out",
     help="Output file. Default: <input>_out")
 PARSER
-opts=$(python utils/parseopt.py $0 $*) && eval $opts || exit 1
+eval $(python utils/parseopt.py $0 $*)
 """
 
 import re
 import sys
 import argparse
+
+
+class WrappedArgParser(argparse.ArgumentParser):
+    # re-locate the help information to error
+    def print_help(self, file=None) -> None:
+        if file is None:
+            return super().print_help(sys.stderr)
+        elif file == sys.stdout:
+            return
+        else:
+            return super().print_help(file)
+
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
@@ -50,9 +57,9 @@ if __name__ == "__main__":
     parserinfo = parser_pattern.findall(s)
     match = argument_pattern.findall(parserinfo[0])
 
-    parser = argparse.ArgumentParser(prog=script)
+    parser = WrappedArgParser(prog=script)
     for arg in match:
-        # NOTE: 
+        # NOTE:
         # This is potential dangerous. It's your duty to ensure the safety.
         eval(f"parser.add_argument({arg})")
 
@@ -63,9 +70,7 @@ if __name__ == "__main__":
                 value = f"\"{' '.join([str(x) for x in value])}\""
             sys.stdout.write(f"export {arg}={value}; ")
     except SystemExit as se:
-        # re-locate the help information to error
-        if se.code == 0:
-            parser.print_help(sys.stderr)
+        sys.stdout.write("exit 1;")
         sys.exit(1)
     else:
         sys.exit(0)

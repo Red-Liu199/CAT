@@ -1,9 +1,15 @@
 
+train command:
+
+```bash
+utils/pipeline/ngram.sh exp/template-lm-ngram --text-corpus -o 3 --type probing
+```
+
 property:
 
 - prune: 
-- type:  trie
-- size:  6.6MB
+- type:  probing
+- size:  17MB
 
 perplexity:
 

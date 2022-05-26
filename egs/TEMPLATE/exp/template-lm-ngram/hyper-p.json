@@ -1,7 +1,6 @@
 {
     "data": {
         "train": "data/local-lm/ptb.train.txt",
-        "dev": "data/local-lm/ptb.valid.txt",
         "test": [
             "data/local-lm/ptb.valid.txt",
             "data/local-lm/ptb.test.txt"

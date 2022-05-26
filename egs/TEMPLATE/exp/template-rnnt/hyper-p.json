@@ -9,24 +9,24 @@
     "tokenizer": {
         "type": "SentencePieceTokenizer",
         "property": {
-            "model_type": "word",
+            "model_type": "char",
             "use_all_vocab": true,
             "bos_id": 0,
             "unk_id": 1,
             "model_prefix": "sentencepiece/yesno_word/spm",
-            "vocab_size": 4
+            "vocab_size": 8
         }
     },
     "train": {
         "amp": true,
-        "batch-size": 4,
-        "check-freq": 50,
+        "batch-size": 1,
+        "check-freq": 100,
         "databalance": true
     },
     "inference": {
         "decode": {
-            "beam-size": 4,
-            "nj": 1,
+            "beam-size": 16,
+            "nj": 4,
             "cpu": true
         },
         "er": {
