@@ -16,18 +16,20 @@ set -e
 # change dir to a different one to test whether cat module has been installed.
 $(cd egs && python -c "import cat" >/dev/null 2>&1) || (
     python -m pip install -r requirements.txt || exit 1
+
+    # check installation
+    $(cd egs && python -c "import cat") >/dev/null
 )
 echo "install module:cat and its requirements done."
 
 # install ctcdecode is annoying...
 $(python -c "import ctcdecode" >/dev/null 2>&1) || (
-    [ ! -d src/ctcdecode ] && git clone --recursive https://github.com/pe-trik/ctcdecode.git src/ctcdecode
-    wget http://www.openfst.org/twiki/pub/FST/FstDownload/openfst-1.6.7.tar.gz \
-        -O src/ctcdecode/third_party/openfst-1.6.7.tar.gz
-    wget https://boostorg.jfrog.io/artifactory/main/release/1.67.0/source/boost_1_67_0.tar.gz \
-        -O src/ctcdecode/third_party/boost_1_67_0.tar.gz
+    [ ! -d src/ctcdecode ] && (
+        git clone --recursive git@github.com:maxwellzh/ctcdecode.git src/ctcdecode
+    )
 
-    # ctcdecode doesn't support -e
+    # ctcdecode doesn't support -e, but we want to install locally
+    # ... so we cannot put it in requirements.txt
     python -m pip install src/ctcdecode || exit 1
 )
 echo "install module:ctcdecode done."
