@@ -85,7 +85,7 @@ def select_checkpoint(f_checklist: str, n: int = -1, mode: Literal['best', 'last
     elif os.path.isdir(f_checklist):
         cm = CheckpointManager(os.path.join(f_checklist, F_CHECKLIST))
     else:
-        raise RuntimeError(f"'{f_checklist}' is neither a file or a folder.")
+        raise RuntimeError(f"'{f_checklist}' is neither a file nor a folder.")
 
     checklist = [(path, check['metric']) for path, check in cm.content.items()]
 

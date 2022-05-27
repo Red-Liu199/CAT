@@ -11,7 +11,6 @@ set -e
 ("--output", type=str, default="$dir/${order}gram.klm",
     help="Path of output N-gram file. default: [dir]/[order]gram.klm")
 ("--arpa", action="store_true", help="Store n-gram file as .arpa instead of binary.")
-("--text-corpus", action="store_true", help="Use on-the-fly encoding for text corpus.")
 ("--prune", type=str, default="", nargs='*',
     help="Prune options passed to KenLM lmplz executable. default: ")
 ("--type", type=str, default="probing", choices=['trie', 'probing'],
@@ -42,37 +41,28 @@ export arpa_out="/tmp/$(
     echo ''
 ).arpa.tmp"
 
+export tokenizer="$(cat $dir/hyper-p.json |
+    python -c "import sys,json;print(json.load(sys.stdin)['tokenizer']['location'])")"
+[ ! -f $tokenizer ] && echo "No tokenizer model: '$tokenizer'" && exit 1
+
+# get text files
+f_text=$(cat $dir/hyper-p.json | python -c "
+import sys,json 
+from cat.utils.pipeline.asr import resolve_in_priority 
+files = ' '.join(sum(resolve_in_priority(json.load(sys.stdin)['data']['train']), []))
+print(files)")
+
+for x in $f_text; do
+    [ ! -f $x ] && echo "No such training corpus: '$x'" && exit 1
+done
+
 # we need to manually rm the bos/eos/unk since lmplz tool would add them
 # and kenlm not support <unk> in corpus,
 # ...so in the `utils/data/corpus2index.py` script we convert 0(<bos>, <eos>) and 1 (<unk>) to white space
 # ...if your tokenizer set different bos/eos/unk id, you should make that mapping too.
-export tokenizer="$(cat $dir/hyper-p.json |
-    python -c "import sys,json;print(json.load(sys.stdin)['tokenizer']['location'])")"
-if [ $text_corpus == "True" ]; then
-    f_text=$(cat $dir/hyper-p.json |
-        python -c "import sys,json;print(json.load(sys.stdin)['data']['train'])" |
-        sed "s/\[//g" | sed "s/\]//g" | sed "s/'//g" | sed "s/,/ /g")
-
-    [ ! -f $tokenizer ] && echo "No tokenizer model: '$tokenizer'" && exit 1
-    for x in $f_text; do
-        [ ! -f $x ] && echo "No such training corpus: '$x'" && exit 1
-    done
-
-    python utils/data/corpus2index.py $f_text \
-        -t --tokenizer $tokenizer --map 0: 1: \
-        >$text_out
-else
-    textbin=$dir/lmbin/train.pkl
-    if [ ! -f $textbin ]; then
-        python utils/pipeline/lm.py $dir --sta 2 --sto 2 || exit 1
-    else
-        echo "$textbin found, skip generating."
-    fi
-
-    [ ! -f $textbin ] && echo "No binary text file: '$textbin'" && exit 1
-    python utils/data/corpus2index.py $textbin \
-        --map 0: 1: >$text_out
-fi
+# this step also filter out the utterance id.
+python utils/data/corpus2index.py $f_text \
+    -t --tokenizer $tokenizer --map 0: 1: >$text_out
 
 train_cmd="lmplz <$text_out -o $order $prune -S 20%"
 [ $arpa == "True" ] && train_cmd="$train_cmd >$output"

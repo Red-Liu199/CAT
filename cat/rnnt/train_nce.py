@@ -258,20 +258,16 @@ class NCETransducerTrainer(TransducerTrainer):
             enc_out, lx)
 
         ground_truth = [
-            [
-                ' '.join(
-                    str(x)
-                    for x in targets[n, :target_lens[n]].cpu().tolist()
-                )
-            ] * len(batched_hypos[n])
+            ' '.join(
+                str(x)
+                for x in targets[n, :target_lens[n]].cpu().tolist()
+            )
             for n in range(bs)
         ]
-        ground_truth = sum(ground_truth, [])
-
-        hypos = sum((
-            [hypo.pred[1:] for hypo in list_hypos]
-            for list_hypos in batched_hypos), [])
-        hypos = [' '.join(str(x) for x in h) for h in hypos]
+        hypos = [
+            ' '.join(str(x) for x in list_hypos[0].pred[1:])
+            for list_hypos in batched_hypos
+        ]
         assert len(hypos) == len(ground_truth)
 
         err = cal_wer(ground_truth, hypos)

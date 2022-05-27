@@ -1,30 +1,49 @@
 # Author: Huahuan Zheng (maxwellzh@outlook.com)
 
 
-import io
 import os
 import sys
+import uuid
 import argparse
 from typing import *
 from multiprocessing import Process, Queue
 
 
-def blocks(files, size=2**16):
-    while True:
-        b = files.read(size)
-        if not b:
-            break
-        yield b
+def chunkize_file(files: List[str], num_workers: int) -> List[Tuple[int, int]]:
 
+    f_sizes = []
+    for f in files:
+        assert os.path.isfile(f)
+        f_sizes.append(os.path.getsize(f))
 
-def countlines(files: Union[str, List[str]]) -> int:
-    if isinstance(files, str):
-        files = [files]
-    cnt = 0
-    for _file in files:
-        with open(_file, "r", encoding="utf-8", errors='ignore') as f:
-            cnt += sum(bl.count("\n") for bl in blocks(f))
-    return cnt
+    tot_size = sum(f_sizes)
+    chunk_size = tot_size // num_workers
+
+    c_beg = 0
+    c_end = chunk_size
+    offset = 0
+    splits = []
+
+    for _size, f in zip(f_sizes, files):
+        with open(f, 'r') as fio:
+            while c_end - offset <= _size:
+                fio.seek(c_end-offset)
+                # read to '\n'
+                while True:
+                    try:
+                        fio.readline()
+                        break
+                    except UnicodeDecodeError:
+                        fio.seek(fio.tell()-1)
+
+                c_end = fio.tell()
+                splits.append((c_beg, c_end))
+                c_beg = c_end
+                c_end = c_beg + chunk_size
+        offset += _size
+    if c_end != tot_size:
+        splits.append((c_beg, tot_size))
+    return splits
 
 
 def dispatch_jobs(num_jobs: int, num_workers: int) -> List[Tuple[int, int]]:
@@ -41,21 +60,30 @@ class TextLoader:
     def __init__(self, f_tknz: str) -> None:
         self._tknz = tknz.load(f_tknz)
 
-    def __call__(self, corpus: str, _offset: int = 0, _cnt: int = -1):
-        if _offset >= countlines(corpus):
+    @staticmethod
+    def count_size(file) -> int:
+        return os.path.getsize(file)
+
+    def __call__(self, corpus: str, _offset: int = 0, _end: int = -1):
+        if _end == -1:
+            _end = os.path.getsize(corpus)
+        if _offset >= _end:
             return
+
         with open(corpus, 'r') as fi:
-            for i, line in enumerate(fi):
-                if i < _offset:
-                    continue
-                if i == _cnt:
-                    break
-                indices = self._tknz.encode(line.strip())
+            fi.seek(_offset)
+            while line := fi.readline():
                 yield self._tknz.encode(line.strip())
+                if fi.tell() >= _end:
+                    break
         return
 
 
 class BinLoader:
+    @staticmethod
+    def count_size(file) -> int:
+        return len(CorpusDataset(file))
+
     def __call__(self, corpus: str, _offset: int = 0, _cnt: int = -1):
         data = CorpusDataset(corpus)
         if _offset >= len(data):
@@ -73,30 +101,27 @@ def process_worker(args: argparse.Namespace, p_range: Tuple[int, int], q_out: Qu
     def _int2str(x: int) -> str:
         return mapping.get(x, str(x))
 
-    idx_beg, idx_end = p_range
     rm_empty = not args.keep_empty_line
     if args.istext:
         loader = TextLoader(args.tokenizer)
     else:
         loader = BinLoader()
 
+    cache = f'/tmp/corpus2index-{uuid.uuid4()}.tmp'
+    assert os.access('/tmp', os.W_OK), f"cannot write to /tmp"
     offset = 0
-    buffer = io.StringIO()
-    for file in args.input:
-        for tokens in loader(file, idx_beg - offset, idx_end - offset):
-            if tokens == [] and rm_empty:
-                continue
-            buffer.write(' '.join(_int2str(x) for x in tokens)+'\n')
-            if buffer.tell() >= 16777216:
-                q_out.put(buffer.getvalue(), block=True)
-                buffer.truncate(0)
-        offset += countlines(file)
-        if offset >= idx_end:
-            break
+    idx_beg, idx_end = p_range
+    with open(cache, 'w') as fo:
+        for file in args.input:
+            for tokens in loader(file, idx_beg - offset, idx_end - offset):
+                if tokens == [] and rm_empty:
+                    continue
+                fo.write(' '.join(_int2str(x) for x in tokens)+'\n')
+            offset += loader.count_size(file)
+            if offset >= idx_end:
+                break
 
-    q_out.put(buffer.getvalue(), block=True)
-    buffer.close()
-    q_out.put(None, block=True)
+    q_out.put(cache, block=True)
 
 
 if __name__ == "__main__":
@@ -133,13 +158,14 @@ if __name__ == "__main__":
     from cat.shared.data import CorpusDataset
     from cat.shared import tokenizer as tknz
     if args.istext:
-        total_lines = countlines(args.input)
+        tot_size = sum(os.path.getsize(f) for f in args.input)
+        num_process = max(min(os.cpu_count()//2, tot_size//(1024*1024)), 1)
+        workerloads = chunkize_file(args.input, num_process)
     else:
-        total_lines = sum(len(CorpusDataset(dataset))
-                          for dataset in args.input)
-
-    num_process = max(min(os.cpu_count()//2, total_lines//10000), 1)
-    workerloads = dispatch_jobs(total_lines, num_process)
+        tot_lines = sum(len(CorpusDataset(dataset))
+                        for dataset in args.input)
+        num_process = max(min(os.cpu_count()//2, tot_lines//1000), 1)
+        workerloads = dispatch_jobs(tot_lines, num_process)
 
     try:
         q = Queue(maxsize=1)
@@ -151,17 +177,12 @@ if __name__ == "__main__":
             ))
             p[-1].start()
 
-        cnt_done = 0
-        while True:
-            line = q.get(block=True)
-            if line is None:
-                cnt_done += 1
-                if cnt_done == num_process:
-                    break
-            else:
-                sys.stdout.write(line)
-                sys.stdout.flush()
-            del line
+        for _ in range(num_process):
+            f_cache = q.get(block=True)
+            with open(f_cache, 'r') as fi:
+                for line in fi:
+                    sys.stdout.write(line)
+            os.remove(f_cache)
 
         for _p in p:
             _p.join()

@@ -57,8 +57,8 @@ class MWERTransducerTrainer(TransducerTrainer):
     def __init__(self, beamdecoder: RNNTDecoder, mle_weight: float, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.searcher = beamdecoder
+        assert not self._sampled_softmax
         assert self._compact
-        assert not self._fused, f"RNN-T+MWER doesn't support fused mode yet."
         assert isinstance(mle_weight, float)
         # RNN-T loss weight for joint training
         self.mle_weight = mle_weight
@@ -70,6 +70,8 @@ class MWERTransducerTrainer(TransducerTrainer):
         targets     : (N, L)
         target_lens : (N, )
         """
+        device = enc_out.device
+
         # batched: (batchsize*beamsize, )
         targets = targets.to(
             device='cpu', dtype=torch.int32, non_blocking=True)
@@ -81,12 +83,7 @@ class MWERTransducerTrainer(TransducerTrainer):
             self.eval()
             self.requires_grad_(False)
             all_hypos = self.searcher.batching_rna(enc_out, frame_lens)
-            # filter the ground truth label
-            all_hypos = [
-                [hypo for hypo in list_hypos if hypo.pred[1:] !=
-                    tuple(targets[n, :target_lens[n]].tolist())]
-                for n, list_hypos in enumerate(all_hypos)
-            ]
+
             cnt_hypos = enc_out.new_tensor(
                 [len(list_hypos) for list_hypos in all_hypos], dtype=torch.long
             )
@@ -97,7 +94,7 @@ class MWERTransducerTrainer(TransducerTrainer):
             # ]
             tmp_mesh = torch.meshgrid(
                 torch.ones_like(cnt_hypos),
-                torch.arange(cnt_hypos.sum(), device=cnt_hypos.device),
+                torch.arange(cnt_hypos.sum(), device=device),
                 indexing='ij')[1]
             tmp_cumsum = cnt_hypos.cumsum(dim=0).unsqueeze(1)
             mask_batches = tmp_mesh < tmp_cumsum
@@ -137,25 +134,26 @@ class MWERTransducerTrainer(TransducerTrainer):
         del gt
         del hy
         pred_in = coreutils.pad_list([
-            targets.new_tensor(hypo, device=enc_out.device)
+            targets.new_tensor(hypo, device=device)
             for hypo in batched_tokens
         ])
-        squeezed_targets = targets.new_tensor(
-            sum([hypo[1:] for hypo in batched_tokens], tuple())
-        )
         expd_target_lens = target_lens.new_tensor(
             [len(hypo)-1 for hypo in batched_tokens])
         pred_out, _ = self.predictor(
             pred_in, input_lengths=expd_target_lens+1)
 
-        joinout, squeezed_targets, enc_out_lens = self.compute_join(
-            enc_out_expand, pred_out, squeezed_targets, enc_out_lens, expd_target_lens)
+        joinout = self.joiner(enc_out_expand, pred_out,
+                              enc_out_lens, expd_target_lens+1)
 
+        squeezed_targets = targets.new_tensor(
+            sum([hypo[1:] for hypo in batched_tokens], tuple()),
+            device=device
+        )
         with autocast(enabled=False):
             nll = RNNTLoss(
                 joinout.float(), squeezed_targets,
-                enc_out_lens.to(device=joinout.device),
-                expd_target_lens.to(device=joinout.device),
+                enc_out_lens.to(device=device),
+                expd_target_lens.to(device=device),
                 gather=True, compact=True
             )
 

@@ -49,8 +49,6 @@ def main(args: argparse.Namespace = None):
         args.tokenizer), f"Tokenizer model not found: {args.tokenizer}"
 
     if args.cpu or not torch.cuda.is_available():
-        if args.verbose:
-            print("> Using CPU")
         args.cpu = True
 
     if args.cpu:
