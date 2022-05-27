@@ -210,6 +210,10 @@ class NCETransducerTrainer(TransducerTrainer):
         # draw noise samples
         with torch.no_grad():
             batched_hypos = self.attach['searcher'].batching_rna(enc_out, lx)
+            for hypos in batched_hypos:
+                for i in range(len(hypos)-1, -1, -1):
+                    if len(hypos[i]) == 1:
+                        hypos.pop(i)
 
             # get number of negative samples w.r.t. each utterances
             cnt_hypos = lx.new_tensor([len(list_hypos)
@@ -407,7 +411,8 @@ def build_model(cfg: dict, args: argparse.Namespace, dist: bool = True) -> NCETr
     # initialize external lm
     dummy_lm = lm_builder(coreutils.readjson(
         cfg['nce']['init-elm']['config']), dist=False)
-    coreutils.load_checkpoint(dummy_lm, cfg['nce']['init-elm']['check'])
+    if cfg['nce']['init-elm'].get('check', None) is not None:
+        coreutils.load_checkpoint(dummy_lm, cfg['nce']['init-elm']['check'])
     elm = dummy_lm.lm
     elm.eval()
     elm.requires_grad_(False)

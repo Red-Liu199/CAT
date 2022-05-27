@@ -199,7 +199,7 @@ class MWERTransducerTrainer(TransducerTrainer):
 def build_model(cfg: dict, args: argparse.Namespace, dist: bool = True) -> MWERTransducerTrainer:
     """
     cfg:
-        MWER:
+        mwer:
             decoder:
                 ...
             trainer:
@@ -208,22 +208,22 @@ def build_model(cfg: dict, args: argparse.Namespace, dist: bool = True) -> MWERT
         ...
 
     """
-    assert 'MWER' in cfg, f"missing 'MWER' in field:"
-    assert 'decoder' in cfg['MWER'], f"missing 'decoder' in field:MWER:"
+    assert 'mwer' in cfg, f"missing 'mwer' in field:"
+    assert 'decoder' in cfg['mwer'], f"missing 'decoder' in field:mwer:"
 
     encoder, predictor, joiner = rnnt_builder(cfg, dist=False, wrapped=False)
 
     rnnt_decoder = RNNTDecoder(
         predictor=predictor,
         joiner=joiner,
-        **cfg['MWER']['decoder']
+        **cfg['mwer']['decoder']
     )
     model = MWERTransducerTrainer(
         rnnt_decoder,
         encoder=encoder,
         predictor=predictor,
         joiner=joiner,
-        **cfg['MWER']['trainer'],
+        **cfg['mwer']['trainer'],
         **cfg['transducer'])
 
     if not dist:

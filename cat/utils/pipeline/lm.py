@@ -89,8 +89,6 @@ if __name__ == "__main__":
                 "2. specify 'tokenizer' in ['data']['text_processing'];\n"
                 f"3. setup 'tokenizer' and ['tokenizer']['location'] in {f_hyper}\n")
             processing_settings['tokenizer'] = hyper_cfg['tokenizer']['location']
-            sys.stdout.write(fmt.format(
-                f"set ['text_processing']['tokenizer']='{processing_settings['tokenizer']}'"))
 
         pkldir = os.path.join(working_dir, 'lmbin')
         os.makedirs(pkldir, exist_ok=True)
@@ -112,8 +110,11 @@ if __name__ == "__main__":
                 setting = processing_settings
 
             f_pkl = os.path.join(pkldir, part+'.pkl')
-            mp_spawn(t2b.main, get_args(
-                setting, t2b.TextProcessingParser(), [part_text, f_pkl]))
+            if os.path.isfile(f_pkl):
+                sys.stderr.write(f"warning: {f_pkl} exists, skip.\n")
+            else:
+                mp_spawn(t2b.main, get_args(
+                    setting, t2b.TextProcessingParser(), [part_text, f_pkl]))
             os.remove(part_text)
 
     ############ Stage 3  NN training ############
@@ -208,13 +209,13 @@ if __name__ == "__main__":
         if intfname == 'cat.lm.ppl_compute':
             # we need to remove the uid in the transcript text
             # but for text resovled from local path, we assume it's raw text w/o uid.
-            text_local, text_trans = resolve_in_priority(
-                hyper_cfg['data']['test'])
+            text_local, _ = resolve_in_priority(hyper_cfg['data']['test'])
             # use combine_text() to remove the uid
             text_trans = [
-                combine_text(t_r, f'/tmp/{os.path.basename(t_r)}.tmp')
-                for t_r in text_trans
+                combine_text(t_r, f"/tmp/{t_r}.tmp")
+                for t_r in set(hyper_cfg['data']['test']) - set(text_local)
             ]
+
             infr_option['evaluate'] = text_local+text_trans
             interface.main(get_args(
                 infr_option,

@@ -32,15 +32,6 @@ if [ "$prune" ]; then
     prune="--prune $prune"
 fi
 
-export text_out="/tmp/$(
-    tr -dc A-Za-z0-9 </dev/urandom | head -c 13
-    echo ''
-).corpus.tmp"
-export arpa_out="/tmp/$(
-    tr -dc A-Za-z0-9 </dev/urandom | head -c 13
-    echo ''
-).arpa.tmp"
-
 export tokenizer="$(cat $dir/hyper-p.json |
     python -c "import sys,json;print(json.load(sys.stdin)['tokenizer']['location'])")"
 [ ! -f $tokenizer ] && echo "No tokenizer model: '$tokenizer'" && exit 1
@@ -61,10 +52,8 @@ done
 # ...so in the `utils/data/corpus2index.py` script we convert 0(<bos>, <eos>) and 1 (<unk>) to white space
 # ...if your tokenizer set different bos/eos/unk id, you should make that mapping too.
 # this step also filter out the utterance id.
-python utils/data/corpus2index.py $f_text \
-    -t --tokenizer $tokenizer --map 0: 1: >$text_out
-
-train_cmd="lmplz <$text_out -o $order $prune -S 20%"
+train_cmd="python utils/data/corpus2index.py $f_text \
+    -t --tokenizer $tokenizer --map 0: 1: | lmplz -o $order $prune -S 20%"
 [ $arpa == "True" ] && train_cmd="$train_cmd >$output"
 
 # NOTE: if lmplz raises error telling the counts of n-grams are not enough,
@@ -72,9 +61,13 @@ train_cmd="lmplz <$text_out -o $order $prune -S 20%"
 # Error msg sample:
 # "ERROR: 3-gram discount out of range for adjusted count 3: -5.2525253."
 train_cmd="$train_cmd || $train_cmd --discount_fallback"
-
 [ $arpa == "False" ] && train_cmd="($train_cmd) | build_binary $type /dev/stdin $output"
-eval $train_cmd
+
+if [ -f $output ]; then
+    echo "KenLM $output found, skip lmplz."
+else
+    eval $train_cmd
+fi
 
 if [ -f $dir/config.json ]; then
     cat $dir/config.json | python -c "

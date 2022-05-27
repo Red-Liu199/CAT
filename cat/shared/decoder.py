@@ -355,17 +355,17 @@ class NGram(AbsDecoder):
         self.unk_id = unk_id
         self.ngram = kenlm.Model(f_binlm)
         # scale: convert log10 -> loge
-        self.register_buffer('scale', torch.tensor(
-            10.).log_(), persistent=False)
+        self.scale = torch.tensor(10.).log_().item()
 
     def score(self, input_ids: torch.LongTensor, targets: torch.LongTensor, input_lengths: Optional[torch.LongTensor] = None):
-        input_ids = input_ids.cpu()
         targets = targets.cpu()
         if input_lengths is None:
             in_lens = [input_ids.size(1)]*input_ids.size(0)
         else:
             in_lens = input_lengths.cpu().tolist()
 
+        device = input_ids.device
+        input_ids = input_ids.cpu()
         # [N, ]
         log_prob = input_ids.new_full(
             input_ids.size()[:1], 0.0, dtype=torch.float)
@@ -385,7 +385,7 @@ class NGram(AbsDecoder):
 
         log_prob *= self.scale
 
-        return log_prob
+        return log_prob.to(device=device)
 
     def forward(self, src_ids: torch.Tensor, hidden: torch.Tensor = None, input_lengths: Optional[torch.Tensor] = None):
         """This is a non-standar interface, only designed for inference. The n-gram model will take input as context and 
@@ -416,7 +416,7 @@ class NGram(AbsDecoder):
             for tok in self.vocab.values():
                 pred_logp[b].append(update_state(self.ngram, state, tok)[0])
 
-        return self.scale*self.scale.new_tensor(pred_logp).unsqueeze(1), input_ids
+        return self.scale*src_ids.new_tensor(pred_logp, dtype=torch.float).unsqueeze(1), input_ids
 
     @staticmethod
     def batching_states(states: List[AbsStates]) -> AbsStates:
