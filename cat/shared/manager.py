@@ -291,7 +291,7 @@ class Manager(object):
                     args.checkdir,
                     f"checkpoint.{self.epoch}e{self.step}s.pt"
                 )
-                # inside self.save(), there maybe all_reduce OP, don't put it in rank==0 block.
+                # inside self.save(), there is an all_reduce OP, don't put it in rank==0 block.
                 # we should save the checkpoint before monitor.export(), otherwise the monitor is dumped
                 # ... into file and empty.
                 self.save(checkpoint)
@@ -491,7 +491,7 @@ def train(trainloader: ReadBatchDataLoader, args: argparse.Namespace, manager: M
         # update every fold times and drop the last few batches (number of which <= fold)
         if fold == 1 or (i+1) % fold == 0:
             local_loss, local_bs = _go_step(bs, minibatch)
-            accum_loss += local_loss
+            accum_loss += local_loss * local_bs
             n_batch += local_bs
 
             if grad_norm > 0.0:
@@ -511,7 +511,7 @@ def train(trainloader: ReadBatchDataLoader, args: argparse.Namespace, manager: M
 
             # measure accuracy and record loss; item() can sync all processes.
             tolog = {
-                'loss': accum_loss.item(),
+                'loss': (accum_loss/n_batch).item(),
                 'lr': scheduler.lr_cur
             }
 
@@ -546,7 +546,7 @@ def train(trainloader: ReadBatchDataLoader, args: argparse.Namespace, manager: M
             # gradient accumulation w/o sync
             with model.no_sync():
                 local_loss, local_bs = _go_step(bs, minibatch)
-                accum_loss += local_loss
+                accum_loss += local_loss * local_bs
                 n_batch += local_bs
 
         if args.verbose:

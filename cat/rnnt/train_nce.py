@@ -54,6 +54,7 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         func_train=custom_train,
         func_eval=custom_evaluate,
         extra_tracks=[
+            'loss/nce',
             'loss/nce-data',
             'loss/nce-noise',
             'acc/data',
@@ -250,7 +251,7 @@ class NCETransducerTrainer(TransducerTrainer):
         nce_noise_obj = self._logsigmoid(
             q_noise + math.log(noise_ratio) - p_noise)
 
-        return -(nce_data_obj.mean(dim=0) + noise_ratio * nce_noise_obj.mean(dim=0)), bs, \
+        return -(nce_data_obj.mean(dim=0) + noise_ratio * nce_noise_obj.mean(dim=0)), \
             (nce_data_obj, nce_noise_obj)
 
     @torch.no_grad()
@@ -288,7 +289,7 @@ def custom_hook(
         n_step: int,
         nnforward_args: tuple):
 
-    nce_loss, _, (p_c_0, p_c_1) = model(*nnforward_args)
+    nce_loss, (p_c_0, p_c_1) = model(*nnforward_args)
 
     if args.rank == 0:
         # FIXME: not exact global accuracy
@@ -299,12 +300,15 @@ def custom_hook(
         step_cur = manager.step_by_last_epoch + n_step
         manager.monitor.update(
             {
+                'loss/nce': (nce_loss.item(), step_cur),
                 'loss/nce-data': (loss_data, step_cur),
                 'loss/nce-noise': (loss_noise, step_cur),
                 'acc/data': (pos_acc, step_cur),
                 'acc/noise': (noise_acc, step_cur)
             }
         )
+        manager.writer.add_scalar(
+            'loss/nce', nce_loss.item(), step_cur)
         manager.writer.add_scalar(
             'loss/nce-data', loss_data, step_cur)
         manager.writer.add_scalar(
