@@ -13,6 +13,7 @@ from ..shared import coreutils
 from ..shared import SpecAug
 from ..shared import encoder as tn_zoo
 from ..shared import decoder as pn_zoo
+from ..shared.layer import SampledSoftmax
 from ..shared.data import (
     KaldiSpeechDataset,
     sortedPadCollateASR
@@ -75,7 +76,6 @@ class TransducerTrainer(nn.Module):
         if sampled_softmax:
             assert bos_id == 0
             assert joiner.is_normalize_separated
-            joiner._skip_normalize = True
 
         self.ilme_weight = 0.0
         if ilme_weight is not None and ilme_weight != 0.0:
@@ -88,6 +88,8 @@ class TransducerTrainer(nn.Module):
 
         self._compact = compact
         self._sampled_softmax = sampled_softmax
+        if sampled_softmax:
+            self.log_softmax = SampledSoftmax(blank=0)
 
         self.encoder = encoder
         self.predictor = predictor
@@ -120,7 +122,10 @@ class TransducerTrainer(nn.Module):
         return self
 
     def compute_join(self, enc_out: torch.Tensor, pred_out: torch.Tensor, targets: torch.Tensor, enc_out_lens: torch.Tensor, target_lens: torch.Tensor) -> torch.FloatTensor:
-        enc_out_lens = enc_out_lens.to(torch.int)
+        device = enc_out.device
+        enc_out_lens = enc_out_lens.to(device=device, dtype=torch.int)
+        targets = targets.to(device=device, dtype=torch.int)
+        target_lens = target_lens.to(device=device, dtype=torch.int)
 
         if self._pn_mask is not None:
             pred_out = self._pn_mask(pred_out, target_lens+1)[0]
@@ -131,19 +136,18 @@ class TransducerTrainer(nn.Module):
             if targets.dim() == 2:
                 targets = gather.cat(targets, target_lens)
 
+        if self._sampled_softmax:
+            logits = self.joiner.impl_forward(
+                enc_out, pred_out, enc_out_lens, target_lens+1
+            )
+            joinout, targets = self.log_softmax(
+                logits, targets
+            )
+        else:
             joinout = self.joiner(
                 enc_out, pred_out, enc_out_lens, target_lens+1)
-            if self._sampled_softmax:
-                indices_sampled, targets = torch.unique(
-                    targets, sorted=True, return_inverse=True)
-                # leave the first place for <bos>/<blk>
-                targets += 1
-                indices_sampled = torch.nn.functional.pad(
-                    indices_sampled, (1, 0), ).to(torch.long)
-                joinout = joinout[:, indices_sampled].log_softmax(dim=-1)
-        else:
-            joinout = self.joiner(enc_out, pred_out)
-        return joinout, targets.to(torch.int), enc_out_lens
+
+        return joinout, targets, enc_out_lens, target_lens
 
     def forward(self, inputs: torch.FloatTensor, targets: torch.LongTensor, in_lens: torch.LongTensor, target_lens: torch.LongTensor) -> torch.FloatTensor:
 
@@ -151,7 +155,7 @@ class TransducerTrainer(nn.Module):
         pred_out = self.predictor(torch.nn.functional.pad(
             targets, (1, 0), value=self.bos_id))[0]
 
-        joinout, targets, enc_out_lens = self.compute_join(
+        joinout, targets, enc_out_lens, target_lens = self.compute_join(
             enc_out, pred_out, targets, enc_out_lens, target_lens
         )
         loss = 0.0
@@ -178,9 +182,9 @@ class TransducerTrainer(nn.Module):
 
         with autocast(enabled=False):
             loss += RNNTLoss(
-                joinout.float(), targets.to(dtype=torch.int32),
-                enc_out_lens.to(device=joinout.device, dtype=torch.int32),
-                target_lens.to(device=joinout.device, dtype=torch.int32),
+                joinout.float(), targets,
+                enc_out_lens,
+                target_lens,
                 reduction='mean', gather=True, compact=self._compact
             )
 
@@ -238,7 +242,7 @@ def build_model(
             _model.load_state_dict(
                 _load_and_immigrate(c_cfg['pretrained'], prefix, ''), strict=False)
 
-        if cfg.get('freeze', False):
+        if c_cfg.get('freeze', False):
             _model.requires_grad_(False)
             setattr(_model, 'freeze', True)
         else:
@@ -249,9 +253,6 @@ def build_model(
                 _path = ''
             else:
                 _path = c_cfg['pretrained']
-            print("{:<10}: freeze={:<5} | loaded from {}".format(
-                component.lower(), str(_model.freeze), _path))
-            del _path
         return _model
 
     assert 'encoder' in cfg

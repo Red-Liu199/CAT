@@ -5,7 +5,8 @@
 """training/evaluating manager"""
 
 from ..shared.data import (
-    BalancedDistributedSampler,
+    DynamicBatchDistSampler,
+    ReadBatchDataLoader,
     PipeTokenize
 )
 from ..shared import tokenizer as tknz
@@ -63,18 +64,23 @@ class Manager(object):
         """
         super().__init__()
 
-        coreutils.check_parser(args, ['rank', 'gpu', 'workers', 'trset', 'devset', 'databalance',
-                                      'batch_size', 'grad_accum_fold', 'config', 'dir', 'debug',
-                                      'logdir', 'checkdir', 'resume', 'init_model'])
+        coreutils.check_parser(args, [
+            'rank', 'gpu', 'workers', 'trset', 'devset', 'dynamic_batch_mode',
+            'batch_size', 'grad_accum_fold', 'config', 'dir', 'debug',
+            'logdir', 'checkdir', 'resume', 'init_model'
+        ])
 
         # setup dataloader
         val_set = Dataset(args.devset)
 
         setattr(args, 'n_steps', 0)
+        world_size = dist.get_world_size()
         if args.large_dataset:
             assert args.tokenizer is not None, f"--tokenizer is required for --large-dataset"
             assert os.path.isfile(args.tokenizer), \
                 f"--tokenizer={args.tokenizer} is not a valid file."
+            # large dataset doesnot support dynamic batching
+            args.dynamic_batch_mode = -1
 
             '''
             NOTE (Huahuan):
@@ -90,7 +96,7 @@ class Manager(object):
                 allow it fitting the size is OK. But that would require knowing the size of dataset and is somewhat more complicated.
             '''
             os.environ['RANK'] = str(dist.get_rank())
-            os.environ['WORLD_SIZE'] = str(dist.get_world_size())
+            os.environ['WORLD_SIZE'] = str(world_size)
             tr_set = (
                 wds.WebDataset(
                     # expand expression first with braceexpand, then glob, e.g.
@@ -113,50 +119,53 @@ class Manager(object):
                 # add some hook if needed, e.g. filter short seqs for CTC/CRF
                 tr_set = _wds_hook(tr_set)
             tr_set = tr_set.batched(
-                args.batch_size//dist.get_world_size(),
+                args.batch_size//world_size,
                 collation_fn=collate_fn,
                 # set partial=False to avoid a partial batch, but would drop a few of data, see bellow disscussion.
                 partial=False
             )
 
-            args.batch_size = (args.batch_size //
-                               dist.get_world_size()) * dist.get_world_size()
             trainloader = wds.WebLoader(
                 tr_set, num_workers=1, shuffle=False,
                 # batching is done by webdataset
                 batch_size=None)
-            '''
-            '''
-
-            # we don't know the size of dataset, just set a value large enough
-            args.n_steps = 0
             train_sampler = None
         else:
             tr_set = Dataset(args.trset)
-
-            if args.databalance and dist.get_world_size() > 1:
+            if args.dynamic_batch_mode != -1 and world_size > 1:
                 coreutils.distprint(
-                    "> Enable balanced dataloader.", args.gpu)
-                train_sampler = BalancedDistributedSampler(
-                    tr_set, args.batch_size, local_rank=args.gpu)
+                    "> enable dynamically batching", args.gpu)
+                train_sampler = DynamicBatchDistSampler(
+                    dataset=tr_set,
+                    mode=['bucket', 'batch'][args.dynamic_batch_mode],
+                    global_batch_size=args.batch_size,
+                    max_bucket_size=args.dynamic_bucket_size,
+                    local_rank=args.gpu
+                )
                 trainloader = DataLoader(
                     tr_set, batch_sampler=train_sampler,
                     num_workers=args.workers, collate_fn=collate_fn,
-                    prefetch_factor=4, persistent_workers=True)
-                args.n_steps = train_sampler.total_size//args.batch_size//args.grad_accum_fold
+                    prefetch_factor=4, persistent_workers=True
+                )
             else:
-                args.databalance = False
+                args.dynamic_batch_mode = -1
                 train_sampler = DistributedSampler(tr_set)
                 trainloader = DataLoader(
-                    tr_set, batch_size=args.batch_size//dist.get_world_size(), shuffle=False,
+                    tr_set, batch_size=args.batch_size//world_size, shuffle=False,
                     num_workers=args.workers, sampler=train_sampler, collate_fn=collate_fn,
                     prefetch_factor=4, persistent_workers=True)
-                args.n_steps = len(trainloader)//args.grad_accum_fold
+
+        if args.dynamic_batch_mode == -1:
+            args.batch_size = (args.batch_size // world_size) * world_size
+            trainloader = ReadBatchDataLoader(trainloader, bs=args.batch_size)
+        else:
+            trainloader = ReadBatchDataLoader(trainloader, dynamic=True)
 
         val_sampler = DistributedSampler(val_set, shuffle=False)
         valloader = DataLoader(
-            val_set, batch_size=args.batch_size//dist.get_world_size(), shuffle=False,
-            num_workers=args.workers, sampler=val_sampler, collate_fn=collate_fn)
+            val_set, batch_size=args.batch_size//world_size, shuffle=False,
+            num_workers=args.workers, sampler=val_sampler, collate_fn=collate_fn
+        )
 
         self.train_sampler = train_sampler
         self.trainloader = trainloader
@@ -177,15 +186,8 @@ class Manager(object):
                                  model=self.model, gpu_info=gpu_info)
 
         # hook the function
-        if func_train is None:
-            self.train = train
-        else:
-            self.train = func_train
-
-        if func_eval is None:
-            self.evaluate = evaluate
-        else:
-            self.evaluate = func_eval
+        self.train = train if func_train is None else func_train
+        self.evaluate = evaluate if func_eval is None else func_eval
 
         # Initial specaug module
         if 'specaug_config' not in cfg:
@@ -377,23 +379,30 @@ class Manager(object):
 
 '''
 NOTE (Huahuan):
-    with --databalance, batch size on each device might be different,
-    however, torch DDP automatically make the allreduce on gradients
-    then average them by world size during backward.
+    with --dynamic_batch_mode, batch size on each device might be different,
+    however, torch DDP automatically makes the allreduce on gradients
+    then averages them by world size during backward.
     which assumes the batch sizes across devices are the same.
     To address this, we re-calculate the loss in a hack way:
-        loss_normalized = sum(loss) / global_batch_size * world_size
-    Currently the loss is:
-        loss_current_normalized = mean_on_device(loss) / world_size
-    Substitute `loss_normalized` to replace `mean_on_device(loss)`, here is
-        loss_current_normalized' = sum(loss) / global_batch_size
+        local_loss_new = sum_over_local_batches(local_loss) / global_batch_size * world_size
+
+    Here we prove the new hacked-loss is equivalent to the standard one:
+    Currently the loss is (in standard DDP):
+        loss_normalized = sum_over_devices(mean_over_local_batches(local_loss)) / world_size
+                        = sum_over_devices(sum_over_local_batches(local_loss) / (global_batch_size / world_size))  / world_size
+                        = sum_over_devices(sum_over_local_batches(local_loss)) / global_batch_size
+
+
+    With re-defining the local_loss, we substitute `local_loss_new` to replace `mean_over_local_batches(local_loss)`, here is
+        loss_normalized_new' = sum_over_devices(sum_over_local_batches(local_loss) / global_batch_size)
+                             = loss_normalized
+
     such that the gradient is properly computed. Be aware that this
-    might cause numerical difference with float point given the fact that
-        probably: (f * N) / N != f
+    might cause numerical difference given the fact that probably: (f * N) / N != f
 '''
 
 
-def train(trainloader, args: argparse.Namespace, manager: Manager, hook_func: Callable = None):
+def train(trainloader: ReadBatchDataLoader, args: argparse.Namespace, manager: Manager, hook_func: Callable = None):
     """
     The default train function.
 
@@ -404,14 +413,13 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, hook_func: Ca
         _trainer_hook (optional, callable function) : custom hook function, check source code for usage.
     """
 
-    def _go_step(detach_loss, n_batch, minibatch):
+    def _go_step(g_batch_size: int, minibatch) -> Tuple[torch.Tensor, int]:
         feats, frame_lens, labels, label_lens = minibatch
         feats = feats.cuda(args.gpu, non_blocking=True)
         if manager.specaug is not None:
             feats, frame_lens = manager.specaug(feats, frame_lens)
 
-        # we divide loss with fold since we want the gradients to be divided by fold
-        with autocast(enabled=enableAMP):
+        with autocast(enabled=use_amp):
             if hook_func is None:
                 loss = model(feats, labels, frame_lens, label_lens)
             else:
@@ -420,39 +428,17 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, hook_func: Ca
                     manager, model, args, (i+1) // fold,
                     (feats, labels, frame_lens, label_lens)
                 )
-
             if isinstance(loss, tuple):
-                assert len(loss) == 2
-                loss, norm_size = loss
-            else:
-                norm_size = feats.size(0)
+                loss = loss[0]
+
+            # divide loss with fold since we want the gradients to be divided by fold
             loss /= fold
 
-        if not isinstance(norm_size, torch.Tensor):
-            norm_size = frame_lens.new_tensor(
-                int(norm_size), device=args.gpu)
-        else:
-            norm_size = norm_size.to(device=args.gpu, dtype=torch.long)
-
-        loss_local_sum = loss.detach() * norm_size
-        if 'databalance' in args and args.databalance:
-            '''
-            get current global size
-            efficiently, we can set t_batch_size=args.batch_size, 
-            but current impl is more robust
-            '''
-            dist.all_reduce(norm_size)
-            loss.data = loss_local_sum * (world_size / norm_size)
-        else:
-            norm_size *= world_size
-
+        loss.data = loss.detach() * (feats.size(0) * world_size / g_batch_size)
         scaler.scale(loss).backward()
 
-        dist.all_reduce(loss_local_sum)
-        detach_loss += loss_local_sum.float()
-        n_batch += norm_size
-
-        return detach_loss, n_batch
+        # return for logging
+        return loss.detach() * fold, feats.size(0)
 
     coreutils.check_parser(args, ['grad_accum_fold', 'n_steps', 'verbose',
                                   'print_freq', 'check_freq', 'rank', 'gpu', 'debug', 'amp', 'grad_norm'])
@@ -461,8 +447,8 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, hook_func: Ca
     scheduler = manager.scheduler
     optimizer = scheduler.optimizer
     optimizer.zero_grad()
-    enableAMP = args.amp
-    scaler = GradScaler(enabled=enableAMP)
+    use_amp = args.amp
+    scaler = GradScaler(enabled=use_amp)
     grad_norm = args.grad_norm
 
     world_size = dist.get_world_size()
@@ -483,7 +469,7 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, hook_func: Ca
         disable=(args.gpu != 0 or args.verbose),
         leave=False
     )
-    for i, minibatch in enumerate(trainloader):
+    for i, (bs, minibatch) in enumerate(trainloader):
         # since the gradient fold could be > 1, we need to accumulate the time
         if args.verbose:
             t_data += time.time() - t_last_batch
@@ -504,9 +490,12 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, hook_func: Ca
 
         # update every fold times and drop the last few batches (number of which <= fold)
         if fold == 1 or (i+1) % fold == 0:
-            accum_loss, n_batch = _go_step(accum_loss, n_batch, minibatch)
+            local_loss, local_bs = _go_step(bs, minibatch)
+            accum_loss += local_loss
+            n_batch += local_bs
+
             if grad_norm > 0.0:
-                if enableAMP:
+                if use_amp:
                     scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(
                     model.parameters(), grad_norm, error_if_nonfinite=False)
@@ -520,9 +509,6 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, hook_func: Ca
             cnt_step_update += 1
             p_bar.update()
 
-            # average for logging, since we divide loss by fold for backward,
-            # here we multiply fold back for logging
-            accum_loss *= fold / n_batch
             # measure accuracy and record loss; item() can sync all processes.
             tolog = {
                 'loss': accum_loss.item(),
@@ -554,12 +540,14 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, hook_func: Ca
                 yield None
 
             # reset accumulated loss
-            accum_loss -= accum_loss
-            n_batch -= n_batch
+            accum_loss = 0.
+            n_batch = 0
         else:
             # gradient accumulation w/o sync
             with model.no_sync():
-                accum_loss, n_batch = _go_step(accum_loss, n_batch, minibatch)
+                local_loss, local_bs = _go_step(bs, minibatch)
+                accum_loss += local_loss
+                n_batch += local_bs
 
         if args.verbose:
             t_last_batch = time.time()
@@ -580,7 +568,7 @@ def train(trainloader, args: argparse.Namespace, manager: Manager, hook_func: Ca
 
 
 @torch.no_grad()
-def evaluate(testloader, args: argparse.Namespace, manager: Manager) -> float:
+def evaluate(testloader: DataLoader, args: argparse.Namespace, manager: Manager) -> float:
 
     model = manager.model
     cnt_seq = 0
@@ -596,27 +584,19 @@ def evaluate(testloader, args: argparse.Namespace, manager: Manager) -> float:
         Suppose the loss is reduced by mean
         '''
         loss = model(feats, labels, ilens, olens)
-
         if isinstance(loss, tuple):
-            assert len(loss) >= 2
-            loss, norm_size = loss[:2]
-        else:
-            norm_size = feats.size(0)
-        if not isinstance(norm_size, torch.Tensor):
-            norm_size = ilens.new_tensor(
-                int(norm_size), device=args.gpu)
-        else:
-            norm_size = norm_size.to(device=args.gpu, dtype=torch.long)
+            loss = loss[0]
 
-        real_loss = loss * norm_size  # type: torch.Tensor
+        cnt_seq += feats.size(0)
+        total_loss += loss * feats.size(0)
 
-        dist.all_reduce(real_loss, dist.ReduceOp.SUM)
-        dist.all_reduce(norm_size, dist.ReduceOp.SUM)
+    cnt_seq = total_loss.new_tensor(cnt_seq)
 
-        cnt_seq += norm_size.item()
-        total_loss += real_loss.item()
-
-    avg_loss = total_loss/cnt_seq
+    # sync info for loggin and further state control
+    # NOTE: this sync is required.
+    dist.all_reduce(total_loss, dist.ReduceOp.SUM)
+    dist.all_reduce(cnt_seq, dist.ReduceOp.SUM)
+    avg_loss = (total_loss/cnt_seq).item()
 
     if args.rank == 0:
         manager.writer.add_scalar('loss/dev', avg_loss, manager.step)

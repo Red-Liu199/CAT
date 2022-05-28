@@ -702,7 +702,7 @@ if __name__ == "__main__":
                 sys.argv[0],        # file script
                 working_dir,
                 "--silent" if args.silent else "",
-                f"--start_stage={4}",
+                "--start_stage=4",
                 f"--stop_stage={args.stage_end}",
                 f"--ngpu={args.ngpu}"
             ]))

@@ -65,16 +65,17 @@ class LMTrainer(nn.Module):
 
         # targets: (\sum{S_i})
         loss = self.criterion(logits, targets)
-        return loss, input_lengths.sum()
+        return loss
 
 
+# NOTE:
+#   we use ce loss to train the model. but perplexity to monitor training
+#   perplexity = exp(cross-entropy loss)
+#   you can define custom eval/train function as this if needed.
 @torch.no_grad()
 def evaluate(*args) -> float:
     celoss = default_eval(*args)
     try:
-        # NOTE: perplexity = exp(cross-entropy loss)
-        # if you custom the criterion in LMTrainer,
-        # please also add a custom evaluate() function like this.
         return math.exp(celoss)
     except OverflowError:
         return float('inf')

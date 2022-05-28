@@ -829,12 +829,7 @@
                         "properties": {
                             "kwargs": {
                                 "type": "object",
-                                "properties": {
-                                    "skip_normalize": {
-                                        "type": "boolean",
-                                        "default": false
-                                    }
-                                }
+                                "properties": {}
                             }
                         }
                     }
@@ -890,10 +885,6 @@
                                 "type": "object",
                                 "properties": {
                                     "compact": {
-                                        "type": "boolean",
-                                        "default": false
-                                    },
-                                    "skip_normalize": {
                                         "type": "boolean",
                                         "default": false
                                     },

@@ -83,10 +83,10 @@ class NCETransducerTrainer(TransducerTrainer):
         assert isinstance(beamdecoder, RNNTDecoder)
         assert self._compact
         assert self.ilme_weight == 0.
-        assert not self._sampled_softmax
         assert isinstance(mle_weight, float)
         assert isinstance(ilm_weight, float)
         assert isinstance(elm_weight, float)
+
         if mle_weight != 0.:
             raise NotImplementedError
         if ilm_weight > 0:
@@ -183,13 +183,14 @@ class NCETransducerTrainer(TransducerTrainer):
             padded_targets, dummy_targets, ly)
 
         # cal model score
-        model_join_out = self.joiner(enc_out, pred_out, lx, ly+1)
+        model_join_out, squeeze_targets, lx, ly = self.compute_join(
+            enc_out, pred_out, squeeze_targets, lx, ly
+        )
         with autocast(enabled=False):
             # model_log_prob: (N, )
             model_log_prob = -RNNTLoss(
-                model_join_out.float(), squeeze_targets,
-                lx.to(device=device, dtype=torch.int32),
-                ly.to(device=device, dtype=torch.int32),
+                model_join_out.float(),
+                squeeze_targets, lx, ly,
                 gather=True, compact=True
             )
 

@@ -7,6 +7,7 @@
 """Data loading module
 """
 
+from queue import Queue
 from . import coreutils as coreutils
 from .tokenizer import AbsTokenizer
 
@@ -20,7 +21,7 @@ import numpy as np
 from typing import *
 
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 import torch.distributed as dist
 from torch.utils.data.distributed import DistributedSampler
 
@@ -386,10 +387,12 @@ class sortedScpPadCollate():
         return keys, mats, lengths
 
 
-class BalancedDistributedSampler(DistributedSampler):
+class DynamicBatchDistSampler(DistributedSampler):
     def __init__(self,
-                 dataset: torch.utils.data.Dataset,
-                 global_batch_size: int,
+                 dataset: AbsDataset,
+                 mode: Literal['bucket', 'batch'],
+                 global_batch_size: int = -1,
+                 max_bucket_size: int = -1,
                  num_replicas: Optional[int] = None,
                  rank: Optional[int] = None,
                  local_rank: int = None,
@@ -399,20 +402,15 @@ class BalancedDistributedSampler(DistributedSampler):
         super().__init__(dataset, num_replicas=num_replicas, rank=rank,
                          shuffle=shuffle, seed=seed, drop_last=drop_last)
 
-        if global_batch_size < self.num_replicas or global_batch_size > len(self.dataset):
-            raise RuntimeError(
-                f"Invalid global batch size: {global_batch_size} for given n_wokers: {self.num_replicas} and len of dataset: {len(self.dataset)}")
-
         if not hasattr(dataset, 'get_seq_len'):
             raise RuntimeError(
-                f"{type(dataset)} has not implement Dataset.get_seq_len method, which is required for BalanceDistributedSampler.")
+                f"{type(dataset)} has not implement get_seq_len(), "
+                f"which is required for {self.__class__.__name__}.")
 
         # scan data length, this might take a while
-        if rank is None:
-            rank = dist.get_rank()
         if local_rank is None:
             # using 1 node
-            local_rank = rank
+            local_rank = self.rank
 
         if local_rank == 0:
             # save length info into cache file
@@ -420,11 +418,29 @@ class BalancedDistributedSampler(DistributedSampler):
 
         dist.barrier()
 
-        # read from cached file
-        seq_lens = dataset.get_seq_len()
-        self._lens = seq_lens
+        if mode == 'bucket':
+            assert max_bucket_size > 0 and max_bucket_size >= self.num_replicas, max_bucket_size
 
-        self.g_batch = int(global_batch_size)
+            self.index_dispatcher = BucketGrouper(
+                max_bucket_size=max_bucket_size,
+                rank=self.rank,
+                n_procs=self.num_replicas,
+                linfo=dataset.get_seq_len()
+            )
+        elif mode == 'batch':
+            assert global_batch_size > 0 and \
+                global_batch_size >= self.num_replicas and \
+                global_batch_size <= len(dataset), global_batch_size
+
+            self.index_dispatcher = BatchGrouper(
+                g_batchsize=global_batch_size,
+                rank=self.rank,
+                n_procs=self.num_replicas,
+                linfo=dataset.get_seq_len()
+            )
+        else:
+            raise ValueError(
+                f"{self.__class__.__name__}: unknown mode '{mode}'")
 
     def __iter__(self):
         # DistributedSampler.__iter__()
@@ -451,29 +467,57 @@ class BalancedDistributedSampler(DistributedSampler):
         assert len(indices) == self.total_size
 
         # Add implementation here
-        batched_indices = [indices[idx_g_batch:idx_g_batch+self.g_batch]
-                           for idx_g_batch in range(0, self.total_size, self.g_batch)]
-
-        if len(batched_indices[-1]) < self.num_replicas:
-            batched_indices.pop()
-
-        partial_indices, _ = group_indices(
-            (batched_indices, self._lens, self.num_replicas, 0))
-
-        local_indices = [x[self.rank] for x in partial_indices]
-        return iter(local_indices)
+        return iter(self.index_dispatcher(indices))
 
 
-def group_indices(args: Tuple[List[List[int]], List[int], int, int]):
-    idx_groups, global_ls, n_replicas, p_id = args
-    for k, g in enumerate(idx_groups):
-        g_sorted = sorted(g, key=lambda i: global_ls[i], reverse=True)
+class Grouper:
+    def __init__(self, rank: int, n_procs: int, linfo: List[int]) -> None:
+        self.weight = linfo
+        self.rank = rank
+        self.num_procs = n_procs
+        self._bsinfo = Queue(maxsize=4096)
 
-        g_grouped = coreutils.group_by_lens(
-            g_sorted, [global_ls[i] for i in g_sorted], n_replicas)
-        idx_groups[k] = g_grouped
+    def _call_group(self, indices: List[int]):
+        self._bsinfo.put(len(indices))
+        g_sorted = sorted(list(zip(
+            indices,
+            [self.weight[i]for i in indices]
+        )), key=lambda x: x[1], reverse=True)
+        return coreutils.weighted_group(
+            g_sorted, self.num_procs)[self.rank]
 
-    return idx_groups, p_id
+
+class BatchGrouper(Grouper):
+    def __init__(self, g_batchsize: int, rank: int, n_procs: int, linfo: List[int]) -> None:
+        super().__init__(rank, n_procs, linfo)
+        self.g_batchsize = g_batchsize
+
+    def __call__(self, indices: Iterable[int]):
+        cur_batch = []
+        for idx in indices:
+            cur_batch.append(idx)
+            if len(cur_batch) == self.g_batchsize:
+                yield self._call_group(cur_batch)
+                cur_batch.clear()
+        return
+
+
+class BucketGrouper(Grouper):
+    def __init__(self, max_bucket_size: int, rank: int, n_procs: int, linfo: List[int]) -> None:
+        super().__init__(rank, n_procs, linfo)
+        self.max_bucket_size = max_bucket_size
+
+    def __call__(self, indices: Iterable[int]):
+        cur_batch = []
+        cumsum = 0
+        for i in indices:
+            cur_batch.append(i)
+            cumsum += self.weight[i]
+            if cumsum >= self.max_bucket_size and len(cur_batch) >= self.num_procs:
+                yield self._call_group(cur_batch)
+                cur_batch.clear()
+                cumsum = 0
+        return
 
 
 class PipeTokenize:
@@ -483,3 +527,34 @@ class PipeTokenize:
 
     def __call__(self, samples: Tuple[np.ndarray, str]) -> Tuple[np.ndarray, torch.LongTensor]:
         return (torch.as_tensor(samples[0]), torch.LongTensor(self._tokenizer.encode(samples[1])))
+
+
+class ReadBatchDataLoader:
+    def __init__(self, dataloader: DataLoader, bs: int = -1, dynamic: bool = False):
+        """
+        Args:
+            dataloader : any instances of pytorch dataloader
+            bs (int)   : global batch size, not required if `dynamic` is True
+            dynamic (bool) : tell the use of DynamicBatchDistSampler
+        """
+        if dynamic:
+            assert dataloader.batch_sampler is not None
+            assert isinstance(dataloader.batch_sampler,
+                              DynamicBatchDistSampler)
+            self.batch_size = None
+            self._bsinfo = dataloader.batch_sampler.index_dispatcher._bsinfo
+        else:
+            self.batch_size = bs
+            self._bsinfo = None
+
+        self._isdynamic = dynamic
+        self.dl = dataloader
+
+    def __iter__(self):
+        for batch in self.dl:
+            if self._isdynamic:
+                bs = self._bsinfo.get()
+            else:
+                bs = self.batch_size
+            yield bs, batch
+        return

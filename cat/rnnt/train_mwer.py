@@ -57,7 +57,6 @@ class MWERTransducerTrainer(TransducerTrainer):
     def __init__(self, beamdecoder: RNNTDecoder, mle_weight: float, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.searcher = beamdecoder
-        assert not self._sampled_softmax
         assert self._compact
         assert isinstance(mle_weight, float)
         # RNN-T loss weight for joint training
@@ -142,28 +141,26 @@ class MWERTransducerTrainer(TransducerTrainer):
         pred_out, _ = self.predictor(
             pred_in, input_lengths=expd_target_lens+1)
 
-        joinout = self.joiner(enc_out_expand, pred_out,
-                              enc_out_lens, expd_target_lens+1)
-
         squeezed_targets = targets.new_tensor(
             sum([hypo[1:] for hypo in batched_tokens], tuple()),
             device=device
         )
+        joinout, squeezed_targets, enc_out_lens, expd_target_lens = \
+            self.compute_join(enc_out_expand, pred_out,
+                              squeezed_targets, enc_out_lens, expd_target_lens)
         with autocast(enabled=False):
-            nll = RNNTLoss(
+            ll = -RNNTLoss(
                 joinout.float(), squeezed_targets,
-                enc_out_lens.to(device=device),
-                expd_target_lens.to(device=device),
+                enc_out_lens,
+                expd_target_lens,
                 gather=True, compact=True
             )
 
-        # nll: (bs*n_hyps, )
-        nll = (-nll).exp()
         # den: (bs, )
-        den = (nll * mask_batches).sum(dim=1)
+        den = torch.logsumexp(ll * mask_batches, dim=1)
         # den: (bs, ) -> (bs*n_hyps, )
         den = den[torch.repeat_interleave(cnt_hypos)]
-        return torch.sum(nll / den * penalty) / bs
+        return torch.sum((ll-den).exp() * penalty) / bs
 
     def forward(self, inputs: torch.FloatTensor, targets: torch.LongTensor, in_lens: torch.LongTensor, target_lens: torch.LongTensor) -> torch.FloatTensor:
 

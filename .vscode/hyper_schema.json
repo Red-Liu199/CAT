@@ -392,9 +392,20 @@
                                         "type": "string",
                                         "description": "Directory to save the log and model files."
                                     },
-                                    "databalance": {
-                                        "description": "Load data batches according to sequence lenth.",
-                                        "default": false
+                                    "dynamic_bucket_size": {
+                                        "type": "number",
+                                        "description": "The approximate maximum bucket size in dynamic_batch_mode=0.",
+                                        "default": -1
+                                    },
+                                    "dynamic_batch_mode": {
+                                        "type": "number",
+                                        "description": "Dynamic batching mode. -1: disable; 0: bucket mode; 1: batch mode. default -1.",
+                                        "default": -1,
+                                        "examples": [
+                                            -1,
+                                            0,
+                                            1
+                                        ]
                                     },
                                     "tokenizer": {
                                         "type": "string",
@@ -518,9 +529,20 @@
                                         "type": "string",
                                         "description": "Directory to save the log and model files."
                                     },
-                                    "databalance": {
-                                        "description": "Load data batches according to sequence lenth.",
-                                        "default": false
+                                    "dynamic_bucket_size": {
+                                        "type": "number",
+                                        "description": "The approximate maximum bucket size in dynamic_batch_mode=0.",
+                                        "default": -1
+                                    },
+                                    "dynamic_batch_mode": {
+                                        "type": "number",
+                                        "description": "Dynamic batching mode. -1: disable; 0: bucket mode; 1: batch mode. default -1.",
+                                        "default": -1,
+                                        "examples": [
+                                            -1,
+                                            0,
+                                            1
+                                        ]
                                     },
                                     "tokenizer": {
                                         "type": "string",
@@ -644,9 +666,20 @@
                                         "type": "string",
                                         "description": "Directory to save the log and model files."
                                     },
-                                    "databalance": {
-                                        "description": "Load data batches according to sequence lenth.",
-                                        "default": false
+                                    "dynamic_bucket_size": {
+                                        "type": "number",
+                                        "description": "The approximate maximum bucket size in dynamic_batch_mode=0.",
+                                        "default": -1
+                                    },
+                                    "dynamic_batch_mode": {
+                                        "type": "number",
+                                        "description": "Dynamic batching mode. -1: disable; 0: bucket mode; 1: batch mode. default -1.",
+                                        "default": -1,
+                                        "examples": [
+                                            -1,
+                                            0,
+                                            1
+                                        ]
                                     },
                                     "tokenizer": {
                                         "type": "string",
@@ -770,9 +803,20 @@
                                         "type": "string",
                                         "description": "Directory to save the log and model files."
                                     },
-                                    "databalance": {
-                                        "description": "Load data batches according to sequence lenth.",
-                                        "default": false
+                                    "dynamic_bucket_size": {
+                                        "type": "number",
+                                        "description": "The approximate maximum bucket size in dynamic_batch_mode=0.",
+                                        "default": -1
+                                    },
+                                    "dynamic_batch_mode": {
+                                        "type": "number",
+                                        "description": "Dynamic batching mode. -1: disable; 0: bucket mode; 1: batch mode. default -1.",
+                                        "default": -1,
+                                        "examples": [
+                                            -1,
+                                            0,
+                                            1
+                                        ]
                                     },
                                     "tokenizer": {
                                         "type": "string",
@@ -896,9 +940,20 @@
                                         "type": "string",
                                         "description": "Directory to save the log and model files."
                                     },
-                                    "databalance": {
-                                        "description": "Load data batches according to sequence lenth.",
-                                        "default": false
+                                    "dynamic_bucket_size": {
+                                        "type": "number",
+                                        "description": "The approximate maximum bucket size in dynamic_batch_mode=0.",
+                                        "default": -1
+                                    },
+                                    "dynamic_batch_mode": {
+                                        "type": "number",
+                                        "description": "Dynamic batching mode. -1: disable; 0: bucket mode; 1: batch mode. default -1.",
+                                        "default": -1,
+                                        "examples": [
+                                            -1,
+                                            0,
+                                            1
+                                        ]
                                     },
                                     "tokenizer": {
                                         "type": "string",

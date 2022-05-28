@@ -133,7 +133,7 @@ class Conv2dSubdampling(nn.Module):
         # [B, T//4, OD, D//4] -> [B, T//4, OD * D//4]
         out = out.contiguous().view(B, NT, OD*ND)
         lens_out = torch.div(lens, 2, rounding_mode='floor')
-        lens_out = torch.div(lens_out, 2, rounding_mode='floor')
+        lens_out = torch.div(lens_out, 2, rounding_mode='floor').to(lens.dtype)
         return out, lens_out
 
 
@@ -190,7 +190,7 @@ class VGG2LSubsampling(nn.Module):
         contiguous_out = transposed_out.contiguous().view(
             transposed_out.size(0), transposed_out.size(1), -1)
 
-        lens_out = torch.ceil(torch.ceil(lens/2)/2)
+        lens_out = torch.ceil(torch.ceil(lens/2).to(lens.dtype)/2)
         return contiguous_out, lens_out
 
 
@@ -780,3 +780,35 @@ class MaskedBatchNorm1d(nn.BatchNorm1d):
             inp = inp * self.weight[None, :, None] + self.bias[None, :, None]
 
         return inp
+
+
+class SampledSoftmax(nn.Module):
+    def __init__(self, blank: int = -1) -> None:
+        super().__init__()
+        assert isinstance(blank, int)
+
+        if blank != -1:
+            # CTC / RNN-T keep the first place for <blk>, currently only support <blk>=0
+            assert blank == 0
+            self.pad = nn.ConstantPad1d((1, 0), 0)
+
+        self.blank_id = blank
+
+    def forward(self, x: torch.Tensor, labels: torch.Tensor):
+
+        orin_shape = labels.shape
+        if labels.dim() > 1:
+            labels = labels.flatten()
+
+        dtype = labels.dtype
+        indices_sampled, labels = torch.unique(
+            labels, sorted=True, return_inverse=True)
+        indices_sampled = indices_sampled.to(torch.long)
+        labels = labels.to(dtype)
+
+        if self.blank_id != -1:
+            if indices_sampled[0] != self.blank_id:
+                indices_sampled = self.pad(indices_sampled)
+                labels += 1
+
+        return x[..., indices_sampled].log_softmax(dim=-1), labels.reshape(orin_shape)

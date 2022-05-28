@@ -132,6 +132,19 @@ if __name__ == "__main__":
 
     ############ Stage 4  Evaluate ############
     if s_beg <= 4 and s_end >= 4:
+        # FIXME: runing script directly from NN training to decoding always producing SIGSEGV error
+        if s_beg <= 3:
+            os.system(" ".join([
+                sys.executable,     # python interpreter
+                sys.argv[0],        # file script
+                working_dir,
+                "--silent" if args.silent else "",
+                "--start_stage=4",
+                f"--stop_stage={args.stage_end}",
+                f"--ngpu={args.ngpu}"
+            ]))
+            sys.exit(0)
+
         if not args.silent:
             print("{0} {1} {0}".format("="*20, "Stage 4 Evaluate"))
         fmt = "# Evaluate # {}\n" if not args.silent else ""

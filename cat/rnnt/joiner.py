@@ -6,6 +6,9 @@
 """
 
 
+__all__ = ["AbsJointNet", "JointNet"]
+
+
 import gather
 from typing import *
 
@@ -14,13 +17,8 @@ import torch.nn as nn
 
 
 class AbsJointNet(nn.Module):
-    def __init__(self, skip_normalize: bool = False) -> None:
+    def __init__(self) -> None:
         super().__init__()
-        if skip_normalize and not self.is_normalize_separated:
-            raise ValueError(
-                f"{self.__class__.__name__} cannot skip the normalization in forward(), please set skip_normalize=False."
-            )
-        self._skip_normalize = skip_normalize
 
     @property
     def is_normalize_separated(self) -> bool:
@@ -36,10 +34,7 @@ class AbsJointNet(nn.Module):
     def forward(self, *args, **kwargs):
         joinout = self.impl_forward(
             *args, **kwargs)  # type: torch.Tensor
-        if self._skip_normalize:
-            return joinout
-        else:
-            return joinout.log_softmax(dim=-1)
+        return joinout.log_softmax(dim=-1)
 
 
 class JointNet(AbsJointNet):
@@ -60,9 +55,8 @@ class JointNet(AbsJointNet):
             hdim: int = -1,
             join_mode: Literal['add', 'cat'] = 'add',
             act: Literal['tanh', 'relu'] = 'tanh',
-            skip_normalize: bool = False,
             compact: bool = False):
-        super().__init__(skip_normalize=skip_normalize)
+        super().__init__()
 
         if act == 'tanh':
             act_layer = nn.Tanh()
@@ -201,6 +195,3 @@ class HAT(JointNet):
         log_prob_label = logits[..., 1:].log_softmax(
             dim=-1) + self._dist_blank(-logit_blank)
         return torch.cat([log_prob_blank, log_prob_label], dim=-1)
-
-
-__all__ = [AbsJointNet, JointNet]

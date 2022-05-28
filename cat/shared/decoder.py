@@ -59,9 +59,15 @@ class AbsDecoder(nn.Module):
                 self.classifier.weight = self.embedding.weight
 
     def score(self, input_ids: torch.LongTensor, targets: torch.LongTensor, input_lengths: Optional[torch.LongTensor] = None, *args):
+
+        U = input_lengths.max()
         if input_lengths is None:
-            input_lengths = input_ids.new_ones(
-                input_ids.size(0)) * input_ids.size(1)
+            input_lengths = input_ids.new_full(input_ids.size(0), U)
+
+        if input_ids.size(1) > U:
+            input_ids = input_ids[:, :U]
+        if targets.size(1) > U:
+            targets = targets[:, :U]
 
         # [N, U, K]
         logits, _ = self.forward(input_ids, input_lengths=input_lengths, *args)

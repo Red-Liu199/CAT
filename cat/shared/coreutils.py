@@ -204,31 +204,6 @@ def highlight_msg(msg: Union[Sequence[str], str]):
     print(msg)
 
 
-'''
-NOTE (Huahuan):
-    with --databalance, batch size on each device might be different,
-    however, torch DDP automatically makes the allreduce on gradients
-    then averages them by world size during backward.
-    which assumes the batch sizes across devices are the same.
-    To address this, we re-calculate the loss in a hack way:
-        local_loss_new = sum_over_local_batches(local_loss) / global_batch_size * world_size
-
-    Here we prove the new hacked-loss is equivalent to the standard one:
-    Currently the loss is (in standard DDP):
-        loss_normalized = sum_over_devices(mean_over_local_batches(local_loss)) / world_size
-                        = sum_over_devices(sum_over_local_batches(local_loss) / (global_batch_size / world_size))  / world_size
-                        = sum_over_devices(sum_over_local_batches(local_loss)) / global_batch_size
-
-
-    With re-defining the local_loss, we substitute `local_loss_new` to replace `mean_over_local_batches(local_loss)`, here is
-        loss_normalized_new' = sum_over_devices(sum_over_local_batches(local_loss) / global_batch_size)
-                             = loss_normalized
-
-    such that the gradient is properly computed. Be aware that this
-    might cause numerical difference given the fact that probably: (f * N) / N != f
-'''
-
-
 def basic_ddp_parser(prog: str = '') -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog=prog)
     parser.add_argument('-j', '--workers', default=1, type=int, metavar='N',
@@ -281,8 +256,10 @@ def basic_trainer_parser(prog: str = '', training: bool = True,  isddp: bool = T
                             help="Location of dev data. Default: <data>/[pickle|hdf5]/cv.[pickle|hdf5]")
         parser.add_argument("--dir", type=str, default=None, metavar='PATH',
                             help="Directory to save the log and model files.")
-        parser.add_argument("--databalance", action="store_true",
-                            help="Load data batches according to sequence lenth.")
+        parser.add_argument("--dynamic_bucket_size", type=int, default=-1,
+                            help="The approximate maximum bucket size in dynamic_batch_mode=0.")
+        parser.add_argument("--dynamic_batch_mode", type=int, choices=[-1, 0, 1], default=-1,
+                            help="Dynamic batching mode. -1: disable; 0: bucket mode; 1: batch mode. default -1.")
 
         parser.add_argument("--tokenizer", type=str,
                             help="Specify tokenizer. Currently, only used with --large-dataset.")
@@ -316,106 +293,95 @@ def convert_syncBatchNorm(model: nn.Module) -> nn.Module:
 # https://stackoverflow.com/a/63393016
 
 
-def divide_almost_equally(arr_l, arr_idx, num_chunks):
-    sorted_arr = list(zip(arr_l, arr_idx))
-
+def divide_almost_equally(arr_weighted: List[Tuple[Any, Union[float, int]]], num_chunks: int):
     heap = [(0, idx) for idx in range(num_chunks)]
     heapq.heapify(heap)
     groups = {i: [] for i in range(num_chunks)}
 
-    for arr_idx in range(len(arr_l)):
+    for idx in range(len(arr_weighted)):
         g_sum, g_idx = heapq.heappop(heap)
-        groups[g_idx].append(sorted_arr[arr_idx][1])
-        g_sum += sorted_arr[arr_idx][0]
+        groups[g_idx].append(arr_weighted[idx][0])
+        g_sum += arr_weighted[idx][1]
         heapq.heappush(heap, (g_sum, g_idx))
 
     return groups.values()
 
 
-def group_by_lens(src_l: List[Any], linfo: List[int], N: int, consider_padding: bool = True) -> List[List[Any]]:
-    """Split `src_l` by `linfo` into `N` parts.
+def weighted_group(weighted_list: List[Tuple[Any, Union[float, int]]], N: int, consider_padding: bool = True) -> List[List[Any]]:
+    """
+    weighted_list is list of (obj, weight)
+    Split `weighted_list` by weight into `N` parts and return the indices.
+
     The split is done by a kind of greedy method, considering
-    balancing the sum of lengths in each part and their paddings.
-    Assume src_l is sorted by descending order.
+    balancing the sum of weights in each group (and their paddings).
+    Assume src_list is sorted by descending order.
     """
 
-    len_src = len(linfo)
+    len_src = len(weighted_list)
     assert len_src >= N, f"list to be split is shorter than number of groups: {len_src} < {N}"
-    assert len_src == len(src_l)
 
     if N == 1:
-        return [src_l]
+        return [[obj for obj, _ in weighted_list]]
     if N == len_src:
-        return [[x] for x in src_l]
-
-    # NOTE (huahuan):
-    # I deprecated the support for custom length norm, since eval() function could be dangerous
-    # In most of the cases, normalization is not required.
+        return [[x] for x, _ in weighted_list]
 
     if not consider_padding:
-        return list(divide_almost_equally(linfo, src_l, N))
+        return list(divide_almost_equally(weighted_list, N))
 
-    def get_largest(_linfo, _K: int) -> List[int]:
-        _len_linfo = len(_linfo)
-        assert _len_linfo >= _K
-        if _len_linfo == _K:
-            return [0, 1]
+    def get_large(_wght, _K: int) -> int:
+        l_arr = len(_wght)
+        assert l_arr >= _K
+        if l_arr == _K:
+            return 1
         if _K == 1:
-            return [0, _len_linfo]
+            return l_arr
 
-        _avg = sum(_linfo)/_K
-        cnt_interval = 0
-        for i, l in enumerate(_linfo):
-            cnt_interval += l
-            if cnt_interval >= _avg:
-                return [0, i+1]
+        _avg = sum(_wght)/_K
+        cumsum = _wght[0]
+        for i in range(l_arr-_K):
+            cumsum += _wght[i+1]
+            if cumsum > _avg:
+                break
+        # i+1 for [l_bound, u_bound)
+        # i for [l_bound, u_bound-1), keep large part smaller
+        return i+1
 
-    def get_smallest(_linfo, _K: int) -> List[int]:
-        _len_linfo = len(_linfo)
-        assert _len_linfo >= _K
-        if _len_linfo == _K:
-            return [_len_linfo-1, _len_linfo]
+    def get_small(_wght, _K: int) -> int:
+        l_arr = len(_wght)
+        assert l_arr >= _K
+        if l_arr == _K:
+            return l_arr-1
         if _K == 1:
-            return [0, _len_linfo]
+            return 0
 
-        _avg = sum(_linfo)/_K
-        lower_bound = _len_linfo
-        cnt_interval = 0
-        cnt_piece = 0
-        max_piece = _len_linfo - _K + 1
-        for i in range(_len_linfo-1, -1, -1):
-            cnt_interval += _linfo[i]
-            cnt_piece += 1
-            if cnt_interval > _avg or cnt_piece > max_piece:
-                return [lower_bound, _len_linfo]
-            lower_bound -= 1
+        _avg = sum(_wght)/_K
+        cumsum = 0
+        for i in range(l_arr-1, _K-2, -1):
+            cumsum += _wght[i]
+            if cumsum > _avg:
+                break
+        return i
 
     # greedy not optimal
-    g_avg = sum(linfo) / N
-    res = N
+    src_list, weights = list(zip(*weighted_list))
+    g_avg = sum(weights) / N
     indices_fwd = [0]
     indices_bwd = [len_src]
-    sliced_info = linfo[:]
-    while sliced_info != []:
-        running_sum = sum(linfo[indices_fwd[-1]:indices_bwd[-1]])
-        running_avg = running_sum/res
-        if running_avg > g_avg:
-            _, sliced_idx_1 = get_largest(sliced_info, res)
-            indices_fwd.append(indices_fwd[-1] + sliced_idx_1)
-        else:
-            sliced_idx_0, sliced_idx_1 = get_smallest(
-                sliced_info, res)
+    res_list = weights[:]
+    for res in range(N, 0, -1):
+        running_avg = sum(res_list)/res
+        if running_avg >= g_avg:
+            l_bound = get_small(res_list, res)
             indices_bwd.append(
-                sliced_idx_0 + (indices_bwd[-1] - sliced_idx_1))
-
-        sliced_info = linfo[indices_fwd[-1]:indices_bwd[-1]]
-        res -= 1
+                indices_bwd[-1] - (len(res_list)-l_bound))
+        else:
+            u_bound = get_large(res_list, res)
+            indices_fwd.append(indices_fwd[-1] + u_bound)
+        res_list = weights[indices_fwd[-1]:indices_bwd[-1]]
 
     assert indices_fwd[-1] == indices_bwd[-1]
-
     indices = indices_fwd[:-1]+indices_bwd[::-1]
-
-    return [src_l[indices[i]:indices[i+1]] for i in range(N)]
+    return [src_list[indices[i]:indices[i+1]] for i in range(N)]
 
 
 def main_spawner(args, _main_worker: Callable[[int, int, argparse.Namespace], None]):
@@ -490,7 +456,6 @@ def load_checkpoint(model: Union[torch.nn.Module, torch.nn.parallel.DistributedD
             )
         else:
             raise RuntimeError(str(re))
-    # model.load_state_dict(state_dict)
     return model
 
 
