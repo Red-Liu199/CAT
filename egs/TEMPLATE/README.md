@@ -56,7 +56,7 @@
 2. Train a 3-gram word LM
 
    ```bash
-   bash utils/pipeline/ngram.sh exp/template-lm-ngram --text-corpus -o 3
+   bash utils/pipeline/ngram.sh exp/template-lm-ngram -o 3
    ```
 
 
