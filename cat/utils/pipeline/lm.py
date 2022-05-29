@@ -29,11 +29,15 @@ if __name__ == "__main__":
 
     assert s_end >= 1, f"Invalid stop stage: {s_end}"
     assert s_beg >= 1 and s_beg <= s_end, f"Invalid start stage: {s_beg}"
+    from cat.shared._constants import (
+        F_NN_CONFIG,
+        F_HYPER_CONFIG
+    )
 
     cwd = os.getcwd()
     working_dir = args.expdir
     checkExist('d', working_dir)
-    f_hyper = os.path.join(working_dir, 'hyper-p.json')
+    f_hyper = os.path.join(working_dir, F_HYPER_CONFIG)
     checkExist('f', f_hyper)
     hyper_cfg = readfromjson(f_hyper)
     if "env" in hyper_cfg:
@@ -145,6 +149,9 @@ if __name__ == "__main__":
             ]))
             sys.exit(0)
 
+        from cat.shared._constants import (
+            D_CHECKPOINT
+        )
         if not args.silent:
             print("{0} {1} {0}".format("="*20, "Stage 4 Evaluate"))
         fmt = "# Evaluate # {}\n" if not args.silent else ""
@@ -153,14 +160,14 @@ if __name__ == "__main__":
         assert 'inference' in hyper_cfg, f"missing 'inference' at {f_hyper}"
 
         cfg_infr = hyper_cfg['inference']
-        checkdir = os.path.join(working_dir, 'check')
+        checkdir = os.path.join(working_dir, D_CHECKPOINT)
         # do model averaging
         if 'avgmodel' in cfg_infr:
-            checkpoint, _ = model_average(
+            checkpoint = model_average(
                 setting=cfg_infr['avgmodel'],
                 checkdir=checkdir,
                 returnifexist=True
-            )
+            )[0]
         else:
             checkpoint = None
 
@@ -176,10 +183,11 @@ if __name__ == "__main__":
         infer_setting = hyper_cfg['inference']
         if 'avgmodel' in infer_setting:
             # do model averaging
-            checkpoint, _ = model_average(
+            checkpoint = model_average(
                 setting=infer_setting['avgmodel'],
-                checkdir=os.path.join(working_dir, 'check'),
-                returnifexist=True)
+                checkdir=checkdir,
+                returnifexist=True
+            )[0]
         else:
             checkpoint = None
 
@@ -197,8 +205,7 @@ if __name__ == "__main__":
 
         # check config
         if 'config' not in infr_option:
-            infr_option['config'] = os.path.join(
-                working_dir, 'config.json')
+            infr_option['config'] = os.path.join(working_dir, F_NN_CONFIG)
             checkExist('f', infr_option['config'])
         # check tokenizer
         if 'tokenizer' not in infr_option:

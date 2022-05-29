@@ -57,7 +57,7 @@
                     "default": false
                 }
             },
-            "description": "Configuration of Transducer transcription network.",
+            "description": "Configuration of Transducer transcription network / encoder.",
             "required": [
                 "type",
                 "kwargs"
@@ -474,7 +474,7 @@
                     "default": false
                 }
             },
-            "description": "Configuration of Transducer prediction network.",
+            "description": "Configuration of Transducer prediction network / LM.",
             "required": [
                 "type",
                 "kwargs"
@@ -753,7 +753,7 @@
                 }
             ]
         },
-        "specaug_config": {
+        "specaug": {
             "type": "object",
             "properties": {
                 "delta_feats": {

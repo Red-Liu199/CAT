@@ -6,6 +6,6 @@
 """
 
 
-from .train import build_model as am_builder
+from .train import build_model as ctc_builder
 
-__all__ = [am_builder]
+__all__ = [ctc_builder]

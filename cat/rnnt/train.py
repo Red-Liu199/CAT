@@ -8,9 +8,12 @@ Transducer trainer.
 
 __all__ = ["TransducerTrainer", "build_model", "_parser", "main"]
 
-from ..shared import Manager
+from . import joiner as joiner_zoo
+from ..shared import (
+    SpecAug,
+    Manager
+)
 from ..shared import coreutils
-from ..shared import SpecAug
 from ..shared import encoder as tn_zoo
 from ..shared import decoder as pn_zoo
 from ..shared.layer import SampledSoftmax
@@ -18,7 +21,6 @@ from ..shared.data import (
     KaldiSpeechDataset,
     sortedPadCollateASR
 )
-from . import joiner as joiner_zoo
 
 import os
 import gather

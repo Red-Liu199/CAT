@@ -75,6 +75,20 @@ Note that data prepare is not included in standard pipelines. It's your duty to 
 
 **What is done at each stage**
 
+0. Speech data preparation. As I mentioned, data preparation if your job. I do not take care of that. To begin with preparing a dataset yourself, please have a look at the [yesno](./local/data.sh) and [aishell](../aishell/local/data.sh) for examples preparing feats with `torchaudio`. If you already have data in Kaldi standard format (`.scp` for feats and a text transcription file.), you can add the path to `egs/[task]/data/metainfo.json` as following:
+   ```json
+   {
+      "libri-960": {
+         "scp": "/path/to/libri-960.scp",
+         "trans": "/path/to/libri-960.txt"
+      },
+      "wsj": {
+         "scp": "/path/to/wsj.scp",
+         "trans": "/path/to/wsj.txt"
+      }
+   }
+   ```
+
 1. tokenizer training: we train the tokenizer with the training corpus (what you specified in `hyper['data']['train']`, `hyper` is the content in hyper-parameter setting file, which is defaultly `hyper-p.json`) and the tokenizer setting (in `hyper['tokenizer']`). The trained tokenizer would be stored as `/path/to/tokenizer.tknz` if you don't specify the path, and can be loaded directly via
 
    ```python3

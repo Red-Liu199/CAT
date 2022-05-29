@@ -9,8 +9,6 @@ usage:
     python utils/avgmodel.py -h
 """
 
-from cat.shared.manager import F_CHECKLIST, CheckpointManager
-
 import os
 import argparse
 import collections
@@ -79,11 +77,12 @@ def average_checkpoints(inputs: List[str]):
 
 
 def select_checkpoint(f_checklist: str, n: int = -1, mode: Literal['best', 'last', 'slicing'] = 'best', _slicing: tuple = None):
-
+    from cat.shared.manager import CheckManager
+    from cat.shared._constants import F_CHECKPOINT_LIST
     if os.path.isfile(f_checklist):
-        cm = CheckpointManager(f_checklist)
+        cm = CheckManager(f_checklist)
     elif os.path.isdir(f_checklist):
-        cm = CheckpointManager(os.path.join(f_checklist, F_CHECKLIST))
+        cm = CheckManager(os.path.join(f_checklist, F_CHECKPOINT_LIST))
     else:
         raise RuntimeError(f"'{f_checklist}' is neither a file nor a folder.")
 
@@ -124,6 +123,7 @@ def main():
                         help="Remove states other than model parameters (such as scheduler / optimizer) to reduce the output file size.")
 
     args = parser.parse_args()
+    from cat.shared.manager import CheckManager
 
     if args.num_best is None and args.slicing_select is None:
         notfound = []
@@ -141,7 +141,7 @@ def main():
             f"only one input is accepted. However, given input is {args.input}"
         f_checklist = args.input[0]
         try:
-            CheckpointManager(f_checklist)
+            CheckManager(f_checklist)
         except Exception as e:
             print(str(e))
             raise ValueError(
@@ -159,7 +159,7 @@ def main():
             assert len(slicing) == 2
             if args.output is None:
                 args.output = os.path.join(
-                    os.path.dirname(f_checklist), 
+                    os.path.dirname(f_checklist),
                     f"avg_slice_{args.slicing_select}.pt"
                 )
 

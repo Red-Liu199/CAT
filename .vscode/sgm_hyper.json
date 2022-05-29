@@ -1185,7 +1185,7 @@
                                         "properties": {
                                             "config": {
                                                 "type": "string",
-                                                "description": "Path to the configuration file, usually 'path/to/config.json"
+                                                "description": "Path to the configuration file, usually 'path/to/config.json'"
                                             },
                                             "nj": {
                                                 "type": "number",

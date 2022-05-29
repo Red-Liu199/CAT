@@ -4,13 +4,13 @@
             "fileMatch": [
                 "exp/**/config.json"
             ],
-            "url": ".vscode/schemas.json"
+            "url": ".vscode/sgm_nn.json"
         },
         {
             "fileMatch": [
                 "exp/**/hyper-p.json"
             ],
-            "url": ".vscode/hyper_schema.json"
+            "url": ".vscode/sgm_hyper.json"
         }
     ]
 }

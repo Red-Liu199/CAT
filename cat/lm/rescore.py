@@ -12,9 +12,9 @@ P.S. CPU is faster when rescoring with n-gram model, while GPU
      would be faster rescoring with NN model.
 """
 
+from . import lm_builder
 from ..shared import tokenizer as tknz
 from ..shared import coreutils
-from . import lm_builder
 from ..shared.decoder import (
     AbsDecoder,
     NGram
@@ -31,10 +31,10 @@ import argparse
 from tqdm import tqdm
 from typing import *
 
+import torch
+import torch.multiprocessing as mp
 from torch.cuda.amp import autocast
 from torch.utils.data import DataLoader
-import torch.multiprocessing as mp
-import torch
 
 
 def main(args: argparse.Namespace = None):

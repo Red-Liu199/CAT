@@ -4,23 +4,23 @@
 
 __all__ = ["NCETransducerTrainer", "build_model", "_parser", "main"]
 
+from . import rnnt_builder
+from .train import TransducerTrainer
+from .joiner import AbsJointNet
+from .beam_search import BeamSearcher as RNNTDecoder
+from ..lm import lm_builder
+from ..shared import coreutils
+from ..shared.monitor import ANNOTATION
 from ..shared.encoder import AbsEncoder
 from ..shared.decoder import AbsDecoder, ILM
-from ..shared.manager import train as default_train_func
+from ..shared.manager import (
+    Manager,
+    train as default_train_func
+)
 from ..shared.data import (
     KaldiSpeechDataset,
     sortedPadCollateASR
 )
-from ..shared import (
-    Manager,
-    coreutils
-)
-from ..lm import lm_builder
-from .train import build_model as rnnt_builder
-from .train import TransducerTrainer
-
-from .joiner import AbsJointNet
-from .beam_search import BeamSearcher as RNNTDecoder
 
 
 import os
@@ -369,7 +369,7 @@ def custom_evaluate(testloader, args: argparse.Namespace, manager: Manager) -> f
     if args.rank == 0:
         wer = cnt_err / cnt_tokens
         manager.writer.add_scalar('loss/dev-wer', wer, manager.step)
-        manager.monitor.update('eval:loss', (wer, manager.step))
+        manager.monitor.update(ANNOTATION['dev-metric'], (wer, manager.step))
 
         scatter_list = [wer]
     else:

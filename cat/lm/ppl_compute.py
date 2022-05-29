@@ -2,12 +2,12 @@
 
 """
 
-from ..shared.data import (
+from . import lm_builder
+from cat.shared import coreutils
+from cat.shared.data import (
     CorpusDataset,
     sortedPadCollateLM
 )
-from ..shared import coreutils
-from . import lm_builder
 
 import os
 import sys
@@ -221,7 +221,7 @@ def build_model(args: argparse.Namespace, device):
 def _parser():
     parser = argparse.ArgumentParser(prog="Compute perplexity to evaluate LM.")
     parser.add_argument("config", type=str,
-                        help="Path to the configuration file, usually 'path/to/config.json")
+                        help="Path to the configuration file, usually 'path/to/config.json'")
     parser.add_argument("--nj", type=int, default=-1)
     parser.add_argument("-e", "--evaluate", type=str, nargs='+',
                         help="Evaluate test sets. w/o --tokenizer, -e inputs are assumed to be CorpusDataset format binary data.")

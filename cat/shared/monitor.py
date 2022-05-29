@@ -9,6 +9,11 @@ Usage:
     python3 cat/shared/monitor.py <path to my logfile>
 """
 
+from ._constants import (
+    F_MONITOR_FIG,
+    F_MONITOR_SUMMARY
+)
+
 import time
 import pickle
 import os
@@ -17,8 +22,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 from typing import *
 
-FILE_WRITER = r"training.smr"
-BASE_METRIC = ['train:loss', 'train:lr', 'eval:loss']
+# modify the values to any you want, but keep the keys as they're
+ANNOTATION = OrderedDict([
+    ('tr-metric', 'train loss'),
+    ('tr-lr', 'train lr'),
+    ('dev-metric', 'dev loss')
+])
 
 
 class BaseSummary():
@@ -59,7 +68,7 @@ class MonitorWriter():
     """Monitor writer
     """
 
-    def __init__(self, path: str = FILE_WRITER) -> None:
+    def __init__(self, path: str = F_MONITOR_SUMMARY) -> None:
         """
         Args:
             path (str): directory or path to resuming file.
@@ -68,7 +77,7 @@ class MonitorWriter():
         self.summaries = {}
         self._has_exported_since_last_load = False
         if os.path.isdir(path):
-            path = os.path.join(path, FILE_WRITER)
+            path = os.path.join(path, F_MONITOR_SUMMARY)
 
         path = os.path.realpath(path)
         self._default_path = path
@@ -310,8 +319,9 @@ def plot_monitor(mwriter: Union[str, MonitorWriter], o_path: str = None, title: 
         log_writer = MonitorWriter(mwriter)
 
     user_custom_tracks = []
+    base_anno = set(ANNOTATION.values())
     for k in log_writer.summaries:
-        if k not in BASE_METRIC:
+        if k not in base_anno:
             user_custom_tracks.append(k)
 
     n_row = 2 + (len(user_custom_tracks) // 2 + len(user_custom_tracks) % 2)
@@ -321,20 +331,22 @@ def plot_monitor(mwriter: Union[str, MonitorWriter], o_path: str = None, title: 
         3*n_col, 2.2*n_row), constrained_layout=True)
 
     # Learning rate
-    draw_lr(axes[0][0], log_writer['train:lr'])
+    draw_lr(axes[0][0], log_writer[ANNOTATION['tr-lr']])
     axes[0][0].set_xticklabels([])
 
     # Time
-    draw_time(axes[0][1], log_writer['train:loss'], True)
+    draw_time(axes[0][1], log_writer[ANNOTATION['tr-metric']], True)
     axes[0][1].set_xticklabels([])
 
     # Training loss and moving average
-    draw_loss(axes[1][0], log_writer['train:loss'], ylabel='train loss')
+    draw_loss(axes[1][0], log_writer[ANNOTATION['tr-metric']],
+              ylabel=ANNOTATION['tr-metric'])
     axes[1][0].set_xlabel("Step")
 
     # Dev loss
-    draw_loss(axes[1][1], log_writer['eval:loss'],
-              smooth_value=0., ylabel='dev loss', prop_box=True)
+    draw_loss(axes[1][1], log_writer[ANNOTATION['dev-metric']],
+              smooth_value=0., ylabel=ANNOTATION['dev-metric'],
+              prop_box=True)
     axes[1][1].set_xlabel("Step")
 
     # custom metric
@@ -354,12 +366,11 @@ def plot_monitor(mwriter: Union[str, MonitorWriter], o_path: str = None, title: 
     else:
         if o_path is None:
             outpath = os.path.join(os.path.dirname(
-                log_writer._default_path), 'monitor.png')
+                log_writer._default_path), F_MONITOR_FIG)
+        elif os.path.isdir(o_path):
+            outpath = os.path.join(o_path, F_MONITOR_FIG)
         else:
-            if os.path.isdir(o_path):
-                outpath = os.path.join(o_path, 'monitor.png')
-            else:
-                outpath = o_path
+            outpath = o_path
         plt.savefig(outpath, dpi=200, facecolor="w")
     plt.close()
     return outpath
@@ -372,8 +383,9 @@ def cmp(checks: List[str], legends: Union[List[str], None] = None, title: str = 
 
     log_writer = MonitorWriter(checks[0])
     user_custom_tracks = []
+    base_anno = set(ANNOTATION.values())
     for k in log_writer.summaries:
-        if k not in BASE_METRIC:
+        if k not in base_anno:
             user_custom_tracks.append(k)
 
     n_row = 2 + (len(user_custom_tracks) // 2 + len(user_custom_tracks) % 2)
@@ -387,11 +399,12 @@ def cmp(checks: List[str], legends: Union[List[str], None] = None, title: str = 
 
     for clog in checks:
         log_writer = MonitorWriter(clog)
-        draw_lr(axes[0][0], log_writer['train:lr'])
-        draw_time(axes[0][1], log_writer['train:loss'])
-        draw_loss(axes[1][0], log_writer['train:loss'], ylabel='train loss')
-        draw_loss(axes[1][1], log_writer['eval:loss'],
-                  smooth_value=0., ylabel='dev loss')
+        draw_lr(axes[0][0], log_writer[ANNOTATION['tr-lr']])
+        draw_time(axes[0][1], log_writer[ANNOTATION['tr-metric']])
+        draw_loss(axes[1][0], log_writer[ANNOTATION['tr-metric']],
+                  ylabel=ANNOTATION['tr-metric'])
+        draw_loss(axes[1][1], log_writer[ANNOTATION['dev-metric']],
+                  smooth_value=0., ylabel=ANNOTATION['dev-metric'])
 
         # custom metric
         for i, k in enumerate(user_custom_tracks):

@@ -2,17 +2,15 @@
 # Author: Huahuan Zheng (maxwellzh@outlook.com)
 # MWER training of RNN-T
 
-from ..shared.data import (
+from .beam_search import BeamSearcher as RNNTDecoder
+from .train import TransducerTrainer
+from . import rnnt_builder
+from cat.shared.manager import Manager
+from cat.shared import coreutils
+from cat.shared.data import (
     KaldiSpeechDataset,
     sortedPadCollateASR
 )
-from ..shared import (
-    Manager,
-    coreutils
-)
-from .beam_search import BeamSearcher as RNNTDecoder
-from .train import build_model as rnnt_builder
-from .train import TransducerTrainer
 
 
 import os

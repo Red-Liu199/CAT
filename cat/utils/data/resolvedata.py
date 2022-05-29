@@ -32,7 +32,6 @@ import glob
 import json
 from typing import Dict, List
 
-F_DATAINFO = 'data/metainfo.json'
 D_SRCDATA = 'data/src'
 
 
@@ -57,6 +56,7 @@ def find_dataset(d_data: str) -> Dict[str, Dict[str, str]]:
 
 
 def main():
+    from cat.shared._constants import F_DATAINFO
     found_datasets = {}
     if os.path.isdir(D_SRCDATA):
         found_datasets.update(find_dataset(D_SRCDATA))
@@ -72,9 +72,23 @@ def main():
             os.system(f"ln -s {os.path.abspath(src_recipedata)} {D_SRCDATA}")
             found_datasets.update(find_dataset(src_recipedata))
 
-    os.makedirs(os.path.dirname(F_DATAINFO), exist_ok=True)
-    with open(F_DATAINFO, 'w') as fo:
-        json.dump(found_datasets, fo, indent=4, sort_keys=True)
+    if os.path.isfile(F_DATAINFO):
+        backup = json.load(open(F_DATAINFO, 'r'))
+        meta = backup.copy()
+    else:
+        os.makedirs(os.path.dirname(F_DATAINFO), exist_ok=True)
+        backup = None
+        meta = {}
+
+    meta.update(found_datasets)
+    try:
+        with open(F_DATAINFO, 'w') as fo:
+            json.dump(meta, fo, indent=4, sort_keys=True)
+    except Exception as e:
+        if backup is not None:
+            with open(F_DATAINFO, 'w') as fo:
+                json.dump(backup, fo, indent=4, sort_keys=True)
+        raise RuntimeError(str(e))
 
 
 if __name__ == "__main__":

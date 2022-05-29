@@ -4,7 +4,7 @@ Derived from
 https://github.com/parlance/ctcdecode
 """
 
-from .train import build_model as ctc_builder
+from . import ctc_builder
 from ..shared import tokenizer as tknz
 from ..shared import coreutils
 from ..shared.encoder import AbsEncoder
@@ -12,7 +12,6 @@ from ..shared.data import (
     ScpDataset,
     sortedScpPadCollate
 )
-from ctcdecode import CTCBeamDecoder
 
 
 import os
@@ -21,6 +20,7 @@ import pickle
 import argparse
 from tqdm import tqdm
 from typing import *
+from ctcdecode import CTCBeamDecoder
 
 import torch
 import torch.multiprocessing as mp

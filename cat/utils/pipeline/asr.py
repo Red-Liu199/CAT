@@ -20,7 +20,14 @@ __all__ = [
     'train_tokenizer'
 ]
 
-from cat.utils.data.resolvedata import F_DATAINFO
+from cat.shared import tokenizer as tknz
+from cat.shared._constants import (
+    F_DATAINFO,
+    F_NN_CONFIG,
+    F_HYPER_CONFIG,
+    D_CHECKPOINT,
+    D_INFER
+)
 from cat.utils.data import resolvedata
 
 
@@ -35,7 +42,7 @@ from multiprocessing import Process
 
 
 def initial_datainfo():
-    if not os.path.isfile(resolvedata.F_DATAINFO):
+    if not os.path.isfile(F_DATAINFO):
         resolvedata.main()
 
 
@@ -367,11 +374,10 @@ def train_nn_model(
             f"warning: missing 'tokenizer': {f_hyper_p}.\n"
             "... You have ensure the 'num_classes' in config is correct.\n")
     else:
-        from cat.shared import tokenizer as tknz
         checkExist('f', settings['tokenizer']['location'])
         tokenizer = tknz.load(settings['tokenizer']['location'])
 
-        f_nnconfig = os.path.join(working_dir, 'config.json')
+        f_nnconfig = os.path.join(working_dir, F_NN_CONFIG)
         checkExist('f', f_nnconfig)
 
         nnconfig = readfromjson(f_nnconfig)
@@ -492,7 +498,6 @@ def train_tokenizer(f_hyper: str):
     if 'property' not in hyper_settings['tokenizer']:
         hyper_settings['tokenizer']['property'] = {}
 
-    from cat.shared import tokenizer as tknz
     if tokenizer_type == 'SentencePieceTokenizer':
         f_corpus_tmp = combine_text(hyper_settings['data']['train'])
         sp_settings, (f_tokenizer, _) = resolve_sp_path(
@@ -595,7 +600,7 @@ if __name__ == "__main__":
     cwd = os.getcwd()
     working_dir = args.expdir
     checkExist('d', working_dir)
-    f_hyper = os.path.join(working_dir, 'hyper-p.json')
+    f_hyper = os.path.join(working_dir, F_HYPER_CONFIG)
     checkExist('f', f_hyper)
     initial_datainfo()
     datainfo = readfromjson(F_DATAINFO)
@@ -630,7 +635,6 @@ if __name__ == "__main__":
         hyper_cfg = readfromjson(f_hyper)
         assert 'data' in hyper_cfg, f"missing 'data': {f_hyper}"
 
-        from cat.shared import tokenizer as tknz
         if 'tokenizer' not in hyper_cfg:
             sys.stderr.write(
                 f"warning: missing 'tokenizer', assume the ground truth text files as tokenized ones.")
@@ -717,14 +721,14 @@ if __name__ == "__main__":
 
         cfg_infr = hyper_cfg['inference']
 
-        checkdir = os.path.join(working_dir, 'check')
+        checkdir = os.path.join(working_dir, D_CHECKPOINT)
         # do model averaging
-        if 'avgmodel' in cfg_infr:
-            checkpoint, suffix_model = model_average(
+        if 'avgmodel' in cfg_infr and os.path.isdir(checkdir):
+            checkpoint = model_average(
                 setting=cfg_infr['avgmodel'],
                 checkdir=checkdir,
                 returnifexist=True
-            )
+            )[0]
         else:
             checkpoint = None
 
@@ -740,29 +744,36 @@ if __name__ == "__main__":
             # find checkpoint
             if infr_option.get('resume', None) is None:
                 # no avgmodel found, get the best checkpoint
-                if checkpoint is None:
-                    checkpoint, suffix_model = model_average(
+                if checkpoint is None and os.path.isdir(checkdir):
+                    checkpoint = model_average(
                         setting={'mode': 'best', 'num': 1},
                         checkdir=checkdir,
                         returnifexist=True
+                    )[0]
+                # the last check, no fallback method, raise warning
+                if checkpoint is None:
+                    sys.stderr.write(
+                        "warning: inference:infer:option:resume is none.\n"
+                        "    which would causing non-initialized evaluation.\n"
                     )
-                # update config to file
-                _hyper = readfromjson(f_hyper)
-                _hyper['inference']['infer']['option']['resume'] = checkpoint
-                dumpjson(_hyper, f_hyper)
-                infr_option['resume'] = checkpoint
-                sys.stdout.write(fmt.format(
-                    f"set inference:infer:option:resume to {checkpoint}"))
+                else:
+                    # there's no way the output of model_average() is an invalid path
+                    # ... so here we could skip the checkExist()
+                    # update config to file
+                    _hyper = readfromjson(f_hyper)
+                    _hyper['inference']['infer']['option']['resume'] = checkpoint
+                    dumpjson(_hyper, f_hyper)
+                    infr_option['resume'] = checkpoint
+                    sys.stdout.write(fmt.format(
+                        f"set inference:infer:option:resume to {checkpoint}"))
             else:
                 sys.stdout.write(fmt.format(
                     "setting 'resume' in inference:infer:option would ignore the inference:avgmodel settings."))
                 checkpoint = infr_option['resume']
-                # rm dirname and '.pt'
-                suffix_model = os.path.basename(checkpoint)[:-3]
+                checkExist('f', checkpoint)
 
             if 'config' not in infr_option:
-                infr_option['config'] = os.path.join(
-                    working_dir, 'config.json')
+                infr_option['config'] = os.path.join(working_dir, F_NN_CONFIG)
                 checkExist('f', infr_option['config'])
 
             intfname = cfg_infr['infer']['bin']
@@ -786,7 +797,7 @@ if __name__ == "__main__":
                 if 'output_dir' not in infr_option:
                     assert not ignore_field_data
                     infr_option['output_dir'] = os.path.join(
-                        working_dir, 'decode/{}')
+                        working_dir, D_INFER+'/{}')
                     sys.stdout.write(fmt.format(
                         f"set inference:infer:option:output_dir to {infr_option['output_dir']}"))
             elif intfname in ['cat.ctc.decode', 'cat.rnnt.decode']:
@@ -795,7 +806,14 @@ if __name__ == "__main__":
                 if 'output_prefix' not in infr_option:
                     topo = intfname.split('.')[1]
                     assert not ignore_field_data, f"error: seem you forget to set 'output_prefix'"
-                    prefix = f"{topo}-{infr_option.get('beam_size', 'dft')}"
+
+                    # rm dirname and '.pt'
+                    if checkpoint is None:
+                        suffix_model = 'none'
+                    else:
+                        suffix_model = os.path.basename(
+                            checkpoint).removesuffix('.pt')
+                    prefix = f"{topo}_bs{infr_option.get('beam_size', 'dft')}_{suffix_model}"
                     # set output format
                     a = infr_option.get('alpha', 0)
                     b = infr_option.get('beta', 0)
@@ -807,7 +825,7 @@ if __name__ == "__main__":
                             prefix += f'_ilm{ilmw}'
                     infr_option['output_prefix'] = os.path.join(
                         working_dir,
-                        f"decode/{prefix}"+"_{}"
+                        f"{D_INFER}/{prefix}"+"_{}"
                     )
             else:
                 ignore_field_data = True

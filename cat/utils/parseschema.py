@@ -10,6 +10,16 @@ from cat.shared.scheduler import Scheduler
 from cat.rnnt import joiner as joiner_zoo
 from cat.rnnt.joiner import AbsJointNet
 from cat.rnnt.train import TransducerTrainer
+from cat.shared._constants import (
+    SCHEMA_NN_CONFIG,
+    SCHEMA_HYPER_CONFIG,
+    F_NN_CONFIG,
+    F_HYPER_CONFIG
+)
+from cat.utils.pipeline.asr import (
+    readfromjson,
+    dumpjson
+)
 
 import os
 import argparse
@@ -22,6 +32,37 @@ from typing import *
 import torch
 import torch.nn as nn
 from torch.optim import Optimizer
+
+F_VSC_SETTING = ".vscode/settings.json"
+
+
+def modify_vsc_schema(filematch: str, sgm_url: str):
+    if os.path.isfile(F_VSC_SETTING):
+        vsc_setting = readfromjson(F_VSC_SETTING)
+    else:
+        os.makedirs(os.path.dirname(F_VSC_SETTING), exist_ok=True)
+        vsc_setting = {}
+
+    ## dump to setting
+    json_schema = vsc_setting.get('json.schemas', [])
+    match = False
+    for i, _sgm in enumerate(json_schema):
+        if _sgm.get('fileMatch', [None])[0] == filematch:
+            json_schema[i] = {
+                "fileMatch": [filematch],
+                "url": f_schema
+            }
+            match = True
+            break
+    if not match:
+        json_schema.append({
+            "fileMatch": [filematch],
+            "url": f_schema
+        })
+
+    vsc_setting['json.schemas'] = json_schema
+    dumpjson(vsc_setting, F_VSC_SETTING)
+    return F_VSC_SETTING
 
 
 def add_property(d: Union[Dict, OrderedDict], new_property: Dict[str, Any]):
@@ -154,7 +195,7 @@ add_property(schema, {'transducer': processing})
 
 # Encoder
 processing = gen_object(
-    dict, desc="Configuration of Transducer transcription network.")  # type:OrderedDict
+    dict, desc="Configuration of Transducer transcription network / encoder.")  # type:OrderedDict
 modules = []
 for m in dir(tn_zoo):
     _m = getattr(tn_zoo, m)
@@ -171,7 +212,7 @@ add_property(schema, {'encoder': processing})
 
 # Predictor
 processing = gen_object(
-    dict, desc="Configuration of Transducer prediction network.")  # type:OrderedDict
+    dict, desc="Configuration of Transducer prediction network / LM.")  # type:OrderedDict
 modules = []
 for m in dir(pn_zoo):
     _m = getattr(pn_zoo, m)
@@ -190,7 +231,7 @@ add_property(schema, {'decoder': processing})
 processing = gen_object(dict,
                         desc="Configuration of SpecAugument.")  # type:OrderedDict
 module_processing(processing, [SpecAug])
-add_property(schema, {'specaug_config': processing})
+add_property(schema, {'specaug': processing})
 
 
 # Joint network
@@ -228,17 +269,19 @@ add_property(processing, {'optimizer': optim})
 add_property(schema, {'scheduler': processing})
 
 # dump
-with open('.vscode/schemas.json', 'w') as fo:
-    json.dump(schema, fo, indent=4)
+## dump schema
+f_schema = f".vscode/{SCHEMA_NN_CONFIG}"
+dumpjson(schema, f_schema)
+## update setting
+modify_vsc_schema(f"exp/**/{F_NN_CONFIG}", f_schema)
 
 
 # hyper-parameter schema
 # most of the settings in this schema is handcrafted
 # except the fields 'train', 'inference':'infer' and 'inference':'er'
-f_hyper = '.vscode/hyper_schema.json'
-if os.path.isfile(f_hyper):
-    with open(f_hyper, 'r') as fi:
-        hyper_schema = json.load(fi)
+f_schema = f".vscode/{SCHEMA_HYPER_CONFIG}"
+if os.path.isfile(f_schema):
+    hyper_schema = readfromjson(f_schema)
 else:
     hyper_schema = gen_object(dict, desc="Settings of Hyper-parameters.")
 
@@ -295,5 +338,6 @@ add_property(inference, {
 })
 
 # dump
-with open(f_hyper, 'w') as fo:
-    json.dump(hyper_schema, fo, indent=4)
+dumpjson(hyper_schema, f_schema)
+## update setting
+modify_vsc_schema(f"exp/**/{F_HYPER_CONFIG}", f_schema)

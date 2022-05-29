@@ -25,19 +25,23 @@ export PATH=$PATH:../../src/bin/
 
 # train sentence piece tokenizer
 [ $start_stage -le 1 ] && python utils/pipeline/lm.py $dir --sta 1 --sto 1
-[ ! -f $dir/hyper-p.json ] && echo "No hyper-setting file: $dir/hyper-p.json" && exit 1
-[ ! -f $dir/config.json ] && echo "No model config file: $dir/config.json" && exit 1
+read -r f_nn_config f_hyper_config <<<$(python -c \
+    "from cat.shared import _constants; print(_constants.F_NN_CONFIG, _constants.F_HYPER_CONFIG)")
+f_nn_config="$dir/$f_nn_config"
+f_hyper_config="$dir/$f_hyper_config"
+[ ! -f $f_hyper_config ] && echo "No hyper-setting file: $f_hyper_config" && exit 1
+[ ! -f $f_nn_config ] && echo "No model config file: $f_nn_config" && exit 1
 
 if [ "$prune" ]; then
     prune="--prune $prune"
 fi
 
-export tokenizer="$(cat $dir/hyper-p.json |
+export tokenizer="$(cat $f_hyper_config |
     python -c "import sys,json;print(json.load(sys.stdin)['tokenizer']['location'])")"
 [ ! -f $tokenizer ] && echo "No tokenizer model: '$tokenizer'" && exit 1
 
 # get text files
-f_text=$(cat $dir/hyper-p.json | python -c "
+f_text=$(cat $f_hyper_config | python -c "
 import sys,json 
 from cat.utils.pipeline.asr import resolve_in_priority 
 files = ' '.join(sum(resolve_in_priority(json.load(sys.stdin)['data']['train']), []))
@@ -69,8 +73,8 @@ else
     eval $train_cmd
 fi
 
-if [ -f $dir/config.json ]; then
-    cat $dir/config.json | python -c "
+if [ -f $f_nn_config ]; then
+    cat $f_nn_config | python -c "
 import sys, json
 configure = json.load(sys.stdin)
 configure['decoder']['kwargs']['f_binlm'] = '$output'
@@ -78,21 +82,22 @@ configure['decoder']['kwargs']['gram_order'] = $order
 from cat.shared import tokenizer as tknz
 tokenizer = tknz.load('$tokenizer')
 configure['decoder']['kwargs']['num_classes'] = tokenizer.vocab_size
-json.dump(configure, sys.stdout, indent=4)" >$dir/config.json.tmp
-    mv $dir/config.json.tmp $dir/config.json
+json.dump(configure, sys.stdout, indent=4)" >"$f_nn_config.tmp"
+    mv "$f_nn_config.tmp" $f_nn_config
 fi
 
 echo "LM saved at $output."
 
-[ ! -f $dir/readme.md ] && (
-    echo -e "\ntrain command:\n" >>$dir/readme.md
-    echo -e "\`\`\`bash\n$0 $@\n\`\`\`" >>$dir/readme.md
-    echo -e "\nproperty:\n" >>$dir/readme.md
-    echo "- prune: $prune" >>$dir/readme.md
-    echo "- type:  $type" >>$dir/readme.md
-    echo "- size:  $(ls -lh $output | awk '{print $5}')B" >>$dir/readme.md
-    echo -e "\nperplexity:\n" >>$dir/readme.md
-    echo -e "\`\`\`\n\n\`\`\`" >>$dir/readme.md
+f_readme=$dir/$(python -c "from cat.shared import _constants; print(_constants.F_TRAINING_INFO)")
+[ ! -f $f_readme ] && (
+    echo -e "\ntrain command:\n" >>$f_readme
+    echo -e "\`\`\`bash\n$0 $@\n\`\`\`" >>$f_readme
+    echo -e "\nproperty:\n" >>$f_readme
+    echo "- prune: $prune" >>$f_readme
+    echo "- type:  $type" >>$f_readme
+    echo "- size:  $(ls -lh $output | awk '{print $5}')B" >>$f_readme
+    echo -e "\nperplexity:\n" >>$f_readme
+    echo -e "\`\`\`\n\n\`\`\`" >>$f_readme
 )
 
 python utils/pipeline/lm.py $dir --start_stage 4

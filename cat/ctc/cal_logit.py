@@ -4,9 +4,8 @@ Apache 2.0.
 Author: Hongyu Xiang, Keyu An, Huahuan Zheng
 """
 
-import kaldiio
 
-from .train import build_model as ctc_builder
+from . import ctc_builder
 from ..shared import coreutils
 from ..shared.encoder import AbsEncoder
 from ..shared.data import (
@@ -17,6 +16,7 @@ from ..shared.data import (
 
 import os
 import time
+import kaldiio
 import argparse
 import numpy as np
 from tqdm import tqdm

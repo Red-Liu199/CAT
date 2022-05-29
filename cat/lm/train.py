@@ -8,11 +8,13 @@ Language model trainer.
 
 __all__ = ["LMTrainer", "build_model", "_parser", "main"]
 
-from ..shared import Manager
 from ..shared import coreutils
 from ..shared import decoder as model_zoo
 from ..shared.decoder import AbsDecoder
-from ..shared.manager import evaluate as default_eval
+from ..shared.manager import (
+    Manager,
+    evaluate as default_eval
+)
 from ..shared.data import (
     CorpusDataset,
     sortedPadCollateLM

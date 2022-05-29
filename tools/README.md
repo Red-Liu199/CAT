@@ -3,11 +3,11 @@
 ## CAT
 
 - Repository: https://github.com/thu-spmi/CAT
-- CAT is required for data pre-processing, including the feature  extraction and some of the text normalization. So if you want to change the feature extraction settings, you should set it in `tools/CAT/`, probably in `tools/CAT/egs/<task>/run.sh`.
+- CAT is required for data pre-processing, including the feature  extraction and some of the text normalization. So if you want to change the feature extraction settings, you should set it in `tools/CAT/`, probably in `tools/CAT/egs/[task]/run.sh`.
 - Once you have CAT installed, link it to the `Transducer-dev/tools/CAT`
 - We assume the required train/dev/test files satisfy the path format:
    ```
-   tools/CAT/egs/<task>/data/
+   tools/CAT/egs/[task]/data/
     ├── all_ark
     │   ├── <train_1>.scp
     │   ├── <dev_1>.scp

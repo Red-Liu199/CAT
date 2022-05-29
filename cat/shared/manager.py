@@ -4,21 +4,27 @@
 
 """training/evaluating manager"""
 
-from ..shared.data import (
+from . import (
+    coreutils,
+    tokenizer as tknz
+)
+from .specaug import SpecAug
+from ._constants import (
+    F_CHECKPOINT_LIST,
+    F_TRAINING_INFO
+)
+from .data import (
     DynamicBatchDistSampler,
     ReadBatchDataLoader,
     PipeTokenize
 )
-from ..shared import tokenizer as tknz
-from . import coreutils
-from ._specaug import SpecAug
 from .scheduler import (
     State,
     build_scheduler
 )
 from .monitor import (
     MonitorWriter,
-    BASE_METRIC
+    ANNOTATION as monitor_anno
 )
 
 import os
@@ -41,8 +47,6 @@ from torch.utils.data import DataLoader
 from torch.cuda.amp import autocast, GradScaler
 from torch.utils.tensorboard import SummaryWriter
 from torch.distributed.optim import ZeroRedundancyOptimizer
-
-F_CHECKLIST = "checkpoint.list"
 
 
 class Manager(object):
@@ -67,7 +71,7 @@ class Manager(object):
         coreutils.check_parser(args, [
             'rank', 'gpu', 'workers', 'trset', 'devset', 'dynamic_batch_mode',
             'batch_size', 'grad_accum_fold', 'config', 'dir', 'debug',
-            'logdir', 'checkdir', 'resume', 'init_model'
+            '_logdir', '_checkdir', 'resume', 'init_model'
         ])
 
         # setup dataloader
@@ -182,19 +186,25 @@ class Manager(object):
         # NOTE: the following function requires the allreduce OP, so don't put it inside the `if...:` block
         gpu_info = coreutils.gather_all_gpu_info(args.gpu)
         if args.rank == 0 and not args.debug:
-            coreutils.gen_readme(os.path.join(args.dir, 'readme.md'),
-                                 model=self.model, gpu_info=gpu_info)
+            coreutils.gen_readme(
+                os.path.join(
+                    args.dir,
+                    F_TRAINING_INFO
+                ),
+                model=self.model,
+                gpu_info=gpu_info
+            )
 
         # hook the function
         self.train = train if func_train is None else func_train
         self.evaluate = evaluate if func_eval is None else func_eval
 
         # Initial specaug module
-        if 'specaug_config' not in cfg:
+        if 'specaug' not in cfg:
             specaug = None
             coreutils.distprint("> Disable SpecAug", args.gpu)
         else:
-            specaug = SpecAug(**cfg['specaug_config'])
+            specaug = SpecAug(**cfg['specaug'])
             specaug = specaug.to(f'cuda:{args.gpu}')
         self.specaug = specaug
 
@@ -209,18 +219,18 @@ class Manager(object):
             self.scheduler = build_scheduler(
                 cfg['scheduler'], self.model.parameters())
 
-        self.cm = CheckpointManager(
-            os.path.join(args.checkdir, F_CHECKLIST),
+        self.cm = CheckManager(
+            os.path.join(args._checkdir, F_CHECKPOINT_LIST),
             header=f"created at {datetime.today().strftime('%Y-%m-%d %H:%M:%S')}"
         )
-        self.monitor = MonitorWriter(args.logdir)
-        self.monitor.addWriter(BASE_METRIC)
+        self.monitor = MonitorWriter(args._logdir)
+        self.monitor.addWriter(tuple(monitor_anno.values()))
         if extra_tracks is not None:
             self.monitor.addWriter(extra_tracks)
 
         if args.rank == 0:
             self.writer = SummaryWriter(os.path.join(
-                args.logdir, "{0:%Y%m%d-%H%M%S/}".format(datetime.now())))
+                args._logdir, "{0:%Y%m%d-%H%M%S/}".format(datetime.now())))
         else:
             self.writer = None
 
@@ -267,7 +277,7 @@ class Manager(object):
     def run(self, args: argparse.Namespace):
 
         coreutils.check_parser(
-            args, ['checkdir', 'rank', 'gpu', 'dir'])
+            args, ['_checkdir', 'rank', 'gpu', 'dir'])
 
         self.model.train()
         terminated = False
@@ -288,7 +298,7 @@ class Manager(object):
                 self.model.train()
 
                 checkpoint = os.path.join(
-                    args.checkdir,
+                    args._checkdir,
                     f"checkpoint.{self.epoch}e{self.step}s.pt"
                 )
                 # inside self.save(), there is an all_reduce OP, don't put it in rank==0 block.
@@ -309,7 +319,7 @@ class Manager(object):
                     # backup the last checkpoint
                     if self.rank == 0 and not self.DEBUG:
                         shutil.copyfile(checkpoint, os.path.join(
-                            args.checkdir, "checkpoint.pt"))
+                            args._checkdir, "checkpoint.pt"))
                     print("Terminated: GPU[%d]" % self.rank)
                     terminated = True
                     dist.barrier()
@@ -524,8 +534,8 @@ def train(trainloader: ReadBatchDataLoader, args: argparse.Namespace, manager: M
 
                 # update monitor
                 manager.monitor.update({
-                    'train:loss': (tolog['loss'], manager.step),
-                    'train:lr': (tolog['lr'], manager.step)
+                    monitor_anno['tr-metric']: (tolog['loss'], manager.step),
+                    monitor_anno['tr-lr']: (tolog['lr'], manager.step)
                 })
 
             if args.verbose:
@@ -600,11 +610,11 @@ def evaluate(testloader: DataLoader, args: argparse.Namespace, manager: Manager)
 
     if args.rank == 0:
         manager.writer.add_scalar('loss/dev', avg_loss, manager.step)
-        manager.monitor.update('eval:loss', (avg_loss, manager.step))
+        manager.monitor.update(monitor_anno['dev-metric'], (avg_loss, manager.step))
     return avg_loss
 
 
-class CheckpointManager:
+class CheckManager:
     def __init__(self, f_checklist: str, header: str = None) -> None:
 
         # the checkpoint locations would be used for identification

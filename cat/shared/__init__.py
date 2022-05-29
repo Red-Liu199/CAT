@@ -14,7 +14,5 @@ from . import encoder
 from . import decoder
 from . import data
 from . import coreutils
-from .monitor import FILE_WRITER
-from ._specaug import SpecAug
+from .specaug import SpecAug
 from .manager import Manager
-FMT_CHECKPOINT = r"checkpoint.{:03}.pt"

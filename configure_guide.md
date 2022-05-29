@@ -3,7 +3,7 @@
 Basically, I use two files to control the whole pipeline of data-preparation / tokenizer training / model training / evaluation, which commonly look like
 
 ```
-egs/<task>/exp/template
+egs/[task]/exp/template
 ├── config.json
 └── hyper-p.json
 ```
@@ -119,19 +119,19 @@ egs/<task>/exp/template
 
 ## Usage with Visual Studio Code
 
-If you're using [Visual Studio Code](https://code.visualstudio.com/) as working environment, you can setup the json schema for syntax intellisense via (in `egs/<task>/`):
+If you're using [Visual Studio Code](https://code.visualstudio.com/) as working environment, you can setup the json schema for syntax intellisense via (in `egs/[task]/`):
 
 ```bash
 ln -s ../../.vscode ./
 ```
 
-Above command would probably raise an error, if there exists a directory `egs/<task>/.vscode`, in such situation, you could manually copy the schema files
+Above command would probably raise an error, if there exists a directory `egs/[task]/.vscode`, in such situation, you could manually copy the schema files
 
 ```bash
-cp ../../.vscode/{hyper_schema,schemas}.json ./.vscode/
+cp ../../.vscode/{sgm_hyper,sgm_nn}.json ./.vscode/
 ```
 
-And add following contents into the file `egs/<task>/.vscode/settings.json`:
+And add following contents into the file `egs/[task]/.vscode/settings.json`:
 
 ```
 {
@@ -141,19 +141,19 @@ And add following contents into the file `egs/<task>/.vscode/settings.json`:
             "fileMatch": [
                 "exp/**/config.json"
             ],
-            "url": ".vscode/schemas.json"
+            "url": ".vscode/sgm_nn.json"
         },
         {
             "fileMatch": [
                 "exp/**/hyper-p.json"
             ],
-            "url": ".vscode/hyper_schema.json"
+            "url": ".vscode/sgm_hyper.json"
         }
     ]
 }
 ```
 
-With all these properly setup, intellisense will be enable when editting `egs/<task>/<any name>/config.json` and `egs/<task>/<any name>/hyper-p.json`.
+With all these properly setup, intellisense will be enable when editting `exp/[any]/config.json` and `exp/[any]/hyper-p.json`.
 
 <img src="assets/intellisense.gif" width=800px/>
 

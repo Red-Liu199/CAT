@@ -6,15 +6,15 @@
 Parallel decode with distributed GPU/CPU support 
 """
 
+from . import rnnt_builder
+from .beam_search import BeamSearcher
+from ..lm import lm_builder
 from ..shared import coreutils
 from ..shared import tokenizer as tknz
 from ..shared.data import (
     ScpDataset,
     sortedScpPadCollate
 )
-from ..lm import lm_builder
-from . import rnnt_builder
-from .beam_search import BeamSearcher
 
 import os
 import sys

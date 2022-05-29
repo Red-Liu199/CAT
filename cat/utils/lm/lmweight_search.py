@@ -12,8 +12,10 @@ from typing import Union, Dict
 from interpolate_nbests import GetParser as InterpolateParser
 from interpolate_nbests import main as interpolate_main
 
-from wer import _parser
-from wer import main as WERMain
+from cat.utils.wer import (
+    _parser as WERParser,
+    main as WERMain
+)
 
 
 def main(args: argparse):
@@ -86,10 +88,9 @@ def main(args: argparse):
               ' | '.join([f"{x:4.2f}" for x in tuned_metric]) + '  ', end='')
         wer = WERMain(get_args(
             {
-                'stripid': True,
                 'cer': args.cer,
                 'force-cased': args.force_cased
-            }, _parser(), [args.ground_truth, cache_file]
+            }, WERParser(), [args.ground_truth, cache_file]
         ))
         os.remove(cache_file)
         _searchout[mapkey] = wer
@@ -171,7 +172,9 @@ if __name__ == "__main__":
     parser.add_argument("--search", type=int, nargs='+', choices=[0, 1], default=[0],
                         help="Flag of whether search weight of the file or not. ")
     parser.add_argument("--weight", type=float, nargs='*',
-                        help="Weights of fixed parts, # which should be the same as # '0' in --search. defaults are all 1.0.")
+                        help="Weights of fixed parts, "
+                        "# of which should be the same as # of '0' in --search. "
+                        "Defaults are all 1.0.")
     parser.add_argument("--range", type=float, nargs='+', default=[0., 1.],
                         help="Range of parameter searching.")
     parser.add_argument("--interval", type=float, nargs='+', default=0.1,

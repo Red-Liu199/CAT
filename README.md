@@ -7,12 +7,6 @@
 
 ## Installation
 
-0. Clone the repo
-
-    ```bash
-    git clone git@github.com:maxwellzh/Transducer-dev.git
-    ```
-
 1. Main dependencies
 
    I test the codes with `cudatoolkit==11.3 torch==1.11`.
@@ -22,10 +16,11 @@
    - [CAT](https://github.com/thu-spmi/CAT)**\[optional\]**: used for speech data preparation based on kaldi tool, [installation guide](tools/README.md#cat).
       
       Or you can use `egs/[task]/local/data.sh` to process data with `torchaudio`.
-   
-2. Install basic packages
+
+2. Clone and install Transducer packages
 
    ```bash
+   git clone git@github.com:maxwellzh/Transducer-dev.git
    ./install.sh
    ```
 

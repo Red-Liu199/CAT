@@ -16,8 +16,7 @@ Author: Huahuan Zhengh (maxwellzh@outlook.com)
 """
 
 from .joiner import AbsJointNet
-from ..shared import coreutils
-from ..shared.decoder import (
+from cat.shared.decoder import (
     LSTM,
     AbsDecoder,
     AbsStates

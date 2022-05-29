@@ -119,6 +119,7 @@ def gather_all_gpu_info(local_gpuid: int, num_all_gpus: int = None) -> Sequence[
 
 
 def gen_readme(path: str, model: nn.Module, gpu_info: list = []) -> str:
+    from cat.shared._constants import F_MONITOR_FIG
     if os.path.exists(path):
         return path
 
@@ -152,7 +153,7 @@ def gen_readme(path: str, model: nn.Module, gpu_info: list = []) -> str:
         "```",
         "",
         "### Monitor figure",
-        "![monitor](./monitor.png)",
+        f"![monitor](./{F_MONITOR_FIG})",
         ""
     ]
     with open(path, 'w') as fo:
@@ -397,41 +398,48 @@ def main_spawner(args, _main_worker: Callable[[int, int, argparse.Namespace], No
 
 def setup_path(args: argparse.Namespace):
     """
-    Set args.checkdir and args.logdir
+    Set args._checkdir and args._logdir
     """
-
+    from ._constants import (
+        D_TMP,
+        D_CHECKPOINT,
+        D_LOG,
+        F_NN_CONFIG,
+        F_MONITOR_SUMMARY
+    )
     # set checkpoint path and log files path
     if not args.debug:
         if not os.path.isdir(args.dir):
             raise RuntimeError(
-                f"--dir={args.dir} is not a valid directory.")
-        # ckpt -> check
-        checkdir = os.path.join(args.dir, 'check')
-        logdir = os.path.join(args.dir, 'log')
+                f"--dir={args.dir} is not a valid directory."
+            )
+
+        checkdir = os.path.join(args.dir, D_CHECKPOINT)
+        logdir = os.path.join(args.dir, D_LOG)
         os.makedirs(checkdir, exist_ok=True)
         os.makedirs(logdir, exist_ok=True)
     else:
         highlight_msg("Debugging")
         # This is a hack, we won't read/write anything in debug mode.
-        logdir = os.path.join('./', 'tmp_debug_folder')
-        checkdir = logdir
+        logdir = os.path.join(args.dir, D_TMP)
         os.makedirs(logdir, exist_ok=True)
 
     if args.config is None:
-        args.config = os.path.join(args.dir, 'config.json')
+        args.config = os.path.join(args.dir, F_NN_CONFIG)
 
-    setattr(args, 'checkdir', checkdir)
-    setattr(args, 'logdir', logdir)
+    setattr(args, '_checkdir', checkdir)
+    setattr(args, '_logdir', logdir)
     if not args.debug and args.resume is None:
-        if glob.glob(os.path.join(args.checkdir, "*.pt")) != []:
+        if glob.glob(os.path.join(args._checkdir, "*.pt")) != []:
             raise FileExistsError(
-                f"{args.checkdir} is not empty!")
+                f"{args._checkdir} is not empty!"
+            )
 
-        from .monitor import FILE_WRITER
-        logfile = os.path.join(logdir, FILE_WRITER)
+        logfile = os.path.join(logdir, F_MONITOR_SUMMARY)
         if os.path.isfile(logfile):
             raise FileExistsError(
-                f"{logfile} exists!")
+                f"{logfile} exists!"
+            )
 
 
 def load_checkpoint(model: Union[torch.nn.Module, torch.nn.parallel.DistributedDataParallel], path_ckpt: str) -> torch.nn.Module:
