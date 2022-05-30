@@ -1,7 +1,6 @@
 {
     "data": {
-        "dtrain": "train",
-        "ddev": "dev",
+        "train": "train",
         "test": [
             "dev",
             "test"
@@ -17,7 +16,8 @@
             "use_all_vocab": true,
             "model_prefix": "sentencepiece/aishell_char/spm"
         },
-        "location": "exp/rnnt-v15/tokenizer.tknz"
+        "location": "exp/rnnt/rnnt-v15/tokenizer.tknz"
     },
-    "commit": "bb42e467fca4fbd08e5c0b9745da8583f56c15ad"
+    "inference": {},
+    "commit": "d4ab739c81c0c99399138b63b8a436d5649d639d"
 }

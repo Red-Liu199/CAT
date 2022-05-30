@@ -1,12 +1,19 @@
-# n-gram LM
 
-- 5-gram
-- aishell transcript
-- no truncate in text processing
+train command:
 
-## Result
+```bash
+utils/pipeline/ngram.sh exp/lm/lm-v5
+```
+
+property:
+
+- prune: 
+- type:  probing
+- size:  73MB
+
+perplexity:
 
 ```
-Test set: exp/lm-v5/lmbin/test-dev.pkl -> ppl: 59.06
-Test set: exp/lm-v5/lmbin/test-test.pkl -> ppl: 58.44
+Test file: /tmp/dev.tmp -> ppl: 59.06
+Test file: /tmp/test.tmp -> ppl: 58.44
 ```
