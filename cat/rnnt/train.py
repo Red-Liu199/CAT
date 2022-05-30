@@ -198,8 +198,7 @@ def build_model(
         cfg: dict,
         args: Optional[Union[argparse.Namespace, dict]] = None,
         dist: bool = True,
-        wrapped: bool = True,
-        verbose: bool = True) -> Union[nn.parallel.DistributedDataParallel, TransducerTrainer, Tuple[tn_zoo.AbsEncoder, pn_zoo.AbsDecoder, joiner_zoo.AbsJointNet]]:
+        wrapped: bool = True) -> Union[nn.parallel.DistributedDataParallel, TransducerTrainer, Tuple[tn_zoo.AbsEncoder, pn_zoo.AbsDecoder, joiner_zoo.AbsJointNet]]:
 
     if args is not None:
         if isinstance(args, argparse.Namespace):
@@ -249,18 +248,11 @@ def build_model(
             setattr(_model, 'freeze', True)
         else:
             setattr(_model, 'freeze', False)
-
-        if verbose and args['rank'] == 0:
-            if 'pretrained' not in c_cfg:
-                _path = ''
-            else:
-                _path = c_cfg['pretrained']
         return _model
 
     assert 'encoder' in cfg
     assert 'decoder' in cfg
     assert 'joiner' in cfg
-    verbose = False if args is None else verbose
 
     encoder = _build(cfg['encoder'], 'encoder')
     predictor = _build(cfg['decoder'], 'predictor')

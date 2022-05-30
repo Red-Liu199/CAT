@@ -221,8 +221,7 @@ def build_model(args, device) -> Tuple[torch.nn.Module, Union[torch.nn.Module, N
 
     model = rnnt_builder(
         coreutils.readjson(args.config),
-        args, dist=False, verbose=False
-    )
+        args, dist=False)
     model = model.to(device)
     assert args.resume is not None, "Trying to decode with uninitialized parameters. Add --resume"
 

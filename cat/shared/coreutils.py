@@ -130,7 +130,7 @@ def gen_readme(path: str, model: nn.Module, gpu_info: list = []) -> str:
         "",
         "**This part is auto-generated, add your details in Appendix**",
         "",
-        "* # of parameters (million): {:.2f}".format(model_size),
+        "* \# of parameters (million): {:.2f}".format(model_size),
         f"* GPU info \[{len(gpu_info)}\]"
     ]
     gpu_set = list(set(gpu_info))

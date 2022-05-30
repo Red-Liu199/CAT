@@ -20,41 +20,48 @@ class AbsDecoder(nn.Module):
 
     Args:
         num_classes (int): number of classes of tokens. a.k.a. the vocabulary size.
-        n_emb (int): embedding hidden size.
-        n_hid (int, optional): hidden size of decoder, also the dimension of input features of the classifier.
+        dim_emb (int): embedding hidden size.
+        dim_hidden (int, optional): hidden size of decoder, also the dimension of input features of the classifier.
             if -1, will set `n_hid=n_emb`
         padding_idx (int, optional): index of padding lable, -1 to disable it.
         tied (bool, optional): flag of whether the embedding layer and the classifier layer share the weight. Default: False
 
     """
 
-    def __init__(self, num_classes: int = -1, n_emb: int = -1,  n_hid: int = -1, padding_idx: int = -1, tied: bool = False, with_head: bool = True) -> None:
+    def __init__(
+            self,
+            num_classes: int = -1,
+            dim_emb: int = -1,
+            dim_hidden: int = -1,
+            padding_idx: int = -1,
+            tied: bool = False,
+            with_head: bool = True) -> None:
         super().__init__()
         if num_classes == -1:
             return
-        if n_hid == -1:
-            n_hid = n_emb
+        if dim_hidden == -1:
+            dim_hidden = dim_emb
 
         assert num_classes > 0
-        assert n_emb > 0 and isinstance(
-            n_emb, int), f"{self.__class__.__name__}: Invalid embedding size: {n_emb}"
-        assert n_hid > 0 and isinstance(
-            n_hid, int), f"{self.__class__.__name__}: Invalid hidden size: {n_hid}"
-        assert (tied and (n_hid == n_emb)) or (
-            not tied), f"{self.__class__.__name__}: tied=True is conflict with n_emb!=n_hid: {n_emb}!={n_hid}"
+        assert dim_emb > 0 and isinstance(
+            dim_emb, int), f"{self.__class__.__name__}: Invalid embedding size: {dim_emb}"
+        assert dim_hidden > 0 and isinstance(
+            dim_hidden, int), f"{self.__class__.__name__}: Invalid hidden size: {dim_hidden}"
+        assert (tied and (dim_hidden == dim_emb)) or (
+            not tied), f"{self.__class__.__name__}: tied=True is conflict with n_emb!=n_hid: {dim_emb}!={dim_hidden}"
         assert padding_idx == -1 or (padding_idx > 0 and isinstance(padding_idx, -1) and padding_idx <
                                      num_classes), f"{self.__class__.__name__}: Invalid padding idx: {padding_idx}"
 
         if padding_idx == -1:
-            self.embedding = nn.Embedding(num_classes, n_emb)
+            self.embedding = nn.Embedding(num_classes, dim_emb)
         else:
             self.embedding = nn.Embedding(
-                num_classes, n_emb, padding_idx=padding_idx)
+                num_classes, dim_emb, padding_idx=padding_idx)
 
         if not with_head:
             self.classifier = nn.Identity()
         else:
-            self.classifier = nn.Linear(n_hid, num_classes)
+            self.classifier = nn.Linear(dim_hidden, num_classes)
             if tied:
                 self.classifier.weight = self.embedding.weight
 
@@ -145,7 +152,7 @@ class LSTM(AbsDecoder):
                  padding_idx: int = -1,
                  with_head: bool = True,
                  *rnn_args, **rnn_kwargs):
-        super().__init__(n_emb=hdim, num_classes=num_classes,
+        super().__init__(num_classes=num_classes, dim_emb=hdim,
                          padding_idx=padding_idx, with_head=with_head)
 
         rnn_kwargs['batch_first'] = True
@@ -236,11 +243,11 @@ class LSTM(AbsDecoder):
         return AbsStates((h_0, c_0), self)
 
 
-class EmbeddingPN(AbsDecoder):
+class Embedding(AbsDecoder):
     """Prediction network with embedding layer only."""
 
-    def __init__(self, n_emb: int, num_classes: int = -1, n_hid: int = -1, padding_idx: int = -1, tied: bool = False, with_head: bool = True) -> None:
-        super().__init__(n_emb, num_classes=num_classes, n_hid=n_hid,
+    def __init__(self, dim_emb: int, num_classes: int = -1, padding_idx: int = -1, tied: bool = False, with_head: bool = True) -> None:
+        super().__init__(num_classes=num_classes, dim_emb=dim_emb,
                          padding_idx=padding_idx, tied=tied, with_head=with_head)
         self.act = nn.ReLU()
         self.with_head = with_head
@@ -252,6 +259,17 @@ class EmbeddingPN(AbsDecoder):
         else:
             return embed_x, None
 
+    @staticmethod
+    def batching_states(states: List[AbsStates]) -> AbsStates:
+        return AbsStates(None, Embedding)
+
+    @staticmethod
+    def get_state_from_batch(raw_batched_states, index: int) -> AbsStates:
+        return AbsStates(None, Embedding)
+
+    def init_states(self, N: int = 1) -> AbsStates:
+        return AbsStates(None, Embedding)
+
 
 class CausalTransformer(AbsDecoder):
     def __init__(self,
@@ -262,7 +280,7 @@ class CausalTransformer(AbsDecoder):
                  attn_dropout: float = 0.1,
                  with_head: bool = True,
                  padding_idx: int = -1) -> None:
-        super().__init__(n_emb=dim_hid, num_classes=num_classes,
+        super().__init__(num_classes=num_classes, dim_emb=dim_hid,
                          padding_idx=padding_idx, with_head=with_head)
         cfg = GPT2Config(
             vocab_size=num_classes, n_embd=dim_hid,

@@ -457,7 +457,7 @@
                     "examples": [
                         "AbsDecoder",
                         "CausalTransformer",
-                        "EmbeddingPN",
+                        "Embedding",
                         "ILM",
                         "LSTM",
                         "MultiDecoder",
@@ -505,11 +505,11 @@
                                         "type": "number",
                                         "default": -1
                                     },
-                                    "n_hid": {
+                                    "dim_hidden": {
                                         "type": "number",
                                         "default": -1
                                     },
-                                    "n_emb": {
+                                    "dim_emb": {
                                         "type": "number",
                                         "default": -1
                                     },
@@ -568,7 +568,7 @@
                     "if": {
                         "properties": {
                             "type": {
-                                "const": "EmbeddingPN"
+                                "const": "Embedding"
                             }
                         }
                     },
@@ -589,15 +589,11 @@
                                         "type": "number",
                                         "default": -1
                                     },
-                                    "n_hid": {
-                                        "type": "number",
-                                        "default": -1
-                                    },
                                     "num_classes": {
                                         "type": "number",
                                         "default": -1
                                     },
-                                    "n_emb": {
+                                    "dim_emb": {
                                         "type": "number"
                                     }
                                 }
