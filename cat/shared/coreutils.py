@@ -140,7 +140,7 @@ def gen_readme(path: str, model: nn.Module, gpu_info: list = []) -> str:
 
     msg += gpu_msg + [""]
     msg += [
-        "### Appendix",
+        "### Notes",
         "",
         "* ",
         ""
@@ -152,7 +152,8 @@ def gen_readme(path: str, model: nn.Module, gpu_info: list = []) -> str:
         "",
         "```",
         "",
-        "### Monitor figure",
+        "|     training process    |",
+        "|:-----------------------:|",
         f"![monitor](./{F_MONITOR_FIG})",
         ""
     ]

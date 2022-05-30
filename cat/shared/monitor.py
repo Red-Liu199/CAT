@@ -9,7 +9,7 @@ Usage:
     python3 cat/shared/monitor.py <path to my logfile>
 """
 
-from ._constants import (
+from cat.shared._constants import (
     F_MONITOR_FIG,
     F_MONITOR_SUMMARY
 )
@@ -227,6 +227,9 @@ def draw_time(ax: plt.Axes, smr: BaseSummary, prop_box=True):
             if speed < 1.:
                 speed = speed * 60
                 timestr = f"{speed:.1f} sec/step"
+                if speed < 1.:
+                    speed = 1/speed
+                    timestr = f"{speed:.1f} step/sec"
             else:
                 timestr = f"{speed:.1f} min/step"
         else:
