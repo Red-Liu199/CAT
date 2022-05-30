@@ -53,7 +53,7 @@ def main(args: argparse.Namespace = None):
 
     if args.cpu:
         if args.nj == -1:
-            world_size = os.cpu_count()
+            world_size = max(os.cpu_count()//2, 1)
         else:
             world_size = args.nj
     else:

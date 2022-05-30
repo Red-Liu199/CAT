@@ -233,7 +233,7 @@ class BeamSearcher():
         if frame_lens is None:
             n_max_frame_length = encoder_out.size(1)
             frame_lens = dummy_token.new_full(
-                n_batches, fill_value=n_max_frame_length)
+                (n_batches,), fill_value=n_max_frame_length)
         else:
             frame_lens = frame_lens.clone()
             n_max_frame_length = frame_lens.max().int()

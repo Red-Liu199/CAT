@@ -4,21 +4,6 @@ Uage:
     python utils/pipeline/asr.py
 """
 
-__all__ = [
-    'checkExist',
-    'combine_text',
-    'dumpjson',
-    'get_args',
-    'initial_datainfo',
-    'log_commit',
-    'model_average',
-    'mp_spawn',
-    'readfromjson',
-    'resolve_in_priority',
-    'set_visible_gpus',
-    'train_nn_model',
-    'train_tokenizer'
-]
 
 from cat.shared import tokenizer as tknz
 from cat.shared._constants import (
@@ -37,8 +22,70 @@ import json
 import uuid
 import pickle
 import argparse
+from enum import Enum
 from typing import *
 from multiprocessing import Process
+
+# NOTE: the escape sequences do not support nested using
+
+
+class tcolors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKCYAN = '\033[96m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
+
+def _fmtstr(s: str, ct: Literal):
+    assert ct != tcolors.ENDC
+    return f"{ct}{s}{tcolors.ENDC}"
+
+
+def udl(s: str):
+    return _fmtstr(s, tcolors.UNDERLINE)
+
+
+def fmtstr_warn(prompt: str, func: Optional[Callable] = None):
+    if func is None:
+        return f"{_fmtstr('WARNING:', tcolors.WARNING)} {prompt}"
+    else:
+        return f"{_fmtstr('WARNING:', tcolors.WARNING)} {func.__name__}() {prompt}"
+
+
+def fmtstr_error(prompt: str, func: Optional[Callable] = None):
+    if func is None:
+        return f"{_fmtstr('ERROR:', tcolors.FAIL)} {prompt}"
+    else:
+        return f"{_fmtstr('ERROR:', tcolors.FAIL)} {func.__name__}() {prompt}"
+
+
+def fmtstr_header(prompt: str):
+    return "{0} {1} {0}".format('='*20, _fmtstr(prompt, tcolors.BOLD))
+
+
+def fmtstr_missing(property_name: str, field: Optional[Union[str, Iterable[str]]] = None, raiseerror: bool = True):
+    if raiseerror:
+        formatter = fmtstr_error
+    else:
+        formatter = fmtstr_warn
+
+    if isinstance(field, str):
+        field = [field]
+    if field is None:
+        return formatter(f"missing '{property_name}'")
+    else:
+        return formatter(f"missing '{property_name}' in {udl(':'.join(field))}")
+
+
+def fmtstr_set(property_name: str, value: str, isPath: bool = True):
+    if isPath:
+        value = udl(value)
+    return f"set '{property_name}' -> {value}"
 
 
 def initial_datainfo():
@@ -59,7 +106,7 @@ def mp_spawn(target: Callable, args: Union[tuple, argparse.Namespace]):
         exit(1)
 
 
-def readfromjson(file: str) -> dict:
+def readjson(file: str) -> dict:
     checkExist('f', file)
     with open(file, 'r') as fi:
         data = json.load(fi)
@@ -78,7 +125,11 @@ def resolve_sp_path(config: dict, prefix: Optional[str] = None, allow_making: bo
         spdir = os.path.dirname(config['model_prefix'])
         if not os.path.isdir(spdir):
             sys.stderr.write(
-                f"WARNING: trying to resolve from an empty directory: {spdir}\n")
+                fmtstr_warn(
+                    f"trying to resolve from empty folder: {udl(spdir)}\n",
+                    resolve_sp_path
+                )
+            )
             if allow_making:
                 os.makedirs(spdir)
         return config, (config['model_prefix']+'.model', config['model_prefix']+'.vocab')
@@ -88,12 +139,14 @@ def resolve_sp_path(config: dict, prefix: Optional[str] = None, allow_making: bo
     else:
         prefix = ''
 
-    assert 'model_type' in config, "resolve_sp_path: missing 'model_type' in configuration"
+    assert 'model_type' in config, fmtstr_error(
+        f"'model_type' is not specified", resolve_sp_path)
     if config['model_type'] == 'word' or config['model_type'] == 'char':
         f_out = prefix + config['model_type']
         config['use_all_vocab'] = True
     elif config['model_type'] == 'unigram':
-        assert 'vocab_size' in config, "resolve_sp_path: missing 'vocab_size' in configuration"
+        assert 'vocab_size' in config, fmtstr_error(
+            f"'vocab_size' is not specified", resolve_sp_path)
         f_out = prefix + config['model_type'] + '_' + str(config['vocab_size'])
     else:
         raise NotImplementedError(
@@ -123,12 +176,12 @@ def sp_train(intext: str, **kwargs):
 
     DEFAULT_SETTINGS = {
         "input": intext,
-        "num_threads": os.cpu_count(),
+        "num_threads": max(os.cpu_count()//2, 1),
         "bos_id": 0,
         "eos_id": -1,
         "unk_id": 1,
-        "character_coverage": 1.0,
-        "unk_surface": "<unk>"
+        "unk_surface": "<unk>",
+        "minloglevel": 1
     }
     DEFAULT_SETTINGS.update(kwargs)
     if 'user_defined_symbols' in DEFAULT_SETTINGS:
@@ -140,7 +193,7 @@ def sp_train(intext: str, **kwargs):
 
     # available options https://github.com/google/sentencepiece/blob/master/doc/options.md
     spm.SentencePieceTrainer.Train(**DEFAULT_SETTINGS)
-
+    
 
 def pack_data(
         f_scps: Union[List[str], str],
@@ -164,9 +217,13 @@ def pack_data(
     from tqdm import tqdm
 
     if os.path.isfile(f_out):
-        sys.stderr.write("warning: pack_data() "
-                         f"file exists: {f_out}, "
-                         "rm it if you want to update the data.\n\n")
+        sys.stderr.write(
+            fmtstr_warn(
+                f"file exist: {udl(f_out)}, "
+                "rm it if you want to update the data.\n",
+                pack_data
+            )
+        )
         return
 
     if isinstance(f_scps, str):
@@ -180,7 +237,8 @@ def pack_data(
     l_min = 1
     l_max = float('inf')
     if filter is not None:
-        assert ':' in filter, f"pack_data: invalid filter format {filter}"
+        assert ':' in filter, fmtstr_error(
+            f"invalid filter format {filter}", pack_data)
         l_bound, u_bound = (i for i in filter.split(':'))
         if l_bound != '':
             l_min = int(l_bound)
@@ -217,9 +275,11 @@ def pack_data(
 
     num_utts = [sum(1 for _ in open(_f_scp, 'r')) for _f_scp in f_scps]
     total_utts = sum(num_utts)
-    assert total_utts == num_label_lines, \
-        "pack_data: f_scp and f_label should match on the # lines, " \
-        f"instead {total_utts} != {len(labels)}"
+    assert total_utts == num_label_lines, fmtstr_error(
+        "f_scp and f_label should match on the # of lines, "
+        f"instead {total_utts} != {len(labels)}",
+        pack_data
+    )
 
     f_opened = {}
     cnt_frames = 0
@@ -277,31 +337,33 @@ def pack_data(
             'key': np.array(_keys)}, fo)
 
     if cnt_rm > 0:
-        print(f"pack_data: remove {cnt_rm} unqualified sequences.")
+        print(f"pack_data(): remove {cnt_rm} unqualified sequences.")
     print(
-        f"...# frames: {cnt_frames} | # tokens: {cnt_tokens} | # seqs: {idx}")
+        f"# of frames: {cnt_frames} | tokens: {cnt_tokens} | seqs: {idx}")
 
 
 def checkExist(f_type: Literal['d', 'f'], f_list: Union[str, List[str]]):
     """Check whether directory/file exist and raise error if it doesn't.
     """
-    assert f_type in [
-        'd', 'f'], f"checkExist: Unknown f_type: {f_type}, expected one of ['d', 'f']"
-    if isinstance(f_list, str):
-        f_list = [f_list]
-    assert len(
-        f_list) > 0, f"checkExist: Expect the file/dir list to have at least one element, but found empty."
-
-    hints = {'d': 'Directory', 'f': 'File'}
-    not_founds = []
-
     if f_type == 'd':
         check = os.path.isdir
     elif f_type == 'f':
         check = os.path.isfile
     else:
-        raise RuntimeError(
-            f"checkExist: Unknown f_type: {f_type}, expected one of ['d', 'f']")
+        raise RuntimeError(fmtstr_error(
+            f"unknown f_type: {f_type}, expected one of ['d', 'f']",
+            checkExist
+        ))
+
+    if isinstance(f_list, str):
+        f_list = [f_list]
+    assert len(f_list) > 0, fmtstr_error(
+        f"expect the file/dir list to have at least one element, but found empty.",
+        checkExist
+    )
+
+    hints = {'d': 'Directory', 'f': 'File'}
+    not_founds = []
 
     for item in f_list:
         if not check(item):
@@ -359,28 +421,35 @@ def train_nn_model(
         working_dir: str,
         f_hyper_p: str,
         fmt_data: str,
-        promt: str = '{}\n'):
+        prompt: str = '{}\n'):
 
     checkExist('f', f_hyper_p)
-    settings = readfromjson(f_hyper_p)
-    assert 'train' in settings, promt.format("missing 'train' in field:")
-    assert 'bin' in settings['train'], promt.format(
-        "missing 'bin' in field:train:")
-    assert 'option' in settings['train'], promt.format(
-        "missing 'bin' in field:train:")
+    settings = readjson(f_hyper_p)
+    assert 'train' in settings, fmtstr_missing(
+        'train', udl(f_hyper_p)
+    )
+    assert 'bin' in settings['train'], fmtstr_missing(
+        'bin', (udl(f_hyper_p), 'train')
+    )
+    assert 'option' in settings['train'], fmtstr_missing(
+        'option', (udl(f_hyper_p), 'train')
+    )
 
+    f_nnconfig = os.path.join(working_dir, F_NN_CONFIG)
     if 'tokenizer' not in settings:
         sys.stderr.write(
-            f"warning: missing 'tokenizer': {f_hyper_p}.\n"
-            "... You have ensure the 'num_classes' in config is correct.\n")
+            fmtstr_missing('tokenizer', raiseerror=False) + '\n' +
+            fmtstr_warn(
+                f"you have to ensure the 'num_classes' in {udl(f_nnconfig)} is correct.\n",
+                train_nn_model
+            )
+        )
     else:
         checkExist('f', settings['tokenizer']['location'])
         tokenizer = tknz.load(settings['tokenizer']['location'])
-
-        f_nnconfig = os.path.join(working_dir, F_NN_CONFIG)
         checkExist('f', f_nnconfig)
 
-        nnconfig = readfromjson(f_nnconfig)
+        nnconfig = readjson(f_nnconfig)
         # recursively search for 'num_classes'
         recursive_rpl(nnconfig, 'num_classes', tokenizer.vocab_size)
         dumpjson(nnconfig, f_nnconfig)
@@ -391,19 +460,19 @@ def train_nn_model(
         train_data = fmt_data.format('train')
         checkExist('f', train_data)
         train_options['trset'] = train_data
-        sys.stdout.write(promt.format(f"set 'trset' to {train_data}"))
+        sys.stdout.write(prompt.format(fmtstr_set('trset', train_data)))
     if 'devset' not in train_options:
         dev_data = fmt_data.format('dev')
         checkExist('f', dev_data)
         train_options['devset'] = dev_data
-        sys.stdout.write(promt.format(f"set 'devset' to {dev_data}"))
+        sys.stdout.write(prompt.format(fmtstr_set('devset', dev_data)))
     if 'dir' not in train_options:
         train_options['dir'] = working_dir
-        sys.stdout.write(promt.format(f"set 'dir' to {working_dir}"))
+        sys.stdout.write(prompt.format(fmtstr_set('dir', working_dir)))
     if 'dist-url' not in train_options:
         train_options['dist-url'] = f"tcp://localhost:{get_free_port()}"
-        sys.stdout.write(promt.format(
-            f"set 'dist-url' to {train_options['dist-url']}"))
+        sys.stdout.write(prompt.format(fmtstr_set(
+            'dist-url', train_options['dist-url'], False)))
 
     import importlib
     interface = importlib.import_module(settings['train']['bin'])
@@ -424,7 +493,7 @@ def resolve_in_priority(dataset: Union[str, List[str]]) -> Tuple[List[str], List
     if isinstance(dataset, str):
         dataset = [dataset]
 
-    datainfo = readfromjson(F_DATAINFO)
+    datainfo = readjson(F_DATAINFO)
 
     local_text = []     # find in local path, assume NO uid before each utterance
     outside_text = []   # find in src data, assume uid before each utterance
@@ -442,7 +511,10 @@ def combine_text(datasets: Union[str, List[str]], f_out: Optional[str] = None) -
     """Combine text files of dataset(s) and return the combined file."""
     text_noid, text_withid = resolve_in_priority(datasets)
     assert len(text_noid) > 0 or len(
-        text_withid) > 0, f"combineText: dataset '{datasets}' seems empty."
+        text_withid) > 0, fmtstr_error(
+            f"dataset '{datasets}' not found.",
+            combine_text
+    )
 
     if f_out is None:
         f_out = os.path.join('/tmp', str(uuid.uuid4()))
@@ -462,64 +534,77 @@ def combine_text(datasets: Union[str, List[str]], f_out: Optional[str] = None) -
 
 def train_tokenizer(f_hyper: str):
     checkExist('f', f_hyper)
-    hyper_settings = readfromjson(f_hyper)
+    cfg_hyper = readjson(f_hyper)
 
-    assert 'tokenizer' in hyper_settings, f"missing 'tokenizer': {f_hyper}"
-    if 'location' not in hyper_settings['tokenizer']:
-        sys.stderr.write(
-            f"missing 'location' in ['tokenizer']: {f_hyper}\n")
-        sys.stderr.write(f"set ['tokenizer']='tokenizer.tknz'\n")
-        hyper_settings['tokenizer']['location'] = os.path.join(
+    assert 'tokenizer' in cfg_hyper, fmtstr_error(
+        "'tokenizer' is not configured.", train_tokenizer)
+    if 'location' not in cfg_hyper['tokenizer']:
+        cfg_hyper['tokenizer']['location'] = os.path.join(
             os.path.dirname(f_hyper), 'tokenizer.tknz')
+        sys.stdout.write(
+            "train_tokenizer(): " +
+            fmtstr_set(
+                'location', cfg_hyper['tokenizer']['location'])+'\n'
+        )
     else:
-        if os.path.isfile(hyper_settings['tokenizer']['location']):
+        if os.path.isfile(cfg_hyper['tokenizer']['location']):
             sys.stderr.write(
-                f"['tokenizer']['location'] exists: {hyper_settings['tokenizer']['location']}\n"
-                "...skip tokenizer training. If you want to do tokenizer training anyway,\n"
-                "...remove the ['tokenizer']['location'] in setting\n"
-                f"...or remove the file:{hyper_settings['tokenizer']['location']} then re-run the script.\n")
+                fmtstr_warn(
+                    f"['tokenizer']['location'] exists: {udl(cfg_hyper['tokenizer']['location'])}\n"
+                    "... skip tokenizer training. If you want to do tokenizer training anyway,\n"
+                    "... remove the ['tokenizer']['location'] in setting\n"
+                    f"... or remove the file:{udl(cfg_hyper['tokenizer']['location'])} then re-run the script.\n",
+                    train_tokenizer
+                )
+            )
             return
 
-    assert 'type' in hyper_settings[
-        'tokenizer'], f"missing property 'type' in ['tokenizer']: {f_hyper}"
-    assert 'data' in hyper_settings, f"missing property 'data': {f_hyper}"
-    assert 'train' in hyper_settings[
-        'data'], f"missing property 'train' in ['data']: {f_hyper}"
-    assert os.access(os.path.dirname(hyper_settings['tokenizer']['location']),
-                     os.W_OK), f"['tokenizer']['location'] is not writable: '{hyper_settings['tokenizer']['location']}'"
+    assert 'type' in cfg_hyper['tokenizer'], fmtstr_error(
+        "tokenizer:type is not configured.", train_tokenizer)
+    assert 'data' in cfg_hyper, fmtstr_error(
+        "data is not configured.", train_tokenizer)
+    assert 'train' in cfg_hyper['data'], fmtstr_error(
+        "data:train is not configured.", train_tokenizer)
+    assert os.access(os.path.dirname(cfg_hyper['tokenizer']['location']), os.W_OK), \
+        f"tokenizer:location is not writable: '{udl(cfg_hyper['tokenizer']['location'])}'"
 
-    if 'lang' in hyper_settings['data']:
+    if 'lang' in cfg_hyper['data']:
         # check if it's chinese-like languages
-        if ('zh' == hyper_settings['data']['lang'].split('-')[0]):
+        if ('zh' == cfg_hyper['data']['lang'].split('-')[0]):
             sys.stderr.write(
-                "TrainTokenizer(): for Asian language, it's your duty to remove the segment spaces up to your requirement.\n")
+                fmtstr_warn(
+                    "for Asian languages, "
+                    "it's your duty to remove the segment spaces up to your requirement.\n",
+                    train_tokenizer
+                )
+            )
 
-    tokenizer_type = hyper_settings['tokenizer']['type']
-    if 'property' not in hyper_settings['tokenizer']:
-        hyper_settings['tokenizer']['property'] = {}
+    tokenizer_type = cfg_hyper['tokenizer']['type']
+    if 'property' not in cfg_hyper['tokenizer']:
+        cfg_hyper['tokenizer']['property'] = {}
 
     if tokenizer_type == 'SentencePieceTokenizer':
-        f_corpus_tmp = combine_text(hyper_settings['data']['train'])
+        f_corpus_tmp = combine_text(cfg_hyper['data']['train'])
         sp_settings, (f_tokenizer, _) = resolve_sp_path(
-            hyper_settings['tokenizer']['property'], os.path.basename(os.getcwd()), allow_making=True)
+            cfg_hyper['tokenizer']['property'], os.path.basename(os.getcwd()), allow_making=True)
         sp_train(f_corpus_tmp, **sp_settings)
-        hyper_settings['tokenizer']['property'] = sp_settings
+        cfg_hyper['tokenizer']['property'] = sp_settings
         tokenizer = tknz.SentencePieceTokenizer(spmodel=f_tokenizer)
-        hyper_settings['tokenizer']['property']['vocab_size'] = tokenizer.vocab_size
+        cfg_hyper['tokenizer']['property']['vocab_size'] = tokenizer.vocab_size
         os.remove(f_corpus_tmp)
     elif tokenizer_type == 'JiebaComposePhoneTokenizer':
         tokenizer = tknz.JiebaComposePhoneTokenizer(
-            **hyper_settings['tokenizer']['property'])
+            **cfg_hyper['tokenizer']['property'])
     elif tokenizer_type == 'JiebaTokenizer':
         # jieba tokenizer doesn't need training
         tokenizer = tknz.JiebaTokenizer(
-            **hyper_settings['tokenizer']['property'])
+            **cfg_hyper['tokenizer']['property'])
     else:
         raise ValueError(f"Unknown type of tokenizer: {tokenizer_type}")
 
-    tknz.save(tokenizer, hyper_settings['tokenizer']['location'])
+    tknz.save(tokenizer, cfg_hyper['tokenizer']['location'])
 
-    dumpjson(hyper_settings, f_hyper)
+    dumpjson(cfg_hyper, f_hyper)
 
 
 def model_average(
@@ -528,8 +613,10 @@ def model_average(
         returnifexist: bool = False) -> Tuple[str, str]:
     """Do model averaging according to given setting, return the averaged model path."""
 
-    assert 'mode' in setting, "missing 'mode' in ['avgmodel']"
-    assert 'num' in setting, "missing 'num' in ['avgmodel']"
+    assert 'mode' in setting, fmtstr_error(
+        "'mode' not specified.", model_average)
+    assert 'num' in setting, fmtstr_error(
+        "'num' not specified.", model_average)
     avg_mode, avg_num = setting['mode'], setting['num']
 
     import torch
@@ -565,12 +652,16 @@ def log_commit(f_hyper: str):
     import subprocess
     if subprocess.run('command -v git', shell=True, capture_output=True).returncode != 0:
         sys.stderr.write(
-            "warning: git command not found. Skip logging commit.\n")
+            fmtstr_warn(
+                "git command not found, skip logging commit.\n",
+                log_commit
+            )
+        )
     else:
         process = subprocess.run(
             "git log -n 1 --pretty=format:\"%H\"", shell=True, check=True, stdout=subprocess.PIPE)
 
-        orin_settings = readfromjson(f_hyper)
+        orin_settings = readjson(f_hyper)
         orin_settings['commit'] = process.stdout.decode('utf-8')
         dumpjson(orin_settings, f_hyper)
 
@@ -603,8 +694,8 @@ if __name__ == "__main__":
     f_hyper = os.path.join(working_dir, F_HYPER_CONFIG)
     checkExist('f', f_hyper)
     initial_datainfo()
-    datainfo = readfromjson(F_DATAINFO)
-    hyper_cfg = readfromjson(f_hyper)
+    datainfo = readjson(F_DATAINFO)
+    hyper_cfg = readjson(f_hyper)
     if "env" in hyper_cfg:
         for k, v in hyper_cfg["env"].items():
             os.environ[k] = v
@@ -617,33 +708,44 @@ if __name__ == "__main__":
     ############ Stage 1  Tokenizer training ############
     if s_beg <= 1 and s_end >= 1:
         if not args.silent:
-            print("{0} {1} {0}".format("="*20, "Stage 1 Tokenizer training"))
-        fmt = "# Tokenizer trainin # {}\n" if not args.silent else ""
-        hyper_cfg = readfromjson(f_hyper)
+            print(fmtstr_header("Stage 1 Tokenizer training"))
+            fmt = _fmtstr(_fmtstr("Tokenizer training: ",
+                          tcolors.BOLD), tcolors.OKCYAN) + "{}\n"
+        else:
+            fmt = ''
+
+        hyper_cfg = readjson(f_hyper)
         if 'tokenizer' not in hyper_cfg:
             sys.stderr.write(
-                "warning: missing 'tokenizer' in hyper-setting, skip tokenizer training.")
+                fmtstr_missing('tokenizer', raiseerror=False) +
+                ", skip tokenizer training.\n"
+            )
         else:
             train_tokenizer(f_hyper)
 
     ############ Stage 2  Pickle data ############
     if s_beg <= 2 and s_end >= 2:
         if not args.silent:
-            print("{0} {1} {0}".format("="*20, "Stage 2 Pickle data"))
-        fmt = "# Pickle data # {}\n" if not args.silent else ""
+            print(fmtstr_header("Stage 2 Pickle data"))
+            fmt = _fmtstr(_fmtstr("Pickle data: ",
+                          tcolors.BOLD), tcolors.OKCYAN) + "{}\n"
+        else:
+            fmt = ''
 
-        hyper_cfg = readfromjson(f_hyper)
-        assert 'data' in hyper_cfg, f"missing 'data': {f_hyper}"
+        hyper_cfg = readjson(f_hyper)
+        assert 'data' in hyper_cfg, fmtstr_missing('data', udl(f_hyper))
 
         if 'tokenizer' not in hyper_cfg:
             sys.stderr.write(
-                f"warning: missing 'tokenizer', assume the ground truth text files as tokenized ones.")
+                fmtstr_missing('tokenizer', raiseerror=False) +
+                f", assume the ground truth text files as tokenized.\n"
+            )
             istokenized = True
             tokenizer = None
         else:
             # load tokenizer from file
-            assert 'location' in hyper_cfg[
-                'tokenizer'], f"missing 'location' in ['tokenizer']: {f_hyper}"
+            assert 'location' in hyper_cfg['tokenizer'], fmtstr_missing(
+                'location', (udl(f_hyper), 'tokenizer'))
 
             f_tokenizer = hyper_cfg['tokenizer']['location']
             checkExist('f', f_tokenizer)
@@ -659,9 +761,10 @@ if __name__ == "__main__":
         for dataset in ['train', 'dev', 'test']:
             if dataset not in data_settings:
                 sys.stderr.write(
-                    f"warning: missing '{dataset}' in ['data'], skip.\n")
+                    fmtstr_missing(dataset, 'data', raiseerror=False) +
+                    ", skip.\n"
+                )
                 continue
-            sys.stdout.write(fmt.format(f"packing {dataset} data..."))
 
             if dataset == 'train':
                 filter = data_settings['filter']
@@ -687,8 +790,11 @@ if __name__ == "__main__":
     ############ Stage 3  NN training ############
     if s_beg <= 3 and s_end >= 3:
         if not args.silent:
-            print("{0} {1} {0}".format("="*20, "Stage 3 NN training"))
-        fmt = "# NN training # {}\n" if not args.silent else ""
+            print(fmtstr_header("Stage 3 NN training"))
+            fmt = _fmtstr(_fmtstr("NN training: ",
+                          tcolors.BOLD), tcolors.OKCYAN) + "{}\n"
+        else:
+            fmt = ''
 
         train_nn_model(
             working_dir,
@@ -713,11 +819,15 @@ if __name__ == "__main__":
             sys.exit(0)
 
         if not args.silent:
-            print("{0} {1} {0}".format("="*20, "Stage 4 Decode"))
-        fmt = "# Decode # {}\n" if not args.silent else ""
+            print(fmtstr_header("Stage 4 Decode"))
+            fmt = _fmtstr(_fmtstr("Decode: ",
+                          tcolors.BOLD), tcolors.OKCYAN) + "{}\n"
+        else:
+            fmt = ''
 
-        hyper_cfg = readfromjson(f_hyper)
-        assert 'inference' in hyper_cfg, f"missing 'inference' at {f_hyper}"
+        hyper_cfg = readjson(f_hyper)
+        assert 'inference' in hyper_cfg, fmtstr_missing(
+            'inference', udl(f_hyper))
 
         cfg_infr = hyper_cfg['inference']
 
@@ -735,10 +845,10 @@ if __name__ == "__main__":
         # infer
         if 'infer' in cfg_infr:
             # try to get inference:infer:option
-            assert 'bin' in cfg_infr['infer'], \
-                f"missing 'bin' in inference:infer: at {f_hyper}"
-            assert 'option' in cfg_infr['infer'], \
-                f"missing 'option' in inference:infer: at {f_hyper}"
+            assert 'bin' in cfg_infr['infer'], fmtstr_missing(
+                'bin', (udl(f_hyper), 'inference', 'infer'))
+            assert 'option' in cfg_infr['infer'], fmtstr_missing(
+                'option', (udl(f_hyper), 'inference', 'infer'))
 
             infr_option = cfg_infr['infer']['option']
             # find checkpoint
@@ -753,22 +863,28 @@ if __name__ == "__main__":
                 # the last check, no fallback method, raise warning
                 if checkpoint is None:
                     sys.stderr.write(
-                        "warning: inference:infer:option:resume is none.\n"
-                        "    which would causing non-initialized evaluation.\n"
+                        fmtstr_missing(
+                            'resume', ('inference', 'infer', 'option'), False
+                        ) +
+                        "\n    ... would causing non-initialized evaluation.\n"
                     )
                 else:
                     # there's no way the output of model_average() is an invalid path
                     # ... so here we could skip the checkExist()
                     # update config to file
-                    _hyper = readfromjson(f_hyper)
+                    _hyper = readjson(f_hyper)
                     _hyper['inference']['infer']['option']['resume'] = checkpoint
                     dumpjson(_hyper, f_hyper)
                     infr_option['resume'] = checkpoint
-                    sys.stdout.write(fmt.format(
-                        f"set inference:infer:option:resume to {checkpoint}"))
+                    sys.stdout.write(fmt.format(fmtstr_set(
+                        'inference:infer:option:resume',
+                        checkpoint
+                    )))
             else:
                 sys.stdout.write(fmt.format(
-                    "setting 'resume' in inference:infer:option would ignore the inference:avgmodel settings."))
+                    "setting 'resume' in inference:infer:option "
+                    "would ignore the inference:avgmodel settings."
+                ))
                 checkpoint = infr_option['resume']
                 checkExist('f', checkpoint)
 
@@ -798,8 +914,10 @@ if __name__ == "__main__":
                     assert not ignore_field_data
                     infr_option['output_dir'] = os.path.join(
                         working_dir, D_INFER+'/{}')
-                    sys.stdout.write(fmt.format(
-                        f"set inference:infer:option:output_dir to {infr_option['output_dir']}"))
+                    sys.stdout.write(fmt.format(fmtstr_set(
+                        'inference:infer:option:output_dir',
+                        infr_option['output_dir']
+                    )))
             elif intfname in ['cat.ctc.decode', 'cat.rnnt.decode']:
                 if 'input_scp' in infr_option:
                     ignore_field_data = True
@@ -829,8 +947,9 @@ if __name__ == "__main__":
                     )
             else:
                 ignore_field_data = True
-                sys.stderr.write(
-                    f"warning: interface '{intfname}' only support handcrafted execution.\n")
+                sys.stderr.write(fmtstr_warn(
+                    f"interface '{intfname}' only support handcrafted execution.\n"
+                ))
 
             import importlib
             interface = importlib.import_module(intfname)
@@ -844,9 +963,10 @@ if __name__ == "__main__":
                     interface._parser()
                 ))
             else:
-                assert 'data' in hyper_cfg, f"missing 'data' at {f_hyper}"
-                assert 'test' in hyper_cfg[
-                    'data'], f"missing 'test' in data: at {f_hyper}"
+                assert 'data' in hyper_cfg, fmtstr_missing(
+                    'data', udl(f_hyper))
+                assert 'test' in hyper_cfg['data'], fmtstr_missing(
+                    'test', (udl(f_hyper), 'data'))
 
                 testsets = hyper_cfg['data']['test']
                 if isinstance(testsets, str):
@@ -859,13 +979,15 @@ if __name__ == "__main__":
                     for k in infr_option:
                         if isinstance(infr_option[k], str) and '{}' in infr_option[k]:
                             running_option[k] = infr_option[k].format(_set)
-                            sys.stdout.write(fmt.format(
-                                f"{_set}: {k} -> {running_option[k]}"))
+                            sys.stdout.write(fmt.format(f"{_set}: " + fmtstr_set(
+                                k, running_option[k]
+                            )))
                     running_option['input_scp'] = scp
                     if intfname in ['cat.ctc.decode', 'cat.rnnt.decode']:
                         if os.path.isfile(running_option['output_prefix']):
-                            sys.stdout.write(fmt.format(
-                                f"{running_option['output_prefix']} exists, skip."))
+                            sys.stderr.write(fmtstr_warn(
+                                f"{udl(running_option['output_prefix'])} exists, skip.\n"
+                            ))
                             continue
 
                     # FIXME: this canonot be spawned via mp_spawn, otherwise error would be raised
@@ -907,7 +1029,8 @@ if __name__ == "__main__":
                     ))
                     sys.stdout.flush()
             else:
-                assert 'gt' in err_option
+                assert 'gt' in err_option, fmtstr_missing(
+                    'gt', (udl(f_hyper), 'inference', 'er'))
                 wercal.main(get_args(
                     err_option,
                     wercal._parser(),

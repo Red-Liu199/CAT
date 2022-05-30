@@ -154,7 +154,7 @@ def gen_readme(path: str, model: nn.Module, gpu_info: list = []) -> str:
         "",
         "|     training process    |",
         "|:-----------------------:|",
-        f"![monitor](./{F_MONITOR_FIG})",
+        f"|![monitor](./{F_MONITOR_FIG})|",
         ""
     ]
     with open(path, 'w') as fo:

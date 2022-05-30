@@ -2,18 +2,19 @@
 
 **This part is auto-generated, add your details in Appendix**
 
-* Model size/M: 8.74
+* \# of parameters (million): 8.74
 * GPU info \[1\]
   * \[1\] NVIDIA GeForce RTX 3090
 
-### Appendix
+### Notes
 
 * template experiment using CTC loss to train on the yesno data.
 
 ### Result
 ```
-yesno   %SER 100.00 | %WER 63.54 [ 305 / 480, 0 ins, 290 del, 15 sub ]
+yesno   %SER 100.00 | %WER 72.08 [ 346 / 480, 0 ins, 338 del, 8 sub ]
 ```
 
-### Monitor figure
-![monitor](./monitor.png)
+|     training process    |
+|:-----------------------:|
+|![monitor](./monitor.png)|

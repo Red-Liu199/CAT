@@ -17,7 +17,7 @@ from cat.shared._constants import (
     F_HYPER_CONFIG
 )
 from cat.utils.pipeline.asr import (
-    readfromjson,
+    readjson,
     dumpjson
 )
 
@@ -38,7 +38,7 @@ F_VSC_SETTING = ".vscode/settings.json"
 
 def modify_vsc_schema(filematch: str, sgm_url: str):
     if os.path.isfile(F_VSC_SETTING):
-        vsc_setting = readfromjson(F_VSC_SETTING)
+        vsc_setting = readjson(F_VSC_SETTING)
     else:
         os.makedirs(os.path.dirname(F_VSC_SETTING), exist_ok=True)
         vsc_setting = {}
@@ -281,7 +281,7 @@ modify_vsc_schema(f"exp/**/{F_NN_CONFIG}", f_schema)
 # except the fields 'train', 'inference':'infer' and 'inference':'er'
 f_schema = f".vscode/{SCHEMA_HYPER_CONFIG}"
 if os.path.isfile(f_schema):
-    hyper_schema = readfromjson(f_schema)
+    hyper_schema = readjson(f_schema)
 else:
     hyper_schema = gen_object(dict, desc="Settings of Hyper-parameters.")
 
