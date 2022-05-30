@@ -54,6 +54,7 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         func_train=custom_train,
         func_eval=custom_evaluate,
         extra_tracks=[
+            'loss/ml',
             'loss/nce',
             'loss/nce-data',
             'loss/nce-noise',
@@ -88,8 +89,6 @@ class NCETransducerTrainer(TransducerTrainer):
         assert isinstance(ilm_weight, float)
         assert isinstance(elm_weight, float)
 
-        if mle_weight != 0.:
-            raise NotImplementedError
         if ilm_weight > 0:
             print(
                 f"warning: given ilm weight={ilm_weight} > 0, but commonly it's a negative one.")
@@ -189,17 +188,17 @@ class NCETransducerTrainer(TransducerTrainer):
         )
         with autocast(enabled=False):
             # model_log_prob: (N, )
-            model_log_prob = -RNNTLoss(
+            p_y_x = -RNNTLoss(
                 model_join_out.float(),
                 squeeze_targets, lx, ly,
                 gather=True, compact=True
             )
 
-        p_hat_y_x = model_log_prob + \
+        p_hat_y_x = p_y_x + \
             self.weights['ilm'] * ilm_scores + \
             self.weights['elm'] * elm_scores
 
-        return p_hat_y_x, q_y_x
+        return p_hat_y_x, q_y_x, p_y_x
 
     def forward(self, inputs: torch.FloatTensor, targets: torch.LongTensor, in_lens: torch.LongTensor, target_lens: torch.LongTensor) -> torch.FloatTensor:
 
@@ -207,7 +206,8 @@ class NCETransducerTrainer(TransducerTrainer):
         lx = lx.to(torch.int32)
         bs = enc_out.size(0)
 
-        p_data, q_data = self.cal_g_bc(enc_out, targets, lx, target_lens)
+        p_data, q_data, p_raw_data = self.cal_g_bc(
+            enc_out, targets, lx, target_lens)
 
         # draw noise samples
         with torch.no_grad():
@@ -241,7 +241,7 @@ class NCETransducerTrainer(TransducerTrainer):
             [len(hypo)-1 for hypo in batched_tokens])
         del batched_tokens
 
-        p_noise, q_noise = self.cal_g_bc(
+        p_noise, q_noise, _ = self.cal_g_bc(
             noise_enc_out, noise_targets, noise_lx, noise_ly)
 
         noise_ratio = noise_enc_out.size(0) / bs
@@ -251,8 +251,13 @@ class NCETransducerTrainer(TransducerTrainer):
         nce_noise_obj = self._logsigmoid(
             q_noise + math.log(noise_ratio) - p_noise)
 
-        return -(nce_data_obj.mean(dim=0) + noise_ratio * nce_noise_obj.mean(dim=0)), \
-            (nce_data_obj, nce_noise_obj)
+        nce_data_loss = -nce_data_obj.mean(dim=0)
+        nce_noise_loss = -noise_ratio*nce_noise_obj.mean(dim=0)
+        ml_loss = -p_raw_data.mean(dim=0)
+        return ml_loss*self.weights['mle'] + nce_data_loss + nce_noise_loss, \
+            (nce_data_obj.detach(), nce_noise_obj.detach()), \
+            (nce_data_loss.detach(), nce_noise_loss.detach()), \
+            ml_loss.detach()
 
     @torch.no_grad()
     def get_wer(self, inputs: torch.FloatTensor, targets: torch.LongTensor, in_lens: torch.LongTensor, target_lens: torch.LongTensor) -> torch.FloatTensor:
@@ -289,35 +294,39 @@ def custom_hook(
         n_step: int,
         nnforward_args: tuple):
 
-    nce_loss, (p_c_0, p_c_1) = model(*nnforward_args)
+    loss, (p_c_0, p_c_1), (l_data, l_noise), l_ml = model(*nnforward_args)
 
     if args.rank == 0:
         # FIXME: not exact global accuracy
+        l_data = l_data.item()
+        l_noise = l_noise.item()
+        l_ml = l_ml.item()
         pos_acc = ((p_c_0.exp() > 0.5).sum() / p_c_0.size(0)).item()
         noise_acc = ((p_c_1.exp() > 0.5).sum() / p_c_1.size(0)).item()
-        loss_data = (-p_c_0.mean(dim=0)).item()
-        loss_noise = (nce_loss - loss_data).item()
         step_cur = manager.step_by_last_epoch + n_step
         manager.monitor.update(
             {
-                'loss/nce': (nce_loss.item(), step_cur),
-                'loss/nce-data': (loss_data, step_cur),
-                'loss/nce-noise': (loss_noise, step_cur),
+                'loss/ml': (l_ml, step_cur),
+                'loss/nce': ((l_data+l_noise), step_cur),
+                'loss/nce-data': (l_data, step_cur),
+                'loss/nce-noise': (l_noise, step_cur),
                 'acc/data': (pos_acc, step_cur),
                 'acc/noise': (noise_acc, step_cur)
             }
         )
         manager.writer.add_scalar(
-            'loss/nce', nce_loss.item(), step_cur)
+            'loss/ml', l_ml, step_cur)
         manager.writer.add_scalar(
-            'loss/nce-data', loss_data, step_cur)
+            'loss/nce', (l_data+l_noise), step_cur)
         manager.writer.add_scalar(
-            'loss/nce-noise', loss_noise, step_cur)
+            'loss/nce-data', l_data, step_cur)
+        manager.writer.add_scalar(
+            'loss/nce-noise', l_noise, step_cur)
         manager.writer.add_scalar(
             'acc/data', pos_acc, step_cur)
         manager.writer.add_scalar(
             'acc/noise', noise_acc, step_cur)
-    return nce_loss
+    return loss
 
 
 def custom_train(*args):
