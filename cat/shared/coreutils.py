@@ -130,7 +130,7 @@ def gen_readme(path: str, model: nn.Module, gpu_info: list = []) -> str:
         "",
         "**This part is auto-generated, add your details in Appendix**",
         "",
-        "* Model size/M: {:.2f}".format(model_size),
+        "* # of parameters (million): {:.2f}".format(model_size),
         f"* GPU info \[{len(gpu_info)}\]"
     ]
     gpu_set = list(set(gpu_info))
@@ -422,6 +422,7 @@ def setup_path(args: argparse.Namespace):
         highlight_msg("Debugging")
         # This is a hack, we won't read/write anything in debug mode.
         logdir = os.path.join(args.dir, D_TMP)
+        checkdir = logdir
         os.makedirs(logdir, exist_ok=True)
 
     if args.config is None:

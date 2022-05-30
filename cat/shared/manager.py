@@ -138,7 +138,20 @@ class Manager(object):
             tr_set = Dataset(args.trset)
             if args.dynamic_batch_mode != -1 and world_size > 1:
                 coreutils.distprint(
-                    "> enable dynamically batching", args.gpu)
+                    "> enable dynamic batching", args.gpu)
+                if args.dynamic_batch_mode == 0 and args.grad_accum_fold > 1:
+                    """
+                    NOTE (huahuan): with dynamic batching, in batch mode, at each update, the global
+                    ... batch size (g_bs) is always `args.batch_size`. However, with bucket mode,
+                    ... the g_bs could be different at steps, so the
+                    ... grad_accum_fold would introduce grad bias. I think this won't
+                    ... affect much, because the g_bs would only vary in a small range.
+                    ... That's why here is a WARNING instead of an ERROR.
+                    """
+                    coreutils.distprint(
+                        "warning: bucket dynamic batching with --grad_accum_fold > 1 "
+                        "would probably produce inconsistent results."
+                    )
                 train_sampler = DynamicBatchDistSampler(
                     dataset=tr_set,
                     mode=['bucket', 'batch'][args.dynamic_batch_mode],
@@ -179,7 +192,7 @@ class Manager(object):
         cfg = coreutils.readjson(args.config)  # type: dict
         self.model = func_build_model(cfg, args)
 
-        coreutils.distprint("> Model built. Size: {:.2f}M".format(
+        coreutils.distprint("> model built. # of params: {:.2f} M".format(
             coreutils.count_parameters(self.model)/1e6), args.gpu)
 
         # get GPU info and create readme.md
@@ -200,9 +213,15 @@ class Manager(object):
         self.evaluate = evaluate if func_eval is None else func_eval
 
         # Initial specaug module
+        # FIXME: deprecate the error once it's stable
+        if 'specaug_config' in cfg:
+            raise ValueError(
+                "'specaug_config' has been deprecated, use 'specaug' instead. "
+                f"check that in {args.config}"
+            )
         if 'specaug' not in cfg:
             specaug = None
-            coreutils.distprint("> Disable SpecAug", args.gpu)
+            coreutils.distprint("> disable SpecAug", args.gpu)
         else:
             specaug = SpecAug(**cfg['specaug'])
             specaug = specaug.to(f'cuda:{args.gpu}')
@@ -248,14 +267,14 @@ class Manager(object):
 
         if args.resume is not None:
             coreutils.distprint(
-                f"> Resuming from: {args.resume}", args.gpu)
+                f"> resuming from: {args.resume}", args.gpu)
             checkpoint = torch.load(
                 args.resume, map_location=f'cuda:{args.gpu}')  # type: OrderedDict
             self.load(checkpoint)
             del checkpoint
         elif args.init_model is not None:
             coreutils.distprint(
-                f"> Initialize model from: {args.init_model}", args.gpu)
+                f"> initialize model from: {args.init_model}", args.gpu)
             checkpoint = torch.load(
                 args.init_model, map_location=f'cuda:{args.gpu}')  # type: OrderedDict
             if 'scheduler' in checkpoint:
@@ -610,7 +629,8 @@ def evaluate(testloader: DataLoader, args: argparse.Namespace, manager: Manager)
 
     if args.rank == 0:
         manager.writer.add_scalar('loss/dev', avg_loss, manager.step)
-        manager.monitor.update(monitor_anno['dev-metric'], (avg_loss, manager.step))
+        manager.monitor.update(
+            monitor_anno['dev-metric'], (avg_loss, manager.step))
     return avg_loss
 
 

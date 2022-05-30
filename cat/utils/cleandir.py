@@ -15,7 +15,10 @@ def rm(path):
     if os.path.isfile(path):
         os.remove(path)
     elif os.path.isdir(path):
-        shutil.rmtree(path)
+        if os.path.islink(path):
+            os.unlink(path)
+        else:
+            shutil.rmtree(path)
     else:
         return
 
@@ -51,41 +54,47 @@ if __name__ == "__main__":
     # checkdir
     if os.path.isdir(d := join(D_CHECKPOINT)):
         res.append(
-            (d, f"checkpoint folder")
+            (d, "checkpoint folder")
         )
 
     # decode dir
     if os.path.isdir(d := join(D_INFER)):
         res.append(
-            (d, f"inference folder")
+            (d, "inference folder")
         )
 
     # log dir
     if os.path.isdir(d := join(D_LOG)):
         res.append(
-            (d, f"log folder")
+            (d, "log folder")
         )
 
     # data foler
     if os.path.isdir(d := join('pkl')):
         res.append(
-            (d, f"data folder")
+            (d, "data folder")
         )
     if os.path.isdir(d := join('lmbin')):
         res.append(
-            (d, f"data folder")
+            (d, "data folder")
+        )
+
+    # temp folder
+    if os.path.isdir(d := join(D_TMP)):
+        res.append(
+            (d, "temp folder")
         )
 
     # monitor fig
     if os.path.isfile(f := join(F_MONITOR_FIG)):
         res.append(
-            (f, f"monitor fig")
+            (f, "monitor fig")
         )
 
     # readme
     if os.path.isfile(f := join(F_TRAINING_INFO)):
         res.append(
-            (f, f"readme")
+            (f, "readme")
         )
 
     if len(res) > 0:
@@ -118,7 +127,7 @@ if __name__ == "__main__":
                 if i > 0 and i <= len(res):
                     indices.append(i)
             if indices == []:
-                print("no valid indices.")
+                print("no valid index.")
                 sys.exit(0)
             response = input(f"valid indices: {indices}. Confirm [y/N]: ")
             if response.lower() == 'y':
