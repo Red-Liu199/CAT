@@ -2,19 +2,20 @@
 
 **This part is auto-generated, add your details in Appendix**
 
-* Model size/M: 68.19
-* GPU info \[9\]
-  * \[9\] NVIDIA GeForce RTX 3090
+* \# of parameters (million): 79.50
+* GPU info \[8\]
+  * \[8\] NVIDIA GeForce RTX 3090
 
-### Appendix
+### Notes
 
-* train with ctc loss
+* use the same encoder as `rnnt/rnnt-v15`
 
 ### Result
 ```
-RTF=0.22
-%CER 5.75 [6021 / 104765, 79 ins, 152 del, 5790 sub ]
+dev     %SER 40.00 | %CER 5.26 [ 10798 / 205341, 164 ins, 199 del, 10435 sub ]
+test    %SER 42.22 | %CER 5.76 [ 6031 / 104765, 95 ins, 147 del, 5789 sub ]
 ```
 
-### Monitor figure
-![monitor](./monitor.png)
+|     training process    |
+|:-----------------------:|
+|![monitor](./monitor.png)|

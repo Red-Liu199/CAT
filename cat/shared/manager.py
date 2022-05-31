@@ -460,6 +460,7 @@ def train(trainloader: ReadBatchDataLoader, args: argparse.Namespace, manager: M
             if isinstance(loss, tuple):
                 loss = loss[0]
 
+            raw_loss = loss.detach()
             # divide loss with fold since we want the gradients to be divided by fold
             loss /= fold
 
@@ -467,7 +468,7 @@ def train(trainloader: ReadBatchDataLoader, args: argparse.Namespace, manager: M
         scaler.scale(loss).backward()
 
         # return for logging
-        return loss.detach() * fold, feats.size(0)
+        return raw_loss, feats.size(0)
 
     coreutils.check_parser(args, ['grad_accum_fold', 'n_steps', 'verbose',
                                   'print_freq', 'check_freq', 'rank', 'gpu', 'debug', 'amp', 'grad_norm'])

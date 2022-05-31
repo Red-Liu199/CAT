@@ -1,5 +1,5 @@
 {
-    "specaug_config": {
+    "specaug": {
         "freq_mask_width_range": 0.34,
         "num_freq_mask": 2,
         "num_time_mask": 5,
@@ -13,7 +13,6 @@
             "idim": 80,
             "hdim": 512,
             "conv": "vgg2l",
-            "d_head": 36,
             "num_heads": 4,
             "dropout": 0.3,
             "dropout_attn": 0.3,
@@ -23,7 +22,7 @@
         }
     },
     "scheduler": {
-        "type": "SchedulerTransformer",
+        "type": "SchedulerNoam",
         "optimizer": {
             "type": "Adam",
             "use_zero": true,
@@ -37,11 +36,10 @@
             }
         },
         "kwargs": {
-            "peak_factor": 1.0,
-            "d_model": 512,
-            "warmup_steps": 25000,
-            "epoch_max": 100,
-            "reverse_metric_direc": true
+            "dim_model": 512,
+            "warmup_step": 25000,
+            "stop_step": 70000,
+            "peak_factor": 1.0
         }
     }
 }
