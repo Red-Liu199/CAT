@@ -85,9 +85,14 @@ class NCETransducerTrainer(TransducerTrainer):
         assert isinstance(beamdecoder, RNNTDecoder)
         assert self._compact
         assert self.ilme_weight == 0.
-        assert isinstance(mle_weight, float)
-        assert isinstance(ilm_weight, float)
-        assert isinstance(elm_weight, float)
+        try:
+            ilm_weight = float(ilm_weight)
+            elm_weight = float(elm_weight)
+            mle_weight = float(mle_weight)
+        except ValueError as ve:
+            print("weights in invalid format: ilm | elm | mle = "
+                  f"{ilm_weight} | {elm_weight} | {mle_weight}")
+            exit(1)
 
         if ilm_weight > 0:
             print(
@@ -176,11 +181,17 @@ class NCETransducerTrainer(TransducerTrainer):
         ilm_log_prob *= padding_mask
 
         # ilm_scores: (N, U) -> (N, )
-        ilm_scores = ilm_log_prob.sum(dim=-1)
+        if self.weights['ilm'] != 0.:
+            ilm_scores = ilm_log_prob.sum(dim=-1)
+        else:
+            ilm_scores = 0.
 
         # elm_scores: (N, )
-        elm_scores = self.attach['elm'].score(
-            padded_targets, dummy_targets, ly)
+        if self.weights['elm'] != 0.:
+            elm_scores = self.attach['elm'].score(
+                padded_targets, dummy_targets, ly)
+        else:
+            elm_scores = 0.
 
         # cal model score
         model_join_out, squeeze_targets, lx, ly = self.compute_join(
@@ -363,20 +374,18 @@ def custom_evaluate(testloader, args: argparse.Namespace, manager: Manager) -> f
         '''
         part_cnt_err, part_cnt_sum = model.module.get_wer(
             feats, labels, ilens, olens)
+        cnt_err += part_cnt_err
+        cnt_tokens += part_cnt_sum
 
-        gather_obj = [None for _ in range(n_proc)]
-        dist.gather_object(
-            (part_cnt_err, part_cnt_sum),
-            gather_obj if args.rank == 0 else None,
-            dst=0
-        )
-        if args.rank == 0:
-            l_err, l_sum = list(zip(*gather_obj))
-            cnt_err += sum(l_err)
-            cnt_tokens += sum(l_sum)
-
+    gather_obj = [None for _ in range(n_proc)]
+    dist.gather_object(
+        (cnt_err, cnt_tokens),
+        gather_obj if args.rank == 0 else None,
+        dst=0
+    )
     if args.rank == 0:
-        wer = cnt_err / cnt_tokens
+        l_err, l_sum = list(zip(*gather_obj))
+        wer = sum(l_err) / sum(l_sum)
         manager.writer.add_scalar('loss/dev-wer', wer, manager.step)
         manager.monitor.update(ANNOTATION['dev-metric'], (wer, manager.step))
 
@@ -419,8 +428,6 @@ def build_model(cfg: dict, args: argparse.Namespace, dist: bool = True) -> NCETr
         **cfg['nce']['decoder']
     )
     del dummy_trainer
-    beam_searcher.joiner.cuda(args.gpu)
-    beam_searcher.predictor.cuda(args.gpu)
 
     # initialize external lm
     dummy_lm = lm_builder(coreutils.readjson(
@@ -430,7 +437,6 @@ def build_model(cfg: dict, args: argparse.Namespace, dist: bool = True) -> NCETr
     elm = dummy_lm.lm
     elm.eval()
     elm.requires_grad_(False)
-    elm.cuda(args.gpu)
     del dummy_lm
 
     # initialize the real model
@@ -447,6 +453,9 @@ def build_model(cfg: dict, args: argparse.Namespace, dist: bool = True) -> NCETr
 
     if not dist:
         return model
+    beam_searcher.joiner.cuda(args.gpu)
+    beam_searcher.predictor.cuda(args.gpu)
+    elm.cuda(args.gpu)
 
     # make batchnorm synced across all processes
     model = coreutils.convert_syncBatchNorm(model)

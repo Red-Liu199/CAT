@@ -272,7 +272,7 @@ if __name__ == "__main__":
                 for t_r in set(hyper_cfg['data']['test']) - set(text_local)
             ]
 
-            infr_option['evaluate'] = text_local+text_trans
+            infr_option['evaluate'] = text_local+sorted(text_trans)
             interface.main(pipeutil.get_args(
                 infr_option,
                 interface._parser(),

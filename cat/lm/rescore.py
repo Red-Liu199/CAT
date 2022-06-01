@@ -134,7 +134,9 @@ def datawriter(args, q: mp.Queue):
             for k, (_, t) in data[0].items():
                 fo.write(f"{k}\t{t}\n")
             del data
+
     if save_also_nbest:
+        os.makedirs(os.path.dirname(args.save_lm_nbest), exist_ok=True)
         with open(args.save_lm_nbest, 'wb') as fo:
             pickle.dump(nbest, fo)
 
@@ -187,7 +189,7 @@ def main_worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_out: mp.
                     lm_nbest[okey][int(nid)] = (_score.item(), _trans)
 
                 q_out.put((indiv, lm_nbest), block=True)
-                lm_nbest.clear()
+                lm_nbest = {}
             else:
                 q_out.put((indiv, None), block=True)
 
