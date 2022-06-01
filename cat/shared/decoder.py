@@ -5,7 +5,10 @@
 """Decoder module impl
 
 """
+
+from . import layer as clayer
 import kenlm
+import pickle
 from typing import *
 
 import torch
@@ -588,6 +591,15 @@ class MultiDecoder(AbsDecoder):
                 self._decs[i].init_states(N)()
                 for i in range(self._num_decs)
             ), self)
+
+
+class SyllableEnhancedLSTM(LSTM):
+    def __init__(self, syllable_data: str, num_classes: int, hdim: int, norm: bool = False, variational_noise: Union[Tuple[float, float], List[float]] = None, padding_idx: int = -1, with_head: bool = True,  *rnn_args, **rnn_kwargs):
+        super().__init__(num_classes, hdim, norm, variational_noise,
+                         padding_idx, with_head, *rnn_args, **rnn_kwargs)
+        del self.embedding
+        self.embedding = clayer.SyllableEmbedding(
+            num_classes, hdim, syllable_data)
 
 
 def init_state(model: kenlm.Model, pre_toks: List[str]):

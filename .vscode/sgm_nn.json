@@ -462,6 +462,7 @@
                         "LSTM",
                         "MultiDecoder",
                         "NGram",
+                        "SyllableEnhancedLSTM",
                         "ZeroDecoder"
                     ]
                 },
@@ -720,6 +721,46 @@
                                     },
                                     "gram_order": {
                                         "type": "number"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "type": {
+                                "const": "SyllableEnhancedLSTM"
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "kwargs": {
+                                "type": "object",
+                                "properties": {
+                                    "with_head": {
+                                        "type": "boolean",
+                                        "default": true
+                                    },
+                                    "padding_idx": {
+                                        "type": "number",
+                                        "default": -1
+                                    },
+                                    "variational_noise": {},
+                                    "norm": {
+                                        "type": "boolean",
+                                        "default": false
+                                    },
+                                    "hdim": {
+                                        "type": "number"
+                                    },
+                                    "num_classes": {
+                                        "type": "number"
+                                    },
+                                    "syllable_data": {
+                                        "type": "string"
                                     }
                                 }
                             }

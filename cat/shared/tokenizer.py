@@ -295,17 +295,25 @@ class JiebaComposePhoneTokenizer(JiebaTokenizer):
                 f"{self.__class__.__name__}: unknown type of f_mapping: {type(f_mapping)}")
 
         max_phnid = -1
+        cnt_no_occur = 0
         for line in str_mapping.split('\n'):
             if line == '':
                 continue
             indices = re.sub(p_rm_consecutive_space, ' ', line).split()
             word = indices[0]
             if word not in self._vocabulary:
-                sys.stderr.write(
-                    f"warning: {self.__class__.__name__} '{word}' not in existing dict, skip.")
+                if cnt_no_occur < 5:
+                    sys.stderr.write(
+                        f"warning: {self.__class__.__name__} '{word}' not in existing dict, skip.\n")
+                cnt_no_occur += 1
                 continue
             self._w2pid.append((word, tuple(int(x) for x in indices[1:])))
             max_phnid = max(max_phnid, max(self._w2pid[-1][1]))
+
+        if cnt_no_occur >= 5:
+            sys.stderr.write(
+                f"warning: {self.__class__.__name__} {cnt_no_occur} words "
+                "in the w2p map do not occur in dict.\n")
 
         self._w2pid = OrderedDict(self._w2pid)
         # check whether all word in self.vocab in w2pid
