@@ -76,8 +76,6 @@ class MWERTransducerTrainer(TransducerTrainer):
         target_lens = target_lens.to(torch.int)
         bs = enc_out.size(0)
         with torch.no_grad():
-            istraining = self.training
-            self.eval()
             self.requires_grad_(False)
             all_hypos = self.searcher.batching_rna(enc_out, frame_lens)
 
@@ -104,7 +102,6 @@ class MWERTransducerTrainer(TransducerTrainer):
             ]
             del all_hypos
             self.requires_grad_(True)
-            self.train(istraining)
 
         enc_out_expand = torch.cat(
             [
@@ -176,17 +173,14 @@ class MWERTransducerTrainer(TransducerTrainer):
             pred_out = self.predictor(torch.nn.functional.pad(
                 targets, (1, 0), value=self.bos_id))[0]
 
-            joinout, targets, enc_out_lens = self.compute_join(
+            joinout, targets, enc_out_lens, target_lens = self.compute_join(
                 enc_out, pred_out, targets, enc_out_lens, target_lens
             )
             with autocast(enabled=False):
                 loss_mle = RNNTLoss(
-                    joinout.float(), targets.to(dtype=torch.int32),
-                    enc_out_lens.to(device=joinout.device,
-                                    dtype=torch.int32),
-                    target_lens.to(
-                        device=joinout.device, dtype=torch.int32),
-                    reduction='mean', gather=True, compact=self._compact
+                    joinout.float(), targets,
+                    enc_out_lens, target_lens,
+                    reduction='mean', gather=True, compact=True
                 )
             return loss_mbr + self.mle_weight * loss_mle
 

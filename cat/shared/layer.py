@@ -784,7 +784,15 @@ class MaskedBatchNorm1d(nn.BatchNorm1d):
 
 
 class SampledSoftmax(nn.Module):
-    def __init__(self, blank: int = -1) -> None:
+    """
+    Conduct softmax on given target labels (to reduce memory consumption).
+
+    Args:
+        blank (int): CTC/RNN-T blank index, default -1.
+        uniform_ratio (float): uniformly draw indices apart from target labels via given ratio.
+    """
+
+    def __init__(self, blank: int = -1, uniform_ratio: Optional[float] = 0.0) -> None:
         super().__init__()
         assert isinstance(blank, int)
 
@@ -795,6 +803,10 @@ class SampledSoftmax(nn.Module):
 
         self.blank_id = blank
 
+        assert isinstance(uniform_ratio, (int, float))
+        assert uniform_ratio > 0 and uniform_ratio < 1
+        self.uniform_ratio = float(uniform_ratio)
+
     def forward(self, x: torch.Tensor, labels: torch.Tensor):
 
         orin_shape = labels.shape
@@ -802,8 +814,24 @@ class SampledSoftmax(nn.Module):
             labels = labels.flatten()
 
         dtype = labels.dtype
-        indices_sampled, labels = torch.unique(
-            labels, sorted=True, return_inverse=True)
+        if self.uniform_ratio == 0.0:
+            indices_sampled, labels = torch.unique(
+                labels, sorted=True, return_inverse=True)
+        else:
+            n_uniform = int(x.size(-1) * self.uniform_ratio)
+            assert n_uniform > 0
+            concat_labels = torch.cat(
+                [
+                    labels,
+                    torch.randperm(x.size(-1), device=labels.device,
+                                   dtype=dtype)[:n_uniform]
+                ],
+                dim=0
+            )
+            indices_sampled, concat_labels = torch.unique(
+                concat_labels, sorted=True, return_inverse=True)
+            labels = concat_labels[:labels.size(0)]
+
         indices_sampled = indices_sampled.to(torch.long)
         labels = labels.to(dtype)
 

@@ -57,6 +57,7 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
 
 
 class TransducerTrainer(nn.Module):
+    # fmt: off
     def __init__(
         self,
         encoder: tn_zoo.AbsEncoder = None,
@@ -72,7 +73,9 @@ class TransducerTrainer(nn.Module):
         num_predictor_mask: int = -1,
         bos_id: int = 0,
         # conduct sampled softmax
-            sampled_softmax: bool = False):
+        sampled_softmax: bool = False,
+        sampled_softmax_uniform_ratio: float = 0.0):
+        # fmt: on
         super().__init__()
 
         if sampled_softmax:
@@ -91,7 +94,8 @@ class TransducerTrainer(nn.Module):
         self._compact = compact
         self._sampled_softmax = sampled_softmax
         if sampled_softmax:
-            self.log_softmax = SampledSoftmax(blank=0)
+            self.log_softmax = SampledSoftmax(
+                blank=0, uniform_ratio=sampled_softmax_uniform_ratio)
 
         self.encoder = encoder
         self.predictor = predictor
