@@ -4,6 +4,10 @@
         "transducer": {
             "type": "object",
             "properties": {
+                "sampled_softmax_uniform_ratio": {
+                    "type": "number",
+                    "default": 0.0
+                },
                 "sampled_softmax": {
                     "type": "boolean",
                     "default": false

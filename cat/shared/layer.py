@@ -804,7 +804,7 @@ class SampledSoftmax(nn.Module):
         self.blank_id = blank
 
         assert isinstance(uniform_ratio, (int, float))
-        assert uniform_ratio > 0 and uniform_ratio < 1
+        assert uniform_ratio >= 0 and uniform_ratio < 1
         self.uniform_ratio = float(uniform_ratio)
 
     def forward(self, x: torch.Tensor, labels: torch.Tensor):
