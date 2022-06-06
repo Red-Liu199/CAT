@@ -15,7 +15,6 @@ import math
 import uuid
 import shutil
 import argparse
-from multiprocessing import Pool
 from typing import *
 
 import gather
@@ -101,15 +100,19 @@ def evaluate_ngram(pid: int, wsize: int, q: mp.Queue, args: argparse.Namespace, 
 
     torch.set_num_threads(1)
     output = []     # type: List[Tuple[float, int]]
+    prob_ilm = args.probing_ilm
     for f_data in testsets:
         testdata = CorpusDataset(f_data)
         log_probs = 0.
         n_tokens = 0
         for i in range(pid * (len(testdata) // wsize), (pid+1) * (len(testdata) // wsize)):
-            inputs, targets = testdata[i]
-            scores = model.score(inputs.unsqueeze(0), targets.unsqueeze(0))
+            in_tokens, targets = testdata[i]
+            if prob_ilm:
+                in_tokens = in_tokens[:-1]
+                targets = targets[:-1]
+            scores = model.score(in_tokens.unsqueeze(0), targets.unsqueeze(0))
             log_probs += scores
-            n_tokens += inputs.size(0)
+            n_tokens += in_tokens.size(0)
         output.append((log_probs.item(), n_tokens))
     q.put(output, block=True)
 
@@ -121,7 +124,7 @@ def evaluate_nnlm(pid: int, wsize: int, q: mp.Queue, args: argparse.Namespace, t
     if args.usegpu:
         device = pid
         torch.cuda.set_device(device)
-        model = build_model(args, device)
+        model = build_model(args, device, verbose=(pid == 0))
     else:
         torch.set_num_threads(1)
         device = 'cpu'
@@ -130,30 +133,41 @@ def evaluate_nnlm(pid: int, wsize: int, q: mp.Queue, args: argparse.Namespace, t
 
     criterion = torch.nn.CrossEntropyLoss().to(device)
 
+    prob_ilm = args.probing_ilm
     output = []     # type: List[Tuple[float, int]]
     for f_data in testsets:
         testdata = CorpusDataset(f_data)
-        # slice the dataset to avoid duplicated datas
+        # slice the dataset to avoid duplicated
         testdata.offsets = testdata.offsets[
             pid * (len(testdata)//wsize):(pid+1)*(len(testdata)//wsize)]
         testloader = DataLoader(
-            testdata, batch_size=32, collate_fn=sortedPadCollateLM())
+            testdata, batch_size=32,
+            num_workers=1,
+            collate_fn=sortedPadCollateLM(flatten_target=False)
+        )
         nll = 0.
         n_tokens = 0
         for minibatch in testloader:
-            features, input_lengths, labels, _ = minibatch
-            features = features.to(device, non_blocking=True)
-            labels = labels.to(device, non_blocking=True)
-            preds, _ = model(features, input_lengths=input_lengths)
+            in_tokens, in_lens, targets, _ = minibatch
+            if prob_ilm:
+                in_lens -= 1
+            in_tokens = in_tokens.to(device, non_blocking=True)
+            targets = targets.to(device, non_blocking=True)
+            preds, _ = model(in_tokens, input_lengths=in_lens)
             # gather op doesn't support cpu
             if device == 'cpu':
                 logits = torch.cat([
-                    preds[n, :input_lengths[n], :]
+                    preds[n, :in_lens[n], :]
+                    for n in range(preds.size(0))
+                ], dim=0)
+                targets = torch.cat([
+                    targets[n, :in_lens[n], :]
                     for n in range(preds.size(0))
                 ], dim=0)
             else:
-                logits = gather.cat(preds, input_lengths)
-            nll += criterion(logits, labels) * logits.size(0)
+                logits = gather.cat(preds, in_lens)
+                targets = gather.cat(targets, in_lens)
+            nll += criterion(logits, targets) * logits.size(0)
             n_tokens += logits.size(0)
         output.append((-nll.item(), n_tokens))
 
@@ -182,12 +196,14 @@ def consume_worker(wsize: int, q: mp.Queue, args):
 def text2corpusbin(f_text: str, f_bin: str, tokenizer):
     from ..utils.pipeline.asr import get_args
     from ..utils.data import pack_corpus as t2b
-    t2b.main(
-        get_args(
-            {
-                'tokenizer': tokenizer,
-                'quiet': True
-            }, t2b.TextProcessingParser(), [f_text, f_bin]))
+    t2b.main(get_args(
+        {
+            'tokenizer': tokenizer,
+            'quiet': True
+        },
+        t2b.TextProcessingParser(),
+        [f_text, f_bin]
+    ))
 
     return
 
@@ -197,15 +213,16 @@ def isNGram(args):
     return configures['decoder']['type'] == 'NGram'
 
 
-def build_model(args: argparse.Namespace, device):
+def build_model(args: argparse.Namespace, device, verbose: bool = True):
     configures = coreutils.readjson(args.config)
     isngram = (configures['decoder']['type'] == 'NGram')
     if not isngram:
         model = lm_builder(configures, dist=False, wrapper=True)
         if args.resume is None:
-            sys.stderr.write(
-                f"You're trying to compute ppl with un-initialized model.\n"
-                f"... ensure you know what you're doing.\n")
+            if verbose:
+                sys.stderr.write(
+                    f"You're trying to compute ppl with un-initialized model.\n"
+                    f"... ensure you know what you're doing.\n")
         else:
             coreutils.load_checkpoint(model, args.resume)
         # squeeze the wrapper
@@ -229,6 +246,8 @@ def _parser():
                         help="Use tokenizer to encode the evaluation sets. If passed, would take -e inputs as text files.")
     parser.add_argument("--resume", type=str,
                         help="Path to the checkpoint of NNLM, not required for N-gram LM.")
+    parser.add_argument("--probing-ilm", action="store_true",
+                        help="Probing the LM as ILM, </s> would be excluded due to limitation of E2E model.")
     return parser
 
 

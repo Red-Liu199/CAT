@@ -297,12 +297,7 @@ def draw_lr(ax: plt.Axes, smr: BaseSummary):
 
 
 def draw_any(ax: plt.Axes, smr: BaseSummary, _name: str = ''):
-    ax.plot(smr.data['step'], smr.data['val'])
-    ax.ticklabel_format(axis="x", style="sci",
-                        scilimits=(0, 0), useMathText=True)
-    ax.grid(ls='--')
-    ax.set_ylabel(_name)
-    return ax
+    return draw_loss(ax, smr, smooth_value=0.9, ylabel=_name, prop_box=False)
 
 
 def plot_monitor(mwriter: Union[str, MonitorWriter], o_path: str = None, title: str = None, interactive_show=False) -> str:

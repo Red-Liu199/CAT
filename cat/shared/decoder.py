@@ -505,7 +505,7 @@ class ILM(AbsDecoder):
 
         rnntmodel = rnnt_builder(coreutils.readjson(f_rnnt_config), dist=False)
         coreutils.load_checkpoint(rnntmodel, f_check)
-        self._stem = rnntmodel.decoder
+        self._stem = rnntmodel.predictor
         self._head = rnntmodel.joiner
         del rnntmodel
 

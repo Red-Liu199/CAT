@@ -1202,6 +1202,10 @@
                                             "resume": {
                                                 "type": "string",
                                                 "description": "Path to the checkpoint of NNLM, not required for N-gram LM."
+                                            },
+                                            "probing_ilm": {
+                                                "description": "Probing the LM as ILM, </s> would be excluded due to limitation of E2E model.",
+                                                "default": false
                                             }
                                         }
                                     }
