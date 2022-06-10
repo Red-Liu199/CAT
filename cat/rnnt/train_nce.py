@@ -59,7 +59,9 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
             'loss/nce-data',
             'loss/nce-noise',
             'acc/data',
-            'acc/noise'
+            'acc/noise',
+            'weight/ilm',
+            'weight/elm'
         ]
     )
 
@@ -78,6 +80,7 @@ class NCETransducerTrainer(TransducerTrainer):
             ilm_weight: float,
             elm_weight: float,
             mle_weight: Optional[float] = 0.,
+            trainable_weight: bool = False,
             *args, **kwargs) -> None:
         super().__init__(encoder, predictor, joiner, *args, **kwargs)
 
@@ -102,15 +105,7 @@ class NCETransducerTrainer(TransducerTrainer):
         self.attach = {
             'elm': ext_lm,
             'searcher': beamdecoder,
-            '_eval_beam_searcher': RNNTDecoder(
-                predictor,
-                joiner,
-                beam_size=beamdecoder.beam_size,
-                lm_module=ext_lm,
-                alpha=elm_weight,
-                est_ilm=(ilm_weight != 0.0),
-                ilm_weight=ilm_weight
-            )
+            '_eval_beam_searcher': None
         }
         ilm = ILM(lazy_init=True)
         ilm._stem = self.predictor
@@ -121,6 +116,12 @@ class NCETransducerTrainer(TransducerTrainer):
             'elm': elm_weight,   # weight for ELM
             'mle': mle_weight    # RNN-T loss weight for joint training
         }
+        if trainable_weight:
+            self._weight_elm = nn.parameter.Parameter(torch.tensor(elm_weight))
+            self._weight_ilm = nn.parameter.Parameter(torch.tensor(ilm_weight))
+            self.weights['elm'] = self._weight_elm
+            self.weights['ilm'] = self._weight_ilm
+        self.trainable_weight = trainable_weight
 
         self._pad = nn.ConstantPad1d((1, 0), 0)
         self._logsigmoid = nn.LogSigmoid()
@@ -181,13 +182,13 @@ class NCETransducerTrainer(TransducerTrainer):
         ilm_log_prob *= padding_mask
 
         # ilm_scores: (N, U) -> (N, )
-        if self.weights['ilm'] != 0.:
+        if self.trainable_weight or self.weights['ilm'] != 0.:
             ilm_scores = ilm_log_prob.sum(dim=-1)
         else:
             ilm_scores = 0.
 
         # elm_scores: (N, )
-        if self.weights['elm'] != 0.:
+        if self.trainable_weight or self.weights['elm'] != 0.:
             elm_scores = self.attach['elm'].score(
                 padded_targets, dummy_targets, ly)
         else:
@@ -268,7 +269,7 @@ class NCETransducerTrainer(TransducerTrainer):
         return ml_loss*self.weights['mle'] + nce_data_loss + nce_noise_loss, \
             (nce_data_obj.detach(), nce_noise_obj.detach()), \
             (nce_data_loss.detach(), nce_noise_loss.detach()), \
-            ml_loss.detach()
+            ml_loss.detach(), (self.weights['ilm'], self.weights['elm'])
 
     @torch.no_grad()
     def get_wer(self, inputs: torch.FloatTensor, targets: torch.LongTensor, in_lens: torch.LongTensor, target_lens: torch.LongTensor) -> torch.FloatTensor:
@@ -305,7 +306,8 @@ def custom_hook(
         n_step: int,
         nnforward_args: tuple):
 
-    loss, (p_c_0, p_c_1), (l_data, l_noise), l_ml = model(*nnforward_args)
+    loss, (p_c_0, p_c_1), (l_data, l_noise), l_ml, (ilm_w,
+                                                    elm_w) = model(*nnforward_args)
 
     if args.rank == 0:
         # FIXME: not exact global accuracy
@@ -322,7 +324,9 @@ def custom_hook(
                 'loss/nce-data': (l_data, step_cur),
                 'loss/nce-noise': (l_noise, step_cur),
                 'acc/data': (pos_acc, step_cur),
-                'acc/noise': (noise_acc, step_cur)
+                'acc/noise': (noise_acc, step_cur),
+                'weight/ilm': (float(ilm_w), step_cur),
+                'weight/elm': (float(elm_w), step_cur)
             }
         )
         manager.writer.add_scalar(
@@ -337,6 +341,10 @@ def custom_hook(
             'acc/data', pos_acc, step_cur)
         manager.writer.add_scalar(
             'acc/noise', noise_acc, step_cur)
+        manager.writer.add_scalar(
+            'weight/ilm', float(ilm_w), step_cur)
+        manager.writer.add_scalar(
+            'weight/elm', float(elm_w), step_cur)
     return loss
 
 
@@ -362,6 +370,16 @@ def custom_evaluate(testloader, args: argparse.Namespace, manager: Manager) -> f
     cnt_tokens = 0
     cnt_err = 0
     n_proc = dist.get_world_size()
+    # register beam searcher
+    model.module.attach['_eval_beam_searcher'] = RNNTDecoder(
+        model.module.predictor,
+        model.module.joiner,
+        beam_size=model.module.attach['searcher'].beam_size,
+        lm_module=model.module.attach['elm'],
+        alpha=model.module.weights['elm'],
+        est_ilm=True,
+        ilm_weight=model.module.weights['ilm']
+    )
 
     for i, minibatch in tqdm(enumerate(testloader), desc=f'Epoch: {manager.epoch} | eval',
                              unit='batch', total=len(testloader), disable=(args.gpu != 0), leave=False):

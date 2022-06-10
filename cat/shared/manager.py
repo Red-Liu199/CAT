@@ -257,7 +257,7 @@ class Manager(object):
         self.DEBUG = args.debug  # type: bool
         self.epoch = 1      # type: int
         self.step = 0       # type: int
-        # use to resume from checkpoint
+        # used to resume from checkpoint
         self.step_by_last_epoch = 0   # type: int
 
         if not (args.resume is None or args.init_model is None):
@@ -306,16 +306,19 @@ class Manager(object):
             else:
                 self.train_sampler.set_epoch(self.epoch)
 
+            # get the initialized perf. before training start
+            self.model.eval()
+            self.evaluate(self.valloader, args, self)
+            self.model.train()
             for _ in self.train(self.trainloader, args, self):
                 self.model.eval()
                 metrics = self.evaluate(self.valloader, args, self)
+                self.model.train()
                 if isinstance(metrics, tuple):
                     # defaultly use the first one to evaluate
                     metrics = metrics[0]
 
                 state = self.scheduler.step(metrics)
-                self.model.train()
-
                 checkpoint = os.path.join(
                     args._checkdir,
                     f"checkpoint.{self.epoch}e{self.step}s.pt"
