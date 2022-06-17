@@ -294,6 +294,7 @@ from cat.rnnt.train_nce import _parser as parser_rnnt_nce
 from cat.rnnt.train import _parser as parser_rnnt
 from cat.lm.train import _parser as parser_lm
 from cat.ctc.train import _parser as parser_ctc
+from cat.ctc.train_mmi import _parser as parser_ctc_mmi
 # fmt: on
 
 add_property(hyper_schema, {
@@ -302,7 +303,8 @@ add_property(hyper_schema, {
         'cat.rnnt.train_nce': parser_rnnt_nce(),
         'cat.rnnt.train': parser_rnnt(),
         'cat.lm.train': parser_lm(),
-        'cat.ctc.train': parser_ctc()
+        'cat.ctc.train': parser_ctc(),
+        'cat.ctc.train_mmi': parser_ctc_mmi()
     }, desc="Configuration of NN training")
 })
 

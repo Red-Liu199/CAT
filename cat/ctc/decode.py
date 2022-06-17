@@ -124,9 +124,8 @@ def worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_out: mp.Queue
         if pid == 0:
             print(
                 "warning: ctc decoding with an ext. LM assumes <s> -> 0 and <unk> -> 1.")
-        labels = [str(i) for i in range(tokenizer.vocab_size)]
-        labels[0] = '<s>'
-        labels[1] = '<unk>'
+        labels = ['<s>', '<unk>'] + [str(i)
+                                     for i in range(2, tokenizer.vocab_size)]
         searcher = CTCBeamDecoder(
             labels, model_path=args.lm_path, alpha=args.alpha, beta=args.beta,
             beam_width=args.beam_size, num_processes=1, is_token_based=True)

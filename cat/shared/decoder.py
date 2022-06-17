@@ -83,7 +83,7 @@ class AbsDecoder(nn.Module):
         logits, _ = self.forward(input_ids, input_lengths=input_lengths, *args)
         # [N, U]
         log_prob = logits.log_softmax(
-            dim=-1).gather(index=targets.unsqueeze(2), dim=-1).squeeze(-1)
+            dim=-1).gather(index=targets.long().unsqueeze(2), dim=-1).squeeze(-1)
         # True for not masked, False for masked, [N, U]
         padding_mask = torch.arange(input_ids.size(1), device=input_ids.device)[
             None, :] < input_lengths[:, None].to(input_ids.device)

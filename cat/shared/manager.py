@@ -306,10 +306,12 @@ class Manager(object):
             else:
                 self.train_sampler.set_epoch(self.epoch)
 
-            # get the initialized perf. before training start
-            self.model.eval()
-            self.evaluate(self.valloader, args, self)
-            self.model.train()
+            if self.step == 0:
+                # get the initialized perf. before training start
+                self.model.eval()
+                self.evaluate(self.valloader, args, self)
+                self.model.train()
+
             for _ in self.train(self.trainloader, args, self):
                 self.model.eval()
                 metrics = self.evaluate(self.valloader, args, self)

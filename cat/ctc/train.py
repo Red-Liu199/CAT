@@ -83,25 +83,25 @@ class AMTrainer(nn.Module):
         self._crf_ctx = CRFContext(den_lm, next(
             iter(self.am.parameters())).device.index)
 
-    def forward(self, logits, labels, input_lengths, label_lengths):
+    def forward(self, feats, labels, lx, ly):
 
-        netout, lens_o = self.am(logits, input_lengths)
-        netout = torch.log_softmax(netout, dim=-1)
+        logits, lx = self.am(feats, lx)
+        logits = torch.log_softmax(logits, dim=-1)
 
         labels = labels.cpu()
-        lens_o = lens_o.cpu()
-        label_lengths = label_lengths.cpu()
+        lx = lx.cpu()
+        ly = ly.cpu()
         if self.is_crf:
             assert self._crf_ctx is not None
             with autocast(enabled=False):
                 loss = self.criterion(
-                    netout.float(), labels.to(torch.int),
-                    lens_o.to(torch.int), label_lengths.to(torch.int))
+                    logits.float(), labels.to(torch.int),
+                    lx.to(torch.int), ly.to(torch.int))
         else:
             # [N, T, C] -> [T, N, C]
-            netout = netout.transpose(0, 1)
-            loss = self.criterion(netout, labels.to(torch.int), lens_o.to(
-                torch.int), label_lengths.to(torch.int))
+            logits = logits.transpose(0, 1)
+            loss = self.criterion(logits, labels.to(torch.int), lx.to(
+                torch.int), ly.to(torch.int))
         return loss
 
 

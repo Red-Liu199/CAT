@@ -370,16 +370,17 @@ def custom_evaluate(testloader, args: argparse.Namespace, manager: Manager) -> f
     cnt_tokens = 0
     cnt_err = 0
     n_proc = dist.get_world_size()
-    # register beam searcher
-    model.module.attach['_eval_beam_searcher'] = RNNTDecoder(
-        model.module.predictor,
-        model.module.joiner,
-        beam_size=model.module.attach['searcher'].beam_size,
-        lm_module=model.module.attach['elm'],
-        alpha=model.module.weights['elm'],
-        est_ilm=True,
-        ilm_weight=model.module.weights['ilm']
-    )
+    if isinstance(model.module, NCETransducerTrainer):
+        # register beam searcher
+        model.module.attach['_eval_beam_searcher'] = RNNTDecoder(
+            model.module.predictor,
+            model.module.joiner,
+            beam_size=model.module.attach['searcher'].beam_size,
+            lm_module=model.module.attach['elm'],
+            alpha=model.module.weights['elm'],
+            est_ilm=True,
+            ilm_weight=model.module.weights['ilm']
+        )
 
     for i, minibatch in tqdm(enumerate(testloader), desc=f'Epoch: {manager.epoch} | eval',
                              unit='batch', total=len(testloader), disable=(args.gpu != 0), leave=False):
