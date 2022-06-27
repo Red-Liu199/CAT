@@ -130,7 +130,8 @@ class CTCDiscTrainer(AMTrainer):
             lx.unsqueeze(1).repeat(1, k).view(-1),
             ly_samples
         ).view(-1, k)
-        return (-self.weights['ctc_loss']*p_y_x + p_y_x_den.mean(dim=1)).mean(dim=0)
+
+        return (-p_y_x + p_y_x_den.mean(dim=1)/self.weights['ctc_loss']).mean(dim=0)
 
 
 def build_model(cfg: dict, args: argparse.Namespace) -> Union[AbsEncoder, CTCDiscTrainer]:

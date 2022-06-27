@@ -12,14 +12,15 @@ from typing import Union, List, Tuple, Dict
 
 import webdataset as wds
 
+UTTS_PER_FILE = 2000
 
-def parsingData(
+
+def pack_data(
         f_scps: Union[List[str], str],
         f_labels: Union[List[str], str],
         d_out: str,      # output directory
         fmt: str = "data-%05d.tar",       # tar file name format
-        filter_group: List[str] = None,
-        iszh: bool = False):
+        filter_group: List[str] = None):
     """Parsing audio feature and text label into pickle file.
 
     Args:
@@ -61,14 +62,7 @@ def parsingData(
               for l in labels]      # type: List[Tuple[str, str]]
 
     num_labels = len(labels)
-    if iszh:
-        # remove spaces for Asian lang
-        label_dict = {}
-        for i in range(num_labels):
-            uid, utt = labels[i]
-            label_dict[uid] = utt.replace(' ', '')
-    else:
-        label_dict = {uid: utt for uid, utt in labels}   # type: Dict[str, str]
+    label_dict = {uid: utt for uid, utt in labels}   # type: Dict[str, str]
     del labels
 
     num_utts_individual = [sum(1 for _ in open(_f_scp, 'r'))
@@ -87,10 +81,12 @@ def parsingData(
             subdir = os.path.join(d_out, f"{prefix}_{suffix}")
             os.makedirs(subdir, exist_ok=True)
             sinks.append(
-                wds.ShardWriter(os.path.join(subdir, fmt), maxcount=2000)
+                wds.ShardWriter(os.path.join(subdir, fmt),
+                                maxcount=UTTS_PER_FILE)
             )
     else:
-        sinks = [wds.ShardWriter(os.path.join(d_out, fmt), maxcount=2000)]
+        sinks = [wds.ShardWriter(os.path.join(
+            d_out, fmt), maxcount=UTTS_PER_FILE)]
 
     for n, _f_scp in enumerate(f_scps):
         with open(_f_scp, 'r') as fi_scp:
@@ -123,11 +119,10 @@ if __name__ == "__main__":
         srcdata = json.load(fi)
 
     for subset in ['dev', 'train_l']:
-        parsingData(
+        pack_data(
             f_scps=srcdata[subset]['scp'],
             f_labels=srcdata[subset]['trans'],
             d_out=f"/mnt/nvme_workspace/zhenghh/speechdata/wenetspeech/{subset}",
             fmt=f"{subset}_%05d.tar",
-            filter_group=[":10", "11:1000", "1001:1200", "1201:1500", "1500:"],
-            iszh=True
+            filter_group=[":10", "11:1000", "1001:1200", "1201:1500", "1500:"]
         )

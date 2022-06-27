@@ -1,10 +1,5 @@
 # Transducer toolkit for speech recognition
 
-## TODO
-
-1. For script processing large dataset (more than 1000 hours), refer to [loading data with webdataset](egs/wenetspeech/local/prep_wds.py).
-
-
 ## Installation
 
 1. Main dependencies
@@ -28,4 +23,4 @@
 
 To get started with this project, please refer to [TEMPLATE](egs/TEMPLATE/README.md) for tutorial.
 
-Once you're more familiar with the project, please read [the document](configure_guide.md) for configuring the training.
+Once you're more familiar with the project, please read [the document](docs/configure_guide.md) for configuring the training.
