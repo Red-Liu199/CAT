@@ -86,9 +86,9 @@ trset='./data/{10_1000,1000_2000}/data-*.tar'
 trset='./data/10_1000/data-0000{0..9}.tar'
 ```
 
-底层的`webdataset`接口调用在[code](https://github.com/maxwellzh/Transducer-dev/blob/main/cat/shared/manager.py#L82-L136)
+底层的`webdataset`接口调用在[code](https://github.com/maxwellzh/Transducer-dev/blob/main/cat/shared/manager.py#L82)
 
-**NOTE:** 由于开发集数据本身`shuffle=True`，且数据量一般较小，因此开发集数据仍然使用传统方式加载。
+**NOTE:** 由于开发集数据本身`shuffle=False`，且数据量一般较小，因此开发集数据仍然使用传统方式加载。
 
 ## DDP
 
@@ -102,11 +102,14 @@ gpu0: data-00.tar
 gpu1: data-02.tar, data-01.tar
 ```
 
-随之而来的问题是，两个进程上数据量不同，而DDP是同步式梯度更新训练，直接训练的话，gpu1会一直在等待gpu0同步，而gpu0已经完成所有数据退出了。对这个问题，[wenet-e2e](https://github.com/wenet-e2e/wenet/blob/main/docs/UIO.md#qa)提出的解决方案是使用`model.join()`。
+随之而来的问题是，两个进程上数据量不同，而DDP是同步式梯度更新训练，直接训练的话，gpu1会一直在等待gpu0同步，而gpu0已经完成所有数据遍历退出了。对这个问题，[wenet-e2e](https://github.com/wenet-e2e/wenet/blob/main/docs/UIO.md#qa)提出的解决方案是使用`model.join()`。
 
 我们使用更简单直接的方式，当一个进程遍历所有的数据后，直接强制所有进程结束当前迭代轮次（epoch），这样做使得1 epoch内训练的数据量减少了，但由于我们会迭代比较多轮次，并且每次会重新shuffle ark_list，这一部分带来的影响是比较小的
 
 > wenetspeech-L（～10000 hour）中包含约15 million句子，处理后得到约7500个.tar文件，使用8 GPU训练，7500 % 8 = 4，即每轮有4x2000句子被抛弃
+
+**NOTE:**
+上述例子只是为了便于理解，实际中webdataset会对ark文件做一些重复，使得ark文件层级能够被均分；但由于数据集句子无法被2000整除，会有一个（或多个）ark文件的句子相对其他较少，导致每次抛弃的句子数<2000
 
 ## 参考
 
