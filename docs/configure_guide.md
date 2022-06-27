@@ -155,6 +155,6 @@ And add following contents into the file `egs/[task]/.vscode/settings.json`:
 
 With all these properly setup, intellisense will be enable when editting `exp/[any]/config.json` and `exp/[any]/hyper-p.json`.
 
-<img src="assets/intellisense.gif" width=800px/>
+<img src="../assets/intellisense.gif" width=800px/>
 
 For more about how schema works, refer to [JSON editing in Visual Studio Code](https://code.visualstudio.com/docs/languages/json).

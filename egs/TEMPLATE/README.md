@@ -92,4 +92,4 @@ Note that data prepare is not included in standard pipelines. It's your duty to 
 
 ## Training with large dataset
 
-Please refer to [how_to_prepare_large_dataset](https://github.com/maxwellzh/Transducer-dev/docs/how_to_prepare_large_dataset_ch.md)
+Please refer to [how_to_prepare_large_dataset](../../docs/how_to_prepare_large_dataset_ch.md)
