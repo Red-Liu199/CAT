@@ -15,8 +15,7 @@
             "unk_id": 1,
             "model_prefix": "sentencepiece/yesno_char/spm",
             "vocab_size": 8
-        },
-        "location": "exp/asr-rnnt-cuside/tokenizer.tknz"
+        }
     },
     "train": {
         "bin": "cat.rnnt.train_unified",
@@ -34,13 +33,11 @@
                 "streaming": true,
                 "beam_size": 16,
                 "cpu": true,
-                "nj": 40,
-                "resume": "exp/asr-rnnt-cuside/check/best-1.pt"
+                "nj": 40
             }
         },
         "er": {
             "cer": false
         }
-    },
-    "commit": "887fa72f0a50668a80e2ee336a909a3782136d24"
+    }
 }

@@ -152,14 +152,13 @@ class NCETransducerTrainer(TransducerTrainer):
                 enc_out, noise_pred_out, lx, ly+1
             )
 
-            with autocast(enabled=False):
-                # q_y_x: (N, )
-                q_y_x = -RNNTLoss(
-                    noise_join_out.float(), squeeze_targets,
-                    lx.to(device=device, dtype=torch.int32),
-                    ly.to(device=device, dtype=torch.int32),
-                    gather=True, compact=True
-                )
+            # q_y_x: (N, )
+            q_y_x = -RNNTLoss(
+                noise_join_out, squeeze_targets,
+                lx.to(device=device, dtype=torch.int32),
+                ly.to(device=device, dtype=torch.int32),
+                gather=True, compact=True
+            )
 
         # cal ILM scores, refer to cat.shared.decoder.AbsDecoder.score()
         pred_out, _ = self.predictor(padded_targets, input_lengths=ly+1)
@@ -198,13 +197,12 @@ class NCETransducerTrainer(TransducerTrainer):
         model_join_out, squeeze_targets, lx, ly = self.compute_join(
             enc_out, pred_out, squeeze_targets, lx, ly
         )
-        with autocast(enabled=False):
-            # model_log_prob: (N, )
-            p_y_x = -RNNTLoss(
-                model_join_out.float(),
-                squeeze_targets, lx, ly,
-                gather=True, compact=True
-            )
+        # p_y_x: (N, )
+        p_y_x = -RNNTLoss(
+            model_join_out,
+            squeeze_targets, lx, ly,
+            gather=True, compact=True
+        )
 
         p_hat_y_x = p_y_x + \
             self.weights['ilm'] * ilm_scores + \

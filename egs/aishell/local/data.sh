@@ -14,8 +14,6 @@ set -u
     help="Speed perturbation factor(s). Default: None.")
 ("-subsets-fbank", type=str, nargs="+", choices=["train", "dev", "test"],
     default=["train", "dev", "test"], help="Subset(s) for extracting FBanks. Default: ['train', 'dev', 'test']")
-("-subsets-sp", type=str, nargs="+", choices=["train", "dev", "test"],
-    default=["train"], help="Subset(s) for conducting speed perturbation. Default: ['train']")
 PARSER
 eval $(python utils/parseopt.py $0 $*)
 

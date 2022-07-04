@@ -137,6 +137,7 @@ if [ $remove == "False" ]; then
     for p in $package; do
         f_log="module_install_log/$p.log"
         touch $f_log
+        echo "logging at $f_log"
         exc_install $p >$f_log 2>&1 || {
             echo "failed to install $p, check the log at $f_log"
             exit 1
@@ -147,6 +148,7 @@ elif [ $remove == "True" ]; then
     for p in $package; do
         f_log="module_install_log/remove.$p.log"
         touch $f_log
+        echo "logging at $f_log"
         exc_rm $p >$f_log 2>&1 || {
             echo "failed to remove $p, check the log at $f_log"
             exit 1

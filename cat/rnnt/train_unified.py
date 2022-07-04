@@ -292,17 +292,16 @@ class UnifiedTTrainer(TransducerTrainer):
         )
         loss_simu *= self.simu_loss_weight
 
-        with autocast(enabled=False):
-            loss_utt = RNNTLoss(
-                joinout.float(), targets,
-                enc_out_lens, target_lens,
-                reduction='mean', gather=True, compact=self._compact
-            )
-            loss_streaming = RNNTLoss(
-                chunk_joinout.float(), targets,
-                enc_out_lens, target_lens,
-                reduction='mean', gather=True, compact=self._compact
-            )
+        loss_utt = RNNTLoss(
+            joinout, targets,
+            enc_out_lens, target_lens,
+            reduction='mean', gather=True, compact=self._compact
+        )
+        loss_streaming = RNNTLoss(
+            chunk_joinout, targets,
+            enc_out_lens, target_lens,
+            reduction='mean', gather=True, compact=self._compact
+        )
 
         return loss_streaming+loss_utt+loss_simu, \
             (loss_streaming.detach(), loss_utt.detach(), loss_simu.detach())

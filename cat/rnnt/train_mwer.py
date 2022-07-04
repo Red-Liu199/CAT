@@ -143,13 +143,13 @@ class MWERTransducerTrainer(TransducerTrainer):
         joinout, squeezed_targets, enc_out_lens, expd_target_lens = \
             self.compute_join(enc_out_expand, pred_out,
                               squeezed_targets, enc_out_lens, expd_target_lens)
-        with autocast(enabled=False):
-            ll = -RNNTLoss(
-                joinout.float(), squeezed_targets,
-                enc_out_lens,
-                expd_target_lens,
-                gather=True, compact=True
-            )
+
+        ll = -RNNTLoss(
+            joinout, squeezed_targets,
+            enc_out_lens,
+            expd_target_lens,
+            gather=True, compact=True
+        )
 
         # den: (bs, )
         den = torch.logsumexp(ll * mask_batches, dim=1)
@@ -176,12 +176,12 @@ class MWERTransducerTrainer(TransducerTrainer):
             joinout, targets, enc_out_lens, target_lens = self.compute_join(
                 enc_out, pred_out, targets, enc_out_lens, target_lens
             )
-            with autocast(enabled=False):
-                loss_mle = RNNTLoss(
-                    joinout.float(), targets,
-                    enc_out_lens, target_lens,
-                    reduction='mean', gather=True, compact=True
-                )
+
+            loss_mle = RNNTLoss(
+                joinout, targets,
+                enc_out_lens, target_lens,
+                reduction='mean', gather=True, compact=True
+            )
             return loss_mbr + self.mle_weight * loss_mle
 
 

@@ -186,13 +186,12 @@ class TransducerTrainer(nn.Module):
             loss += self.ilme_weight / enc_out.size(0) * \
                 self._ilme_criterion(ilm_log_probs, ilm_targets)
 
-        with autocast(enabled=False):
-            loss += RNNTLoss(
-                joinout.float(), targets,
-                enc_out_lens,
-                target_lens,
-                reduction='mean', gather=True, compact=self._compact
-            )
+        loss += RNNTLoss(
+            joinout, targets,
+            enc_out_lens,
+            target_lens,
+            reduction='mean', gather=True, compact=self._compact
+        )
 
         return loss
 

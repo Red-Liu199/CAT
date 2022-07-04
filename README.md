@@ -16,7 +16,10 @@
 
    ```bash
    git clone git@github.com:maxwellzh/Transducer-dev.git
+   # install with default configurations
    ./install.sh
+   # get help message
+   ./install.sh -h
    ```
 
 ## Examples and Usage
