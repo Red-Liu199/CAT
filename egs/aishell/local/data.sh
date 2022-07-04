@@ -20,9 +20,7 @@ PARSER
 eval $(python utils/parseopt.py $0 $*)
 
 opt_sp="1.0"
-[ "$sp" != "None" ] && (
-    opt_sp=$sp
-)
+[ "$sp" != "None" ] && export opt_sp=$sp
 
 # Extract 80-dim FBank features
 python local/extract_meta.py $src/wav \

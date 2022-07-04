@@ -5,24 +5,12 @@ Uage:
 """
 
 
-from cat.shared import tokenizer as tknz
-from cat.shared._constants import (
-    F_DATAINFO,
-    F_NN_CONFIG,
-    F_HYPER_CONFIG,
-    D_CHECKPOINT,
-    D_INFER
-)
-from cat.utils.data import resolvedata
-
-
 import os
 import sys
 import json
 import uuid
 import pickle
 import argparse
-from enum import Enum
 from typing import *
 from multiprocessing import Process
 
@@ -90,6 +78,7 @@ def fmtstr_set(property_name: str, value: str, isPath: bool = True):
 
 def initial_datainfo():
     if not os.path.isfile(F_DATAINFO):
+        from cat.utils.data import resolvedata
         resolvedata.main()
 
 
@@ -193,7 +182,7 @@ def sp_train(intext: str, **kwargs):
 
     # available options https://github.com/google/sentencepiece/blob/master/doc/options.md
     spm.SentencePieceTrainer.Train(**DEFAULT_SETTINGS)
-    
+
 
 def pack_data(
         f_scps: Union[List[str], str],
@@ -334,7 +323,8 @@ def pack_data(
             'label': labels,
             'linfo': linfo,
             'arkname': ark_locs,
-            'key': np.array(_keys)}, fo)
+            'key': np.array(_keys)
+        }, fo)
 
     if cnt_rm > 0:
         print(f"pack_data(): remove {cnt_rm} unqualified sequences.")
@@ -688,6 +678,19 @@ if __name__ == "__main__":
     assert s_end >= 1, f"Invalid stop stage: {s_end}"
     assert s_beg >= 1 and s_beg <= s_end, f"Invalid start stage: {s_beg}"
 
+    # setting visible gpus before loading cat/torch
+    if args.ngpu > -1:
+        set_visible_gpus(args.ngpu)
+
+    from cat.shared import tokenizer as tknz
+    from cat.shared._constants import (
+        F_DATAINFO,
+        F_NN_CONFIG,
+        F_HYPER_CONFIG,
+        D_CHECKPOINT,
+        D_INFER
+    )
+
     cwd = os.getcwd()
     working_dir = args.expdir
     checkExist('d', working_dir)
@@ -701,9 +704,6 @@ if __name__ == "__main__":
             os.environ[k] = v
     if 'commit' not in hyper_cfg:
         log_commit(f_hyper)
-
-    if args.ngpu > -1:
-        set_visible_gpus(args.ngpu)
 
     ############ Stage 1  Tokenizer training ############
     if s_beg <= 1 and s_end >= 1:
@@ -784,7 +784,8 @@ if __name__ == "__main__":
                 [_data['scp'] for _data in f_data],
                 [_data['trans'] for _data in f_data],
                 f_out=os.path.join(d_pkl, dataset+'.pkl'),
-                filter=filter, tokenizer=tokenizer)
+                filter=filter, tokenizer=tokenizer
+            )
             del f_data
 
     ############ Stage 3  NN training ############
@@ -932,6 +933,8 @@ if __name__ == "__main__":
                         suffix_model = os.path.basename(
                             checkpoint).removesuffix('.pt')
                     prefix = f"{topo}_bs{infr_option.get('beam_size', 'dft')}_{suffix_model}"
+                    if 'unified' in infr_option and infr_option['unified']:
+                        prefix += f"_streaming_{infr_option.get('streaming', 'false')}"
                     # set output format
                     a = infr_option.get('alpha', 0)
                     b = infr_option.get('beta', 0)

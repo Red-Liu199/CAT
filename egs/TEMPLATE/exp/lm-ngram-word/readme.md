@@ -2,7 +2,7 @@
 train command:
 
 ```bash
-utils/pipeline/ngram.sh exp/template-lm-ngram -o 3
+utils/pipeline/ngram.sh exp/lm-ngram-word -o 3
 ```
 
 property:

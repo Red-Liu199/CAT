@@ -13,13 +13,21 @@ bash local/data.sh
 - Train Transducer (RNN-T)
 
    ```bash
-   python utils/pipeline/asr.py exp/template-rnnt --ngpu 1
+   python utils/pipeline/asr.py exp/asr-rnnt --ngpu 1
+   ```
+
+- RNN-T + [CUSIDE](../../docs/cuside_ch.md)
+
+   Note that a very critical argument for CUSIDE setting is the `downsampling_ratio` in [configuration](exp/asr-rnnt-cuside/config.json). There's no such a autonomous way that the program could recognize the downsampling ratio, therefore you need to configure it according to your encoder setting.
+
+   ```bash
+   python utils/pipeline/asr.py exp/asr-rnnt-cuside --ngpu 1
    ```
 
 - Train CTC
 
    ```bash
-   python utils/pipeline/asr.py exp/template-ctc --ngpu 1
+   python utils/pipeline/asr.py exp/asr-ctc --ngpu 1
    ```
 
 ### Language model
@@ -33,14 +41,14 @@ bash local/lm_data.sh
 - Train a Transformer LM
 
    ```bash
-   python utils/pipeline/lm.py exp/template-lm-nn --ngpu 1
+   python utils/pipeline/lm.py exp/lm-nn --ngpu 1
    ```
 
 
 - Train a 3-gram word LM
 
    ```bash
-   bash utils/pipeline/ngram.sh exp/template-lm-ngram -o 3
+   bash utils/pipeline/ngram.sh exp/lm-ngram-word -o 3
    ```
 
 
@@ -88,7 +96,7 @@ Note that data prepare is not included in standard pipelines. It's your duty to 
 
    4.1. For ASR (RNN-T/CTC) task, this is when decoding (tranform speech to text) happens. The decoding is configured by `hyper['inference']['infer']` (with `hyper['inference']['infer']['bin']='cat.ctc.decode'/'cat.rnnt.decode'`) . We usually use word-error rate (WER) or character-error rate (CER) to measure the performance of ASR model, so there is a `hyper['inference']['er']` setting to configure how to compute the error rate.
 
-   4.2 For LM task (whatever NNLM or n-gram LM), we use perplexity (PPL, or ppl) on the testsets to tell the performance of trained LMs. To make that, you should configure the ppl calculation setting in `hyper['inference']['infer']` (with `hyper['inference']['infer']['bin']='cat.lm.ppl_compute'`). You may have seen one of the templates, [lm-nn/hyper-p.json](exp/template-lm-nn/hyper-p.json) not including 'infer' setting. This is because the script `pipeline/lm.py` could automatically configure it in some simple cases. If you have custom requirements, you still need to configure it yourself.
+   4.2 For LM task (whatever NNLM or n-gram LM), we use perplexity (PPL, or ppl) on the testsets to tell the performance of trained LMs. To make that, you should configure the ppl calculation setting in `hyper['inference']['infer']` (with `hyper['inference']['infer']['bin']='cat.lm.ppl_compute'`). You may have seen one of the templates, [lm-nn/hyper-p.json](exp/lm-nn/hyper-p.json) not including 'infer' setting. This is because the script `pipeline/lm.py` could automatically configure it in some simple cases. If you have custom requirements, you still need to configure it yourself.
 
 ## Training with large dataset
 

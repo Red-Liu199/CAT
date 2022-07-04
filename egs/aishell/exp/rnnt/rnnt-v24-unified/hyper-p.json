@@ -1,0 +1,63 @@
+{
+    "data": {
+        "train": [
+            "train-sp0.9",
+            "train-sp1.1",
+            "train"
+        ],
+        "dev": [
+            "dev-sp0.9",
+            "dev-sp1.1",
+            "dev"
+        ],
+        "test": [
+            "dev",
+            "test"
+        ],
+        "filter": "10:2000",
+        "lang": "zh-cn"
+    },
+    "tokenizer": {
+        "type": "SentencePieceTokenizer",
+        "property": {
+            "model_type": "char",
+            "vocab_size": 4232,
+            "add_dummy_prefix": false,
+            "use_all_vocab": true,
+            "model_prefix": "sentencepiece/aishell_char/spm"
+        },
+        "location": "exp/rnnt/rnnt-v24-unified/tokenizer.tknz"
+    },
+    "train": {
+        "bin": "cat.rnnt.train_unified",
+        "option": {
+            "amp": true,
+            "dynamic_batch_mode": 0,
+            "dynamic_bucket_size": 128000,
+            "batch_size": 256,
+            "check_freq": 1000,
+            "grad-norm": 2.0,
+            "grad-accum-fold": 2
+        }
+    },
+    "inference": {
+        "avgmodel": {
+            "mode": "best",
+            "num": 10
+        },
+        "infer": {
+            "bin": "cat.rnnt.decode",
+            "option": {
+                "unified": true,
+                "streaming": true,
+                "beam_size": 16,
+                "cpu": true,
+                "nj": 40
+            }
+        },
+        "er": {
+            "cer": true
+        }
+    },
+    "commit": "7fa12bb354a0a1dfaf7b9638043948c013417bbc"
+}

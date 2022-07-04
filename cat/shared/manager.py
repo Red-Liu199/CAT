@@ -150,7 +150,8 @@ class Manager(object):
                     """
                     coreutils.distprint(
                         "warning: bucket dynamic batching with --grad_accum_fold > 1 "
-                        "would probably produce inconsistent results."
+                        "would probably produce inconsistent results.",
+                        args.gpu
                     )
                 train_sampler = DynamicBatchDistSampler(
                     dataset=tr_set,
@@ -294,7 +295,6 @@ class Manager(object):
             del checkpoint
 
     def run(self, args: argparse.Namespace):
-
         coreutils.check_parser(
             args, ['_checkdir', 'rank', 'gpu', 'dir'])
 
@@ -305,8 +305,7 @@ class Manager(object):
                 pass
             else:
                 self.train_sampler.set_epoch(self.epoch)
-
-            if self.step == 0:
+            if self.step == 0 and not self.DEBUG:
                 # get the initialized perf. before training start
                 self.model.eval()
                 self.evaluate(self.valloader, args, self)
@@ -459,7 +458,7 @@ def train(trainloader: ReadBatchDataLoader, args: argparse.Namespace, manager: M
             else:
                 # you could custom model forward, tracks logging and metric calculation in the hook
                 loss = hook_func(
-                    manager, model, args, (i+1) // fold,
+                    manager, model, args, i+1,
                     (feats, labels, frame_lens, label_lens)
                 )
             if isinstance(loss, tuple):

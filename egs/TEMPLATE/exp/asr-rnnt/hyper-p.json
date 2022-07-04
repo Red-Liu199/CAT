@@ -13,7 +13,7 @@
             "use_all_vocab": true,
             "bos_id": 0,
             "unk_id": 1,
-            "model_prefix": "sentencepiece/yesno_word/spm",
+            "model_prefix": "sentencepiece/yesno_char/spm",
             "vocab_size": 8
         }
     },

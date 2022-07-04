@@ -29,9 +29,8 @@
         "grad-norm": 5.0,
         "databalance": true,
         "checkall": true,
-        "amp": true,
-        "resume": "exp/test-rnnt/checks/checkpoint.004.pt"
-    },
+        "amp": true
+     },
     "inference": {
         "avgmodel": {
             "mode": "best",
@@ -41,8 +40,7 @@
             "beam-size": 16,
             "cpu": true,
             "nj": 40,
-            "thread-per-woker": 2,
-            "resume": "exp/test-rnnt/checks/best-10.pt"
+            "thread-per-woker": 2
         },
         "er": {
             "mode": "cer",

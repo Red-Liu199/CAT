@@ -289,6 +289,7 @@ else:
 # if you want to add a new training script, add it here.
 
 # fmt: off
+from cat.rnnt.train_unified import _parser as parser_rnnt_streaming
 from cat.rnnt.train_mwer import _parser as parser_rnnt_mwer
 from cat.rnnt.train_nce import _parser as parser_rnnt_nce
 from cat.rnnt.train import _parser as parser_rnnt
@@ -299,6 +300,7 @@ from cat.ctc.train_mmi import _parser as parser_ctc_mmi
 
 add_property(hyper_schema, {
     'train': bin_processing({
+        'cat.rnnt.train_unified': parser_rnnt_streaming(),
         'cat.rnnt.train_mwer': parser_rnnt_mwer(),
         'cat.rnnt.train_nce': parser_rnnt_nce(),
         'cat.rnnt.train': parser_rnnt(),

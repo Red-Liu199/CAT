@@ -278,7 +278,7 @@ class ConformerNet(AbsEncoder):
                 cell = c_layers.ConformerCell(
                     hdim, pe, res_factor, d_head, num_heads, kernel_size, multiplier, dropout, dropout_attn)
             self.cells.append(cell)
-        
+
         if time_reduction_factor > 1 and time_reduction_pos == -1:
             self.cells.append(c_layers.TimeReduction(time_reduction_factor))
 
