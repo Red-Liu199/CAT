@@ -25,27 +25,32 @@
         "location": "exp/rnnt/rnnt-v15/tokenizer.tknz"
     },
     "train": {
-        "batch_size": 512,
-        "grad-norm": 5.0,
-        "databalance": true,
-        "checkall": true,
-        "amp": true
-     },
+        "bin": "cat.rnnt.train",
+        "option": {
+            "amp": true,
+            "batch_size": 512,
+            "check_freq": 1000,
+            "dynamic_batch_mode": 0,
+            "dynamic_bucket_size": 230400,
+            "grad-norm": 2.0
+        }
+    },
     "inference": {
         "avgmodel": {
             "mode": "best",
             "num": 10
         },
-        "decode": {
-            "beam-size": 16,
-            "cpu": true,
-            "nj": 40,
-            "thread-per-woker": 2
+        "infer": {
+            "bin": "cat.rnnt.decode",
+            "option": {
+                "beam_size": 16,
+                "cpu": true,
+                "nj": 48
+            }
         },
         "er": {
-            "mode": "cer",
-            "oracle": false
+            "cer": true
         }
     },
-    "commit": "f9f5350355977ba01a45c264635433ef753f7236"
+    "commit": "9a543d851e94ccbccb2172b950bd715634d164cf"
 }
