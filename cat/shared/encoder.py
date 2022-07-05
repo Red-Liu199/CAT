@@ -271,12 +271,14 @@ class ConformerNet(AbsEncoder):
 
         self.cells = nn.ModuleList()
         pe = c_layers.PositionalEncoding(hdim)
+
         for i in range(num_cells):
             if i == time_reduction_pos and time_reduction_factor > 1:
                 cell = c_layers.TimeReduction(time_reduction_factor)
-            else:
-                cell = c_layers.ConformerCell(
-                    hdim, pe, res_factor, d_head, num_heads, kernel_size, multiplier, dropout, dropout_attn)
+                self.cells.append(cell)
+
+            cell = c_layers.ConformerCell(
+                hdim, pe, res_factor, d_head, num_heads, kernel_size, multiplier, dropout, dropout_attn)
             self.cells.append(cell)
 
         if time_reduction_factor > 1 and time_reduction_pos == -1:
