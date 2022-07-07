@@ -11,9 +11,10 @@
 * template experiment training a Transformer LM on PTB.
 
 ### Result
+
 ```
-Test file: data/local-lm/ptb.test.txt -> ppl: 137.15
-Test file: data/local-lm/ptb.valid.txt -> ppl: 143.47
+Test file: data/local-lm/ptb.test.txt -> ppl: 136.56
+Test file: data/local-lm/ptb.valid.txt -> ppl: 142.94
 ```
 
 |     training process    |

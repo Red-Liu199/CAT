@@ -357,7 +357,7 @@ class Manager(object):
 
             self.epoch += 1
 
-    def save(self, name: str, PATH: str = '') -> str:
+    def save(self, name: str, PATH: str = '', extra_states: Optional[Union[Dict, OrderedDict]] = None) -> str:
         """Save checkpoint.
 
         The checkpoint file would be located at:
@@ -375,7 +375,7 @@ class Manager(object):
         if name[-3:] != '.pt':
             name += '.pt'
         PATH = os.path.join(PATH, name)
-        torch.save(OrderedDict({
+        states = OrderedDict({
             'model': self.model.state_dict(),
             'scheduler': self.scheduler.state_dict(),
             # monitor is only for backup, never load it in manager.load()
@@ -383,11 +383,13 @@ class Manager(object):
             'epoch': self.epoch,
             'step': self.step,
             'step_by_last_epoch': self.step_by_last_epoch
-        }), PATH)
-
+        })
+        if extra_states is not None:
+            states.update(extra_states)
+        torch.save(states, PATH)
         return PATH
 
-    def load(self, checkpoint: OrderedDict):
+    def load(self, checkpoint: OrderedDict, return_state: bool = False):
         r'Load checkpoint.'
 
         dist.barrier()
@@ -408,6 +410,11 @@ class Manager(object):
         self.step = checkpoint['step']
         self.step_by_last_epoch = checkpoint.get(
             'step_by_last_epoch', self.step)
+
+        if return_state:
+            return checkpoint
+        else:
+            return None
 
 
 '''

@@ -1,14 +1,11 @@
 # Copyright 2021 Tsinghua University
 # Apache 2.0.
 # Author: Zheng Huahuan (maxwellzh@outlook.com)
-
 """Decoder module impl
-
 """
 
 from . import layer as clayer
 import kenlm
-import pickle
 from typing import *
 
 import torch
@@ -282,7 +279,8 @@ class CausalTransformer(AbsDecoder):
                  num_layers: int,
                  attn_dropout: float = 0.1,
                  with_head: bool = True,
-                 padding_idx: int = -1) -> None:
+                 padding_idx: int = -1,
+                 use_cache: bool = False) -> None:
         super().__init__(num_classes=num_classes, dim_emb=dim_hid,
                          padding_idx=padding_idx, with_head=with_head)
         cfg = GPT2Config(
@@ -301,11 +299,11 @@ class CausalTransformer(AbsDecoder):
         self.n_head = num_head
         self.n_layers = num_layers
         self.d_head = dim_hid//num_head
+        self.use_cache = use_cache
 
     def forward(self, src_ids: torch.Tensor, cache: torch.Tensor = None, input_lengths: Optional[torch.Tensor] = None, *args, **kwargs):
         # (N, S) -> (N, S, D])
         embed_x = self.embedding(src_ids)
-        use_cache = not self.training
 
         if input_lengths is None:
             padding_mask = None
@@ -321,9 +319,9 @@ class CausalTransformer(AbsDecoder):
 
         clm_out = self.trans(inputs_embeds=embed_x,
                              attention_mask=padding_mask,
-                             past_key_values=cache, use_cache=use_cache)
+                             past_key_values=cache, use_cache=self.use_cache)
         logits = self.classifier(clm_out['last_hidden_state'])
-        if use_cache:
+        if self.use_cache or (not self.training):
             return logits, clm_out['past_key_values']
         else:
             return logits, None

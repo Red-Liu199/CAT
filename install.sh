@@ -24,7 +24,7 @@ function exc_install() {
             python -m pip install -r requirements.txt || return 1
 
             # check installation
-            $(cd egs && python -c "import cat") >/dev/null
+            $(cd egs && python -c "import cat") >/dev/null || return 1
         }
         ;;&
     ctcdecode | all)
@@ -82,6 +82,9 @@ function exc_rm() {
         $(cd egs && python -c "import cat" >/dev/null 2>&1) && {
             python -m pip uninstall -y cat
             python setup.py clean --all
+            # clean building dependencies
+            pip uninstall -y gather warp_rnnt webdataset kenlm
+            rm -rf src/{gather,warp-rnnt,webdataset,kenlm}
         }
         ;;&
     ctcdecode | all)
@@ -131,22 +134,25 @@ done
     exit 1
 }
 
-mkdir -p module_install_log
+log_dir="logs"
+mkdir -p $log_dir
 if [ $remove == "False" ]; then
     # install packages
     for p in $package; do
-        f_log="module_install_log/$p.log"
+        f_log="$log_dir/$p.log"
         touch $f_log
         echo "logging at $f_log"
         exc_install $p >$f_log 2>&1 || {
             echo "failed to install $p, check the log at $f_log"
+            echo "clean installation..."
+            $0 $* -r >/dev/null
             exit 1
         }
     done
 elif [ $remove == "True" ]; then
     # remove packages
     for p in $package; do
-        f_log="module_install_log/remove.$p.log"
+        f_log="$log_dir/remove.$p.log"
         touch $f_log
         echo "logging at $f_log"
         exc_rm $p >$f_log 2>&1 || {

@@ -309,7 +309,7 @@
                         "properties": {
                             "option": {
                                 "type": "object",
-                                "description": "Transducer training options",
+                                "description": "Unified streaming/offline Transducer training options",
                                 "properties": {
                                     "workers": {
                                         "type": "number",
@@ -1444,9 +1444,6 @@
                                                 "default": false
                                             },
                                             "streaming": {
-                                                "default": false
-                                            },
-                                            "intermediate": {
                                                 "default": false
                                             }
                                         }

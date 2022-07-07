@@ -175,18 +175,6 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
-                                    "intermediate_classes": {
-                                        "type": "number",
-                                        "default": -1
-                                    },
-                                    "intermediate_pos": {
-                                        "type": "number",
-                                        "default": -1
-                                    },
-                                    "intermediate": {
-                                        "type": "boolean",
-                                        "default": false
-                                    },
                                     "time_reduction_pos": {
                                         "type": "number",
                                         "default": -1
@@ -552,6 +540,10 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
+                                    "use_cache": {
+                                        "type": "boolean",
+                                        "default": false
+                                    },
                                     "padding_idx": {
                                         "type": "number",
                                         "default": -1

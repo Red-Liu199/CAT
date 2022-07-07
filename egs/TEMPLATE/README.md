@@ -32,7 +32,7 @@ bash local/data.sh
 
 ### Language model
 
-Prepare `wikitext-2` data:
+Prepare `ptb` data:
 
 ```bash
 bash local/lm_data.sh

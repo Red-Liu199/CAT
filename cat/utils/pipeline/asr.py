@@ -4,6 +4,23 @@ Uage:
     python utils/pipeline/asr.py
 """
 
+try:
+    from _constants import (
+        F_DATAINFO,
+        F_NN_CONFIG,
+        F_HYPER_CONFIG,
+        D_CHECKPOINT,
+        D_INFER
+    )
+except ModuleNotFoundError:
+    from cat.shared._constants import (
+        F_DATAINFO,
+        F_NN_CONFIG,
+        F_HYPER_CONFIG,
+        D_CHECKPOINT,
+        D_INFER
+    )
+
 
 import os
 import sys
@@ -435,6 +452,7 @@ def train_nn_model(
             )
         )
     else:
+        import cat.shared.tokenizer as tknz
         checkExist('f', settings['tokenizer']['location'])
         tokenizer = tknz.load(settings['tokenizer']['location'])
         checkExist('f', f_nnconfig)
@@ -573,6 +591,7 @@ def train_tokenizer(f_hyper: str):
     if 'property' not in cfg_hyper['tokenizer']:
         cfg_hyper['tokenizer']['property'] = {}
 
+    import cat.shared.tokenizer as tknz
     if tokenizer_type == 'SentencePieceTokenizer':
         f_corpus_tmp = combine_text(cfg_hyper['data']['train'])
         sp_settings, (f_tokenizer, _) = resolve_sp_path(
@@ -683,13 +702,6 @@ if __name__ == "__main__":
         set_visible_gpus(args.ngpu)
 
     from cat.shared import tokenizer as tknz
-    from cat.shared._constants import (
-        F_DATAINFO,
-        F_NN_CONFIG,
-        F_HYPER_CONFIG,
-        D_CHECKPOINT,
-        D_INFER
-    )
 
     cwd = os.getcwd()
     working_dir = args.expdir

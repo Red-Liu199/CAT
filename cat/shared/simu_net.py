@@ -51,11 +51,7 @@ class Postnet(nn.Module):
         self.output_size = output_size
 
     def forward(self, inputs):
-        # inputs: (batch_size, 1, hidden_size)
-        #print(inputs.shape)
-        #inputs = torch.transpose(inputs, 1, 2)
         # inputs: (batch_size, hidden, 1) -- for conv1d operation
-
         return self.layer(inputs).reshape(-1, self.out_len, self.output_size)
         # (batch_size, out_len, output_size) -- back to the original shape
 

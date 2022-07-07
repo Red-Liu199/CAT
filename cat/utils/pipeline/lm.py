@@ -1,6 +1,16 @@
 """Process of LM training
 """
 
+try:
+    from _constants import (
+        F_NN_CONFIG,
+        F_HYPER_CONFIG
+    )
+except ModuleNotFoundError:
+    from cat.shared._constants import (
+        F_NN_CONFIG,
+        F_HYPER_CONFIG
+    )
 
 import asr as pipeutil
 from asr import (
@@ -45,11 +55,6 @@ if __name__ == "__main__":
 
     if args.ngpu > -1:
         pipeutil.set_visible_gpus(args.ngpu)
-
-    from cat.shared._constants import (
-        F_NN_CONFIG,
-        F_HYPER_CONFIG
-    )
 
     cwd = os.getcwd()
     working_dir = args.expdir
