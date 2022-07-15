@@ -6,6 +6,7 @@ This script is used for parsing the json schema for experiment settings.
 from cat.shared import decoder as pn_zoo
 from cat.shared import encoder as tn_zoo
 from cat.shared import scheduler, SpecAug
+from cat.shared import tokenizer as tknz
 from cat.shared.scheduler import Scheduler
 from cat.rnnt import joiner as joiner_zoo
 from cat.rnnt.joiner import AbsJointNet
@@ -93,6 +94,25 @@ def gen_object(type, default=None, desc: str = None) -> OrderedDict:
     return _out
 
 
+def get_func_args(func: Callable):
+    fullargs = inspect.getfullargspec(func)
+    names = [x for x in fullargs[0] if x != 'self']   # type: List[str]
+    defaults = fullargs[3]
+    if defaults is None:
+        defaults = []
+    else:
+        defaults = list(defaults[::-1])
+        for i in range(len(defaults)):
+            try:
+                json.dumps(defaults[i])
+            except (TypeError, OverflowError):
+                defaults[i] = None
+    defaults += [None for _ in range(len(names)-len(defaults))]
+    annos = fullargs[-1]    # type: Dict[str, str]
+    defaults = defaults[::-1]
+    return (names, defaults, annos)
+
+
 def module_processing(processing: typing.Union[dict, OrderedDict], module_list: list):
     module_options = gen_object(str)
     module_options['examples'] = [m.__name__ for m in module_list]
@@ -104,24 +124,13 @@ def module_processing(processing: typing.Union[dict, OrderedDict], module_list: 
         IfCondition = {'properties': {'type': {'const': m.__name__}}}
         ThenProcess = {'properties': {'kwargs': gen_object(dict)}}
         kwargs = ThenProcess['properties']['kwargs']
-        allargspec = inspect.getfullargspec(m)
-        args = [x for x in allargspec[0][::-1] if x != 'self']  # type:list
-        defaults = allargspec[3]
-        if defaults is None:
-            defaults = []
-        else:
-            defaults = list(defaults[::-1])  # type:list
-        defaults += [None for _ in range(len(args)-len(defaults))]
-        anno = allargspec[-1]   # type:dict
 
+        names, defaults, annos = get_func_args(m)
         parsed = []
-        for _arg, _default in zip(args, defaults):
-            if _arg in anno:
-                parsed.append((_arg, gen_object(anno[_arg], _default)))
-            else:
-                parsed.append((_arg, gen_object(None)))
-                # raise RuntimeError(
-                # f"{_arg} of {m.__name__} is not well annotated.")
+        for _arg, _default in zip(names, defaults):
+            parsed.append(
+                (_arg, gen_object(annos.get(_arg, None), _default))
+            )
         kwargs['properties'] = OrderedDict(parsed)
 
         allOf.append(OrderedDict([
@@ -284,6 +293,52 @@ if os.path.isfile(f_schema):
     hyper_schema = readjson(f_schema)
 else:
     hyper_schema = gen_object(dict, desc="Settings of Hyper-parameters.")
+
+# schema for tokenizer
+# setting according to cat.shared.tokenizer.initialize()
+processing = gen_object(
+    dict, desc="Configuration of tokenizer")  # type:OrderedDict
+modules = []
+for m in dir(tknz):
+    _m = getattr(tknz, m)
+    if inspect.isclass(_m) and issubclass(_m, tknz.AbsTokenizer):
+        modules.append(_m)
+
+type_opts = gen_object(str, desc="Type of Tokenizer")
+type_opts.update({
+    'examples': [m.__name__ for m in modules]
+})
+add_property(processing, {'type': type_opts})
+allof = []
+for m in modules:
+    ifcondition = {'properties': {'type': {'const': m.__name__}}}
+    thenprocess = {'properties': {
+        'option-init': gen_object(dict, desc="options for initializing the tokenizer."),
+        'option-train': gen_object(dict, desc="options for traininig tokenizer.")
+    }}
+
+    names, defaults, annos = get_func_args(m)
+    thenprocess['properties']['option-init'].update({
+        'properties': OrderedDict([
+            (n, gen_object(annos.get(n, None), d))
+            for n, d in zip(names, defaults)
+        ])
+    })
+    names, defaults, annos = get_func_args(m.train)
+    thenprocess['properties']['option-train'].update({
+        'properties': OrderedDict([
+            (n, gen_object(annos.get(n, None), d))
+            for n, d in zip(names, defaults)
+        ])
+    })
+    allof.append(OrderedDict([
+        ('if', ifcondition),
+        ('then', thenprocess)
+    ]))
+processing['allOf'] = allof
+processing['required'] = 'type'
+add_property(hyper_schema, {'tokenizer': processing})
+
 
 # schema for field:train
 # if you want to add a new training script, add it here.

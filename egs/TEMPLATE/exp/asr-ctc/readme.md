@@ -12,7 +12,7 @@
 
 ### Result
 ```
-yesno   %SER 100.00 | %WER 72.08 [ 346 / 480, 0 ins, 338 del, 8 sub ]
+yesno   %SER 100.00 | %WER 53.33 [ 256 / 480, 4 ins, 198 del, 54 sub ]
 ```
 
 |     training process    |

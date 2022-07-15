@@ -13,8 +13,8 @@
 ### Result
 
 ```
-Test file: data/local-lm/ptb.test.txt -> ppl: 136.56
-Test file: data/local-lm/ptb.valid.txt -> ppl: 142.94
+Test file: data/local-lm/ptb.test.txt -> ppl: 138.54
+Test file: data/local-lm/ptb.valid.txt -> ppl: 144.72
 ```
 
 |     training process    |

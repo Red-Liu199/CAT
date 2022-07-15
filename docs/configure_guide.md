@@ -28,11 +28,10 @@ egs/[task]/exp/template
         }
     },
     "tokenizer": {
-        "type": ...,        // can be any class derived from 'AbsTokenizer' in cat/shared/tokenizer.py
-        "location": ...     // Path to the tokenizer file.
-        "property": ...     // keyword arguments for training the tokenizer
-                            // for SentencePiece tokenizer, please refer to:
-                            // https://github.com/google/sentencepiece/blob/master/doc/options.md
+        "type": ...,          // can be any class derived from 'AbsTokenizer' in cat/shared/tokenizer.py
+        "file": ...,          // Path to the tokenizer file.
+        "option-train": ...,
+        "option-init": ...
     },
     // NN training related setting:
     "train": {

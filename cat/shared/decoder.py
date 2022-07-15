@@ -303,6 +303,7 @@ class CausalTransformer(AbsDecoder):
 
     def forward(self, src_ids: torch.Tensor, cache: torch.Tensor = None, input_lengths: Optional[torch.Tensor] = None, *args, **kwargs):
         # (N, S) -> (N, S, D])
+        use_cache = self.use_cache or (not self.training)
         embed_x = self.embedding(src_ids)
 
         if input_lengths is None:
@@ -317,11 +318,13 @@ class CausalTransformer(AbsDecoder):
         if 'hidden' in kwargs and cache is None:
             cache = kwargs['hidden']
 
-        clm_out = self.trans(inputs_embeds=embed_x,
-                             attention_mask=padding_mask,
-                             past_key_values=cache, use_cache=self.use_cache)
+        clm_out = self.trans(
+            inputs_embeds=embed_x,
+            attention_mask=padding_mask,
+            past_key_values=cache,
+            use_cache=use_cache)
         logits = self.classifier(clm_out['last_hidden_state'])
-        if self.use_cache or (not self.training):
+        if use_cache:
             return logits, clm_out['past_key_values']
         else:
             return logits, None

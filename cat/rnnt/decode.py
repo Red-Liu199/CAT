@@ -36,7 +36,7 @@ def main(args: argparse.Namespace = None):
 
     if args.tokenizer is None or not os.path.isfile(args.tokenizer):
         raise FileNotFoundError(
-            "Invalid tokenizer model location: {}".format(args.tokenizer))
+            "Invalid tokenizer model file: {}".format(args.tokenizer))
     if args.cpu or not torch.cuda.is_available():
         args.cpu = True
 
@@ -274,7 +274,7 @@ def _parser():
     parser.add_argument("--output_prefix", type=str, default='./decode')
     parser.add_argument("--beam-size", type=int, default=3)
     parser.add_argument("--tokenizer", type=str,
-                        help="Tokenizer model location. See cat/shared/tokenizer.py for details.")
+                        help="Tokenizer model file. See cat/shared/tokenizer.py for details.")
     parser.add_argument("--nj", type=int, default=-1)
     parser.add_argument("--thread-per-woker", type=int, default=1)
     parser.add_argument("--cpu", action='store_true', default=False)

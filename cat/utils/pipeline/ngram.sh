@@ -37,7 +37,7 @@ if [ "$prune" ]; then
 fi
 
 export tokenizer="$(cat $f_hyper_config |
-    python -c "import sys,json;print(json.load(sys.stdin)['tokenizer']['location'])")"
+    python -c "import sys,json;print(json.load(sys.stdin)['tokenizer']['file'])")"
 [ ! -f $tokenizer ] && echo "No tokenizer model: '$tokenizer'" && exit 1
 
 # get text files
@@ -74,14 +74,14 @@ else
 fi
 
 if [ -f $f_nn_config ]; then
+    export vocab_size="$(cat $f_hyper_config |
+        python -c "import sys,json;print(json.load(sys.stdin)['tokenizer']['|V|'])")"
     cat $f_nn_config | python -c "
 import sys, json
 configure = json.load(sys.stdin)
 configure['decoder']['kwargs']['f_binlm'] = '$output'
 configure['decoder']['kwargs']['gram_order'] = $order
-from cat.shared import tokenizer as tknz
-tokenizer = tknz.load('$tokenizer')
-configure['decoder']['kwargs']['num_classes'] = tokenizer.vocab_size
+configure['decoder']['kwargs']['num_classes'] = $vocab_size
 json.dump(configure, sys.stdout, indent=4)" >"$f_nn_config.tmp"
     mv "$f_nn_config.tmp" $f_nn_config
 fi

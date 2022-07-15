@@ -66,161 +66,42 @@
             }
         },
         "tokenizer": {
-            "description": "Configuration of tokenizer",
             "type": "object",
-            "required": [
-                "type"
-            ],
             "properties": {
                 "type": {
                     "type": "string",
+                    "description": "Type of Tokenizer",
                     "examples": [
-                        "JiebaTokenizer",
+                        "AbsTokenizer",
                         "JiebaComposePhoneTokenizer",
+                        "JiebaTokenizer",
+                        "LexiconTokenizer",
+                        "RawTokenizer",
                         "SentencePieceTokenizer"
-                    ],
-                    "default": "SentencePieceTokenizer"
-                },
-                "location": {
-                    "description": "Path to the tokenizer model",
-                    "type": "string"
+                    ]
                 }
             },
+            "description": "Configuration of tokenizer",
             "allOf": [
                 {
                     "if": {
                         "properties": {
                             "type": {
-                                "const": "JiebaTokenizer"
+                                "const": "AbsTokenizer"
                             }
                         }
                     },
                     "then": {
                         "properties": {
-                            "property": {
+                            "option-init": {
                                 "type": "object",
-                                "properties": {
-                                    "userdict": {
-                                        "type": "string"
-                                    },
-                                    "bos_id": {
-                                        "type": "number",
-                                        "default": 0
-                                    }
-                                }
-                            }
-                        }
-                    }
-                },
-                {
-                    "if": {
-                        "properties": {
-                            "type": {
-                                "const": "SentencePieceTokenizer"
-                            }
-                        }
-                    },
-                    "then": {
-                        "properties": {
-                            "property": {
-                                "description": "Configuration of SentencePiece tokenizer. For all options, refer to https://github.com/google/sentencepiece/blob/master/doc/options.md",
+                                "properties": {},
+                                "description": "options for initializing the tokenizer."
+                            },
+                            "option-train": {
                                 "type": "object",
-                                "properties": {
-                                    "input_format": {
-                                        "type": "string",
-                                        "examples": [
-                                            "text",
-                                            "tsv"
-                                        ],
-                                        "default": "text"
-                                    },
-                                    "model_prefix": {
-                                        "type": "string",
-                                        "default": ""
-                                    },
-                                    "model_type": {
-                                        "type": "string",
-                                        "examples": [
-                                            "unigram",
-                                            "bpe",
-                                            "word",
-                                            "char"
-                                        ],
-                                        "default": "unigram"
-                                    },
-                                    "vocab_size": {
-                                        "type": "number",
-                                        "default": 8000
-                                    },
-                                    "character_coverage": {
-                                        "type": "number",
-                                        "default": 0.9995
-                                    },
-                                    "input_sentence_size": {
-                                        "type": "number",
-                                        "default": 0
-                                    },
-                                    "shrinking_factor": {
-                                        "type": "number",
-                                        "default": 0.75
-                                    },
-                                    "num_threads": {
-                                        "type": "number",
-                                        "default": 16
-                                    },
-                                    "num_sub_iterations": {
-                                        "type": "number",
-                                        "default": 2
-                                    },
-                                    "max_sentencepiece_length": {
-                                        "type": "number",
-                                        "default": 16
-                                    },
-                                    "max_sentence_length": {
-                                        "type": "number",
-                                        "default": 4192
-                                    },
-                                    "treat_whitespace_as_suffix": {
-                                        "type": "boolean",
-                                        "default": false
-                                    },
-                                    "user_defined_symbols": {
-                                        "type": "string",
-                                        "default": ""
-                                    },
-                                    "add_dummy_prefix": {
-                                        "type": "boolean",
-                                        "default": true
-                                    },
-                                    "use_all_vocab": {
-                                        "type": "boolean",
-                                        "default": false
-                                    },
-                                    "unk_id": {
-                                        "type": "number",
-                                        "default": 0
-                                    },
-                                    "bos_id": {
-                                        "type": "number",
-                                        "default": 1
-                                    },
-                                    "eos_id": {
-                                        "type": "number",
-                                        "default": 2
-                                    },
-                                    "pad_id": {
-                                        "type": "number",
-                                        "default": -1
-                                    },
-                                    "unk_surface": {
-                                        "type": "string",
-                                        "default": " \u2047 "
-                                    },
-                                    "train_extremely_large_corpus": {
-                                        "type": "boolean",
-                                        "default": false
-                                    }
-                                }
+                                "properties": {},
+                                "description": "options for traininig tokenizer."
                             }
                         }
                     }
@@ -235,13 +116,73 @@
                     },
                     "then": {
                         "properties": {
-                            "property": {
+                            "option-init": {
                                 "type": "object",
                                 "properties": {
-                                    "w2p_map": {
+                                    "lexicon": {
                                         "type": "string"
                                     },
-                                    "userdict": {
+                                    "bos_interface": {
+                                        "type": "string"
+                                    },
+                                    "unk_interface": {
+                                        "type": "string"
+                                    },
+                                    "userdict": {}
+                                },
+                                "description": "options for initializing the tokenizer."
+                            },
+                            "option-train": {
+                                "type": "object",
+                                "properties": {},
+                                "description": "options for traininig tokenizer."
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "type": {
+                                "const": "JiebaTokenizer"
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "option-init": {
+                                "type": "object",
+                                "properties": {
+                                    "userdict": {},
+                                    "bos_id": {
+                                        "type": "number",
+                                        "default": 0
+                                    }
+                                },
+                                "description": "options for initializing the tokenizer."
+                            },
+                            "option-train": {
+                                "type": "object",
+                                "properties": {},
+                                "description": "options for traininig tokenizer."
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "type": {
+                                "const": "LexiconTokenizer"
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "option-init": {
+                                "type": "object",
+                                "properties": {
+                                    "lexicon": {
                                         "type": "string"
                                     },
                                     "bos_interface": {
@@ -252,12 +193,125 @@
                                         "type": "string",
                                         "default": "<unk>"
                                     }
-                                }
+                                },
+                                "description": "options for initializing the tokenizer."
+                            },
+                            "option-train": {
+                                "type": "object",
+                                "properties": {},
+                                "description": "options for traininig tokenizer."
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "type": {
+                                "const": "RawTokenizer"
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "option-init": {
+                                "type": "object",
+                                "properties": {
+                                    "num_units": {
+                                        "type": "number"
+                                    }
+                                },
+                                "description": "options for initializing the tokenizer."
+                            },
+                            "option-train": {
+                                "type": "object",
+                                "properties": {},
+                                "description": "options for traininig tokenizer."
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "type": {
+                                "const": "SentencePieceTokenizer"
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "option-init": {
+                                "type": "object",
+                                "properties": {
+                                    "model_file": {
+                                        "type": "string"
+                                    }
+                                },
+                                "description": "options for initializing the tokenizer."
+                            },
+                            "option-train": {
+                                "type": "object",
+                                "properties": {
+                                    "f_text": {
+                                        "type": "string"
+                                    },
+                                    "model_prefix": {
+                                        "type": "string"
+                                    },
+                                    "vocab_size": {
+                                        "type": "number"
+                                    },
+                                    "add_dummy_prefix": {
+                                        "type": "boolean",
+                                        "default": true
+                                    },
+                                    "character_coverage": {
+                                        "type": "number",
+                                        "default": 0.9995
+                                    },
+                                    "model_type": {
+                                        "default": "unigram"
+                                    },
+                                    "use_all_vocab": {
+                                        "type": "boolean",
+                                        "default": false
+                                    },
+                                    "bos_id": {
+                                        "type": "number",
+                                        "default": 0
+                                    },
+                                    "unk_id": {
+                                        "type": "number",
+                                        "default": 1
+                                    },
+                                    "eos_id": {
+                                        "type": "number",
+                                        "default": -1
+                                    },
+                                    "unk_surface": {
+                                        "type": "string",
+                                        "default": "<unk>"
+                                    },
+                                    "minloglevel": {
+                                        "type": "number",
+                                        "default": 1
+                                    },
+                                    "user_defined_symbols": {
+                                        "type": "string"
+                                    },
+                                    "train_extremely_large_corpus": {
+                                        "type": "boolean",
+                                        "default": false
+                                    }
+                                },
+                                "description": "options for traininig tokenizer."
                             }
                         }
                     }
                 }
-            ]
+            ],
+            "required": "type"
         },
         "env": {
             "description": "Configure any environment variable if needed.",
@@ -1424,7 +1478,7 @@
                                             },
                                             "tokenizer": {
                                                 "type": "string",
-                                                "description": "Tokenizer model location. See cat/shared/tokenizer.py for details."
+                                                "description": "Tokenizer model file. See cat/shared/tokenizer.py for details."
                                             },
                                             "nj": {
                                                 "type": "number",
@@ -1540,7 +1594,7 @@
                                             },
                                             "tokenizer": {
                                                 "type": "string",
-                                                "description": "Tokenizer model location. See cat/shared/tokenizer.py for details."
+                                                "description": "Tokenizer model file. See cat/shared/tokenizer.py for details."
                                             },
                                             "save_lm_nbest": {
                                                 "type": "string",
@@ -1656,7 +1710,7 @@
                                             },
                                             "tokenizer": {
                                                 "type": "string",
-                                                "description": "Tokenizer model location. See cat/shared/tokenizer.py for details."
+                                                "description": "Tokenizer model file. See cat/shared/tokenizer.py for details."
                                             },
                                             "nj": {
                                                 "type": "number",

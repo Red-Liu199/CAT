@@ -12,19 +12,21 @@
     },
     "tokenizer": {
         "type": "SentencePieceTokenizer",
-        "property": {
+        "option-train": {
             "model_type": "word",
             "vocab_size": 10000,
             "use_all_vocab": true,
             "model_prefix": "sentencepiece/ptb-word/spm"
-        }
+        },
+        "|V|": 10000,
+        "file": "exp/lm-nn/tokenizer.tknz"
     },
     "train": {
         "bin": "cat.lm.train",
         "option": {
             "amp": true,
             "batch_size": 64,
-            "check-freq": 100
+            "check-freq": 500
         }
     },
     "inference": {

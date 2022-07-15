@@ -113,16 +113,9 @@ if __name__ == "__main__":
                 'nj', cfg_text_process['nj'], False
             )))
 
-        if 'raw-tokenizer' in cfg_text_process and cfg_text_process['raw-tokenizer']:
-            pass
-        elif 'tokenizer' not in cfg_text_process:
-            assert 'tokenizer' in hyper_cfg, (
-                "\n"
-                "At least one of these options is required:\n"
-                "1. set 'raw-tokenizer' if the text corpus is tokenized;\n"
-                "2. specify 'tokenizer' in ['data']['text_processing'];\n"
-                f"3. setup 'tokenizer' and ['tokenizer']['location'] in {f_hyper}\n")
-            cfg_text_process['tokenizer'] = hyper_cfg['tokenizer']['location']
+        assert 'tokenizer' in hyper_cfg, fmtstr_missing(
+            'tokenizer', udl(f_hyper))
+        cfg_text_process['tokenizer'] = hyper_cfg['tokenizer']['file']
 
         pkldir = os.path.join(working_dir, 'lmbin')
         os.makedirs(pkldir, exist_ok=True)
@@ -248,13 +241,13 @@ if __name__ == "__main__":
             checkExist('f', infr_option['config'])
         # check tokenizer
         if 'tokenizer' not in infr_option:
-            assert hyper_cfg.get('tokenizer', {}).get('location', None) is not None, \
+            assert hyper_cfg.get('tokenizer', {}).get('file', None) is not None, \
                 (
                 "\nyou should set at least one of:\n"
-                f"1. set tokenizer:location ;\n"
+                f"1. set tokenizer:file ;\n"
                 f"2. set inference:infer:option:tokenizer \n"
             )
-            infr_option['tokenizer'] = hyper_cfg['tokenizer']['location']
+            infr_option['tokenizer'] = hyper_cfg['tokenizer']['file']
             sys.stdout.write(fmt.format(fmtstr_set(
                 'tokenizer', infr_option['tokenizer']
             )))

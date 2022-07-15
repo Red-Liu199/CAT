@@ -97,45 +97,48 @@ if __name__ == "__main__":
             (f, "readme")
         )
 
-    if len(res) > 0:
-        ali = max(len(s) for _, s in res)+1
-        print(
-            f"Items found in {path}:\n" +
-            '\n'.join([
-                f"  [{i+1}] {s+' '*(ali-len(s))}: {p}"
-                for i, (p, s) in enumerate(res)
-            ])
-        )
-        s_indices = input("index to be removed > ")
-        s_indices = re.sub(r'\s+', ' ', s_indices)
-        if s_indices == 'all':
-            cf_str = f"confirm {path}"
-            response = input(f"Ensure by typing > {cf_str} <: ")
-            if response == cf_str:
-                for p, _ in res:
-                    rm(p)
-                print("Done.")
+    try:
+        if len(res) > 0:
+            ali = max(len(s) for _, s in res)+1
+            print(
+                f"Items found in {path}:\n" +
+                '\n'.join([
+                    f"  [{i+1}] {s+' '*(ali-len(s))}: {p}"
+                    for i, (p, s) in enumerate(res)
+                ])
+            )
+            s_indices = input("index to be removed > ")
+            s_indices = re.sub(r'\s+', ' ', s_indices)
+            if s_indices == 'all':
+                cf_str = f"confirm {path}"
+                response = input(f"Ensure by typing > {cf_str} <: ")
+                if response == cf_str:
+                    for p, _ in res:
+                        rm(p)
+                    print("Done.")
+                else:
+                    print("Not remove.")
             else:
-                print("Not remove.")
-        else:
-            indices = []
-            for i in s_indices:
-                try:
-                    i = int(i)
-                except:
-                    continue
-                if i > 0 and i <= len(res):
-                    indices.append(i)
-            if indices == []:
-                print("no valid index.")
-                sys.exit(0)
-            response = input(f"valid indices: {indices}. Confirm [y/N]: ")
-            if response.lower() == 'y':
-                for idx in indices:
-                    rm(res[idx-1][0])
-                print("Done.")
-            else:
-                print("Not remove.")
+                indices = []
+                for i in s_indices:
+                    try:
+                        i = int(i)
+                    except:
+                        continue
+                    if i > 0 and i <= len(res):
+                        indices.append(i)
+                if indices == []:
+                    print("no valid index.")
+                    sys.exit(0)
+                response = input(f"valid indices: {indices}. Confirm [y/N]: ")
+                if response.lower() == 'y':
+                    for idx in indices:
+                        rm(res[idx-1][0])
+                    print("Done.")
+                else:
+                    print("Not remove.")
 
-    else:
-        print("Nothing found.")
+        else:
+            print("Nothing found.")
+    except KeyboardInterrupt:
+        print("")

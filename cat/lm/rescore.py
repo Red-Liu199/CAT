@@ -227,7 +227,7 @@ def _parser():
     parser.add_argument("--beta", type=float, default=0.0,
                         help="The 'beta' value for LM integration, a.k.a. the penalty of tokens.")
     parser.add_argument("--tokenizer", type=str,
-                        help="Tokenizer model location. See cat/shared/tokenizer.py for details.")
+                        help="Tokenizer model file. See cat/shared/tokenizer.py for details.")
     parser.add_argument("--save-lm-nbest", type=str,
                         help="Path to save the LM N-best scores.")
 

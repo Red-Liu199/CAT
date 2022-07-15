@@ -8,14 +8,16 @@
     },
     "tokenizer": {
         "type": "SentencePieceTokenizer",
-        "property": {
+        "option-train": {
             "model_type": "char",
             "use_all_vocab": true,
             "bos_id": 0,
             "unk_id": 1,
-            "model_prefix": "sentencepiece/yesno_char/spm",
-            "vocab_size": 8
-        }
+            "vocab_size": 8,
+            "model_prefix": "sentencepiece/yesno_char/spm"
+        },
+        "|V|": 8,
+        "file": "exp/asr-rnnt-cuside/tokenizer.tknz"
     },
     "train": {
         "bin": "cat.rnnt.train_unified",

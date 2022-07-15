@@ -79,22 +79,19 @@ function exc_rm() {
 
     case $name in
     cat | all)
-        $(cd egs && python -c "import cat" >/dev/null 2>&1) && {
-            python -m pip uninstall -y cat
-            python setup.py clean --all
-            # clean building dependencies
-            pip uninstall -y gather warp_rnnt webdataset kenlm
-            rm -rf src/{gather,warp-rnnt,webdataset,kenlm}
-        }
+        python -m pip uninstall -y cat
+        python setup.py clean --all
+        # clean building dependencies
+        pip uninstall -y gather warp_rnnt webdataset kenlm
+        rm -rf src/{gather,warp-rnnt,webdataset,kenlm}
         ;;&
     ctcdecode | all)
-        $(python -c "import ctcdecode" >/dev/null 2>&1) && {
-            python -m pip uninstall -y ctcdecode
-            rm -rf src/ctcdecode
-        }
+        python -m pip uninstall -y ctcdecode
+        rm -rf src/ctcdecode
         ;;&
     kenlm | all)
-        $(python -c "import kenlm" >/dev/null 2>&1) && python -m pip uninstall -y kenlm
+        python -m pip uninstall -y kenlm
+
         [ -d src ] && {
             cd src/
             [ -d kenlm/build/bin ] && {

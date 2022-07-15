@@ -164,7 +164,7 @@ def TextProcessingParser():
     parser.add_argument("--raw-tokenizer", action="store_true",
                         help="Assume input text file as tokenized one, would overwrite --tokenizer")
     parser.add_argument("--tokenizer", type=str,
-                        help="Tokenizer model location. See cat/shared/tokenizer.py for details.")
+                        help="Tokenizer model file. See cat/shared/tokenizer.py for details.")
     parser.add_argument("--nj", type=int, default=1,
                         help="Number of threads. Default: 1")
     parser.add_argument("--concat", type=int, default=-1,
