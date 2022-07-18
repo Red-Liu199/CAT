@@ -192,7 +192,7 @@ def prepare_kaldi_feat(
         apply_cmvn: bool = False,
         sample_frequency: Optional[int] = None,
         speed_perturb: Optional[List[float]] = [],
-        fmt_scp: str = "data/src/all_ark/{}.scp",
+        fmt_scp: str = "data/src/{}/feats.scp",
         fmt_trans: str = "data/src/{}/text",
         fmt_ark: str = "data/src/.arks/{}.ark"):
 

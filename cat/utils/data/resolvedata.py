@@ -12,7 +12,7 @@ if data/src/ does not exist:
 
 find datasets in data/src, which should satisfy:
     1. data/src/SET and data/src/SET/text exist
-    2. data/src/all_ark/SET.scp exist
+    2. data/src/SET/feats.scp exist
 
 the found datasets info would be stored at data/metainfo.json in JSON format
     {
@@ -38,20 +38,28 @@ D_SRCDATA = 'data/src'
 def find_dataset(d_data: str) -> Dict[str, Dict[str, str]]:
     assert os.path.isdir(d_data), f"'{d_data}' is not a directory."
 
-    f_scps = glob.glob(f"{d_data}/all_ark/*.scp")
-    if len(f_scps) == 0:
-        return {}
-
     datasets = {}
-    for file in f_scps:
-        _setname = os.path.basename(file).removesuffix('.scp')
-        _setdir = os.path.join(d_data, _setname)
-        _settrans = os.path.join(_setdir, 'text')
-        if os.path.isdir(_setdir) and os.path.isfile(_settrans):
-            datasets[_setname] = {
-                'scp': os.path.abspath(file),
-                'trans': os.path.abspath(_settrans)
-            }
+    for d in os.listdir(d_data):
+        _setdir = os.path.join(d_data, d)
+        if not os.path.isdir(_setdir):
+            continue
+
+        check_cnt = 0
+        for f in os.listdir(_setdir):
+            if f == 'feats.scp':
+                check_cnt += 1
+            elif f == 'text':
+                check_cnt += 1
+
+            if check_cnt == 2:
+                break
+        if check_cnt != 2:
+            continue
+
+        datasets[d] = {
+            'scp': os.path.abspath(os.path.join(_setdir, 'feats.scp')),
+            'trans': os.path.abspath(os.path.join(_setdir, 'text')),
+        }
     return datasets
 
 

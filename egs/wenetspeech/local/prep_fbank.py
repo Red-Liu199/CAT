@@ -159,9 +159,8 @@ if __name__ == "__main__":
             uid, ark_loc = line.split(maxsplit=1)
             scps[uid] = ark_loc
 
-    os.makedirs('data/src/all_ark', exist_ok=True)
     for _set in args.subset:
-        f_scp = f"data/src/all_ark/{annotations[_set]}.scp"
+        f_scp = f"data/src/{annotations[_set]}/feats.scp"
         with open(f_scp, 'w') as fot:
             for uid in subset2utt[_set]:
                 fot.write(f"{uid}\t{scps[uid]}")

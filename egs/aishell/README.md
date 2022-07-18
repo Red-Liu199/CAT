@@ -13,23 +13,22 @@
    
    - If you're CAT user, take a look at `Transducer-dev/tools/README.md`.
 
-   - If you have kaldi installed, prepare the files:`feat.ark, feat.scp, text`, and place them as (`feat.ark` can be placed anywhere, just ensure path of it in `feat.scp` is correct.)
+   - If you have kaldi installed, prepare the files: `text, wav.scp, utt2spk, ...`, then follow
 
-        ```
-        data/
-        └── src/
-            ├── all_ark
-            │   └── feat.scp
-            └── train_sp
-                └── text
-        ```
+      ```bash
+      bash utils/data/data_prep_old.sh <path/to/data> --kaldi-root <path/to/kaldi> \
+         --feat-dir data/raw-fbank --not-apply-cmvn
+      mkdir -p data/src
+      ln -snf $(readlink -f <path/to/data>) data/src/
+      python utils/data/resolvedata.py
+      ```
 
 Source data info will be automatically stored at `data/metainfo.json`. You can run
 
 ```bash
 python utils/data/resolvedata.py
 ```
-to refresh the information.
+to refresh the information. Manually modifying is also OK.
 
 ## Result
 
