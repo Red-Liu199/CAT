@@ -21,13 +21,16 @@ import torch.nn as nn
 import torch.distributed as dist
 from torch.cuda.amp import autocast
 
+# NOTE:
+#   1/4 subsampling is used for Conformer model defaultly
+#   for other sampling ratios, you may need to modify the values
+#   commonly, you can use larger value for allowing some margin.
+SUBSAMPLING = 4
+
 
 def check_label_len_for_ctc(tupled_mat_label: Tuple[torch.FloatTensor, torch.LongTensor]):
     """filter the short seqs for CTC/CRF"""
-    # NOTE:
-    #   1/4 subsampling is used for Conformer model defaultly
-    #   for other sampling ratios, you may need to modify the values
-    return (tupled_mat_label[0].shape[0] // 4 > tupled_mat_label[1].shape[0])
+    return (tupled_mat_label[0].shape[0] // SUBSAMPLING > tupled_mat_label[1].shape[0])
 
 
 def filter_hook(dataset):
@@ -51,6 +54,20 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         func_build_model=build_model,
         _wds_hook=filter_hook
     )
+
+    # NOTE: for CTC training, the input feat len must be longer than the label len
+    #       ... when using webdataset (--largedataset) to load the data, we deal with
+    #       ... the issue by `_wds_hook`; if not, we filter the unqualified utterances
+    #       ... before training start.
+    tr_dataset = manager.trainloader.dl.dataset
+    if isinstance(tr_dataset, KaldiSpeechDataset):
+        orilen = len(tr_dataset)
+        tr_dataset.filt_by_len(lambda x, y: x//SUBSAMPLING > y)
+        if len(tr_dataset) < orilen:
+            coreutils.distprint(
+                f"warning: filtered {orilen-len(tr_dataset)} utterances.",
+                args.gpu
+            )
 
     # training
     manager.run(args)
