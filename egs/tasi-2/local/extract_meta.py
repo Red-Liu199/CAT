@@ -4,7 +4,7 @@ Compute FBank feature for aishell using torchaudio.
 
 import webdataset as wds
 from typing import List, Tuple, Dict
-from cat.utils.data.data_prep_kaldi import *
+from cat.utils.data.data_prep import *
 import os
 import sys
 import glob

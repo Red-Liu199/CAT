@@ -22,7 +22,7 @@ import torch
 import kaldiio
 
 from torch.utils.data import DataLoader, Dataset
-from cat.utils.data.data_prep_kaldi import *
+from cat.utils.data.data_prep import *
 
 
 valid_subsets = [
