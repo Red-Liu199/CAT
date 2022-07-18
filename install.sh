@@ -1,9 +1,10 @@
 #!/bin/bash
 #
 # install the requirement packages
-set -e -u
+set -e
 <<"PARSER"
-('-p', "--package", type=str, choices=['all', 'cat', 'ctcdecode', 'kenlm'], default=['all'], nargs='*',
+('-p', "--package", type=str, default=['all'], nargs='*',
+    choices=['all', 'cat', 'ctcdecode', 'kenlm', 'ctc-crf', 'fst-decoder'],
     help="Select modules to be installed/uninstalled. Default: all.")
 ('-r', "--remove", action='store_true', default=False,
     help="Remove modules instead of installing.")
@@ -65,6 +66,44 @@ function exc_install() {
             mkdir -p bin && cd bin
             ln -snf ../kenlm/build/bin/* ./ && cd ../../
         }
+        ;;&
+    ctc-crf | all)
+        # install ctc-crf loss function
+        if [ $(command -v gcc-7) ]; then
+            export ver=7
+        elif [ $(command -v gcc-6) ]; then
+            export ver=6
+        else
+            echo "gcc-6/gcc-7 command not found. You may need to install one of them."
+            return 1
+        fi
+
+        cd src/ctc_crf
+        CC=gcc-${ver} CXX=g++-${ver} make || return 1
+        # test the installation
+        echo "Test CTC-CRF installation:"
+        cd test && python main.py || return 1
+        cd ../../../
+        ;;&
+    fst-decoder | all)
+        # install the fst decoder
+        # test kaldi installation
+        [ -z $KALDI_ROOT ] && {
+            echo "\$KALDI_ROOT variable is not set, try"
+            echo "  KALDI_ROOT=<path to kaldi> $0 ..."
+            return 1
+        }
+        export KALDI_ROOT=$KALDI_ROOT
+        cd src/fst-decoder && make || return 1
+        [ ! -f $(command -v ./latgen-faster) ] && {
+            echo "It seems the installation is success, but executable"
+            echo "... binary 'latgen-faster' not found at src/fst-decoder."
+            return 1
+        }
+        cd - >/dev/null
+        [ ! -d src/bin ] && mkdir src/bin
+        cd src/bin/ && ln -snf ../fst-decoder/latgen-faster ./
+        cd - >/dev/null
         ;;
     *) ;;
     esac
@@ -102,6 +141,17 @@ function exc_rm() {
             [ -d kenlm ] && rm -rf kenlm/
             cd - >/dev/null
         }
+        ;;&
+    ctc-crf | all)
+        python -m pip uninstall -y ctc_crf
+
+        cd src/ctc_crf
+        make clean
+        cd - >/dev/null
+        ;;&
+    fst-decoder | all)
+        rm -if src/bin/latgen-faster
+        rm -rf src/fst-decoder/latgen-faster
         ;;
     *) ;;
     esac
@@ -138,11 +188,11 @@ if [ $remove == "False" ]; then
     for p in $package; do
         f_log="$log_dir/$p.log"
         touch $f_log
-        echo "logging at $f_log"
+        echo "logging at $f_log" 1>&2
         exc_install $p >$f_log 2>&1 || {
-            echo "failed to install $p, check the log at $f_log"
-            echo "clean installation..."
-            $0 $* -r >/dev/null
+            echo "failed to install $p, check the log at $f_log" 1>&2
+            echo "clean installation..." 1>&2
+            $0 $* -r >/dev/null 2>&1
             exit 1
         }
     done
@@ -151,9 +201,9 @@ elif [ $remove == "True" ]; then
     for p in $package; do
         f_log="$log_dir/remove.$p.log"
         touch $f_log
-        echo "logging at $f_log"
+        echo "logging at $f_log" 1>&2
         exc_rm $p >$f_log 2>&1 || {
-            echo "failed to remove $p, check the log at $f_log"
+            echo "failed to remove $p, check the log at $f_log" 1>&2
             exit 1
         }
     done
