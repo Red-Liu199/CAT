@@ -84,8 +84,8 @@ function exc_install() {
         echo "Test CTC-CRF installation:"
         cd test && python main.py || return 1
         cd ../../../
-        ;;&
-    fst-decoder | all)
+        ;;
+    fst-decoder )
         # install the fst decoder
         # test kaldi installation
         [ -z $KALDI_ROOT ] && {
@@ -148,8 +148,8 @@ function exc_rm() {
         cd src/ctc_crf
         make clean
         cd - >/dev/null
-        ;;&
-    fst-decoder | all)
+        ;;
+    fst-decoder )
         rm -if src/bin/latgen-faster
         rm -rf src/fst-decoder/latgen-faster
         ;;

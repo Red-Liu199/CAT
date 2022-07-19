@@ -606,25 +606,26 @@ if __name__ == "__main__":
     assert s_end >= 1, f"Invalid stop stage: {s_end}"
     assert s_beg >= 1 and s_beg <= s_end, f"Invalid start stage: {s_beg}"
 
-    # setting visible gpus before loading cat/torch
-    if args.ngpu > -1:
-        set_visible_gpus(args.ngpu)
-
-    from cat.shared import tokenizer as tknz
-
     cwd = os.getcwd()
     working_dir = args.expdir
     checkExist('d', working_dir)
     f_hyper = os.path.join(working_dir, F_HYPER_CONFIG)
     checkExist('f', f_hyper)
-    initial_datainfo()
-    datainfo = readjson(F_DATAINFO)
     hyper_cfg = readjson(f_hyper)
     if "env" in hyper_cfg:
         for k, v in hyper_cfg["env"].items():
             os.environ[k] = v
     if 'commit' not in hyper_cfg:
         log_commit(f_hyper)
+
+    # setting visible gpus before loading cat/torch
+    if args.ngpu > -1:
+        set_visible_gpus(args.ngpu)
+
+    from cat.shared import tokenizer as tknz
+
+    initial_datainfo()
+    datainfo = readjson(F_DATAINFO)
 
     ############ Stage 1  Tokenizer training ############
     if s_beg <= 1 and s_end >= 1:

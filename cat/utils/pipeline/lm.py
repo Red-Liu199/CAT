@@ -53,9 +53,6 @@ if __name__ == "__main__":
     assert s_end >= 1, f"Invalid stop stage: {s_end}"
     assert s_beg >= 1 and s_beg <= s_end, f"Invalid start stage: {s_beg}"
 
-    if args.ngpu > -1:
-        pipeutil.set_visible_gpus(args.ngpu)
-
     cwd = os.getcwd()
     working_dir = args.expdir
     checkExist('d', working_dir)
@@ -68,6 +65,9 @@ if __name__ == "__main__":
 
     if 'commit' not in hyper_cfg:
         pipeutil.log_commit(f_hyper)
+
+    if args.ngpu > -1:
+        pipeutil.set_visible_gpus(args.ngpu)
 
     pipeutil.initial_datainfo()
 
