@@ -30,6 +30,12 @@ bash local/data.sh
    python utils/pipeline/asr.py exp/asr-ctc --ngpu 1
    ```
 
+- Train CTC-CRF. CTC-CRF is somewhat more complex than vanilla CTC. Please refer to the `train.sh` for usage.
+
+   ```bash
+   bash exp/asr-ctc-crf/train.sh 
+   ```
+
 ### Language model
 
 Prepare `ptb` data:

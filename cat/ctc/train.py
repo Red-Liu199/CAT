@@ -24,7 +24,7 @@ from torch.cuda.amp import autocast
 # NOTE:
 #   1/4 subsampling is used for Conformer model defaultly
 #   for other sampling ratios, you may need to modify the values
-#   commonly, you can use larger value for allowing some margin.
+#   commonly, you can use a larger value for allowing some margin.
 SUBSAMPLING = 4
 
 
@@ -127,9 +127,19 @@ def build_model(
         args: Optional[Union[argparse.Namespace, dict]] = None,
         dist: bool = True,
         wrapper: bool = True) -> Union[nn.parallel.DistributedDataParallel, AMTrainer, model_zoo.AbsEncoder]:
-
-    if 'ctc-trainer' not in cfg:
-        cfg['ctc-trainer'] = {}
+    """
+    for ctc-crf training, you need to add extra settings in cfg:
+    {
+        "trainer": {
+            "use_crf": true/false,
+            "lamb": 0.01,
+            "den-lm": "path/to/denlm"
+        },
+        ...
+    }
+    """
+    if 'trainer' not in cfg:
+        cfg['trainer'] = {}
 
     assert 'encoder' in cfg
     netconfigs = cfg['encoder']
@@ -150,7 +160,7 @@ def build_model(
     if not wrapper:
         return am_model
 
-    model = AMTrainer(am_model, **cfg['ctc-trainer'])
+    model = AMTrainer(am_model, **cfg['trainer'])
     if not dist:
         return model
 
@@ -164,9 +174,9 @@ def build_model(
     model = coreutils.convert_syncBatchNorm(model)
 
     model.cuda(args['gpu'])
-    if 'use_crf' in cfg['ctc-trainer'] and cfg['ctc-trainer']['use_crf']:
-        assert 'den-lm' in cfg['ctc-trainer']
-        model.register_crf_ctx(cfg['ctc-trainer']['den-lm'])
+    if 'use_crf' in cfg['trainer'] and cfg['trainer']['use_crf']:
+        assert 'den-lm' in cfg['trainer']
+        model.register_crf_ctx(cfg['trainer']['den-lm'])
     model = torch.nn.parallel.DistributedDataParallel(
         model, device_ids=[args['gpu']])
     return model

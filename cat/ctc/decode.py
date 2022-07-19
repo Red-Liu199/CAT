@@ -121,6 +121,8 @@ def worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_out: mp.Queue
         searcher = CTCBeamDecoder(
             labels, beam_width=args.beam_size, num_processes=1)
     else:
+        assert os.path.isfile(
+            args.lm_path), f"--lm-path={args.lm_path} is not a valid file."
         if pid == 0:
             print(
                 "warning: ctc decoding with an ext. LM assumes <s> -> 0 and <unk> -> 1.")

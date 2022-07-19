@@ -2,7 +2,7 @@
 # author: Zheng Huahuan
 set -e
 <<"PARSER"
-("r_specifier", type=str, help="Input text. Use /dev/stdin if needed.")
+("r_specifier", type=str, help="Input file (raw text with ids). Use /dev/stdin if needed.")
 ("w_specifier", type=str, help="Output den-lm file.")
 ("-tokenizer", type=str, help="Path to the tokenizer file.")
 ("-kaldi-root", type=str, help="Path to kaldi folder. Not required if $KALDI_ROOT is set.")

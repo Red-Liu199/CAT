@@ -265,6 +265,8 @@ if __name__ == "__main__":
         if intfname == 'cat.lm.ppl_compute':
             # we need to remove the uid in the transcript text
             # but for text resovled from local path, we assume it's raw text w/o uid.
+            if isinstance(hyper_cfg['data']['test'], str):
+                hyper_cfg['data']['test'] = [hyper_cfg['data']['test']]
             text_local, _ = pipeutil.resolve_in_priority(
                 hyper_cfg['data']['test'])
             # use combine_text() to remove the uid
