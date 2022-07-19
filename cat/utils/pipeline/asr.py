@@ -458,8 +458,17 @@ def combine_text(datasets: Union[str, List[str]], f_out: Optional[str] = None) -
 
 
 def train_tokenizer(f_hyper: str):
+    def update_conf(_tok, path):
+        # store some info about the tokenizer to the file
+        cfg_hyper = readjson(f_hyper)
+        cfg_hyper['tokenizer']['|V|'] = _tok.vocab_size
+        cfg_hyper['tokenizer']['file'] = path
+        dumpjson(cfg_hyper, f_hyper)
+
     checkExist('f', f_hyper)
     cfg_hyper = readjson(f_hyper)
+
+    import cat.shared.tokenizer as tknz
 
     assert 'tokenizer' in cfg_hyper, fmtstr_error(
         "'tokenizer' is not configured.", train_tokenizer)
@@ -474,6 +483,7 @@ def train_tokenizer(f_hyper: str):
     else:
         f_tokenizer = cfg_hyper['tokenizer']['file']
         if os.path.isfile(f_tokenizer):
+            update_conf(tknz.load(f_tokenizer), f_tokenizer)
             sys.stderr.write(
                 fmtstr_warn(
                     f"['tokenizer']['file'] exists: {udl(f_tokenizer)}\n"
@@ -500,7 +510,6 @@ def train_tokenizer(f_hyper: str):
         )
     )
 
-    import cat.shared.tokenizer as tknz
     f_text = None
     # combine the transcripts and remove the ids if needed.
     if 'option-train' in cfg_hyper['tokenizer']:
@@ -513,11 +522,7 @@ def train_tokenizer(f_hyper: str):
     if f_text is not None:
         os.remove(f_text)
 
-    # store some info about the tokenizer to the file
-    cfg_hyper = readjson(f_hyper)
-    cfg_hyper['tokenizer']['|V|'] = tokenizer.vocab_size
-    cfg_hyper['tokenizer']['file'] = f_tokenizer
-    dumpjson(cfg_hyper, f_hyper)
+    update_conf(tokenizer, f_tokenizer)
 
 
 def model_average(
