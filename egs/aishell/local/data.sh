@@ -1,5 +1,7 @@
-set -e
-set -u
+#!/bin/bash
+# Author: Huahuan Zheng (maxwellzh@outlook.com)
+# This script prepare aishell data by torchaudio
+set -e -u
 
 [ ! $(command -v python) ] && (
     echo "No python executable found in PATH"

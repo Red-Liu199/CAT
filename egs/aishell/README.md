@@ -9,18 +9,14 @@
    bash local/data.sh -h
    ```
 
-2. Prepare data with Kaldi: scripts not provided here.
-   
-   - If you're CAT user, take a look at `Transducer-dev/tools/README.md`.
+2. Prepare data with Kaldi:
 
-   - If you have kaldi installed, prepare the files: `text, wav.scp, utt2spk, ...`, then follow
+   - You should first have Kaldi tool installed.
+   
+   - Get help about how to use Kaldi to prepare data:
 
       ```bash
-      bash utils/data/data_prep_old.sh <path/to/data> --kaldi-root <path/to/kaldi> \
-         --feat-dir data/raw-fbank --not-apply-cmvn
-      mkdir -p data/src
-      ln -snf $(readlink -f <path/to/data>) data/src/
-      python utils/data/resolvedata.py
+      KALDI_ROOT=<path/to/kaldi> bash local/data_kaldi.sh -h
       ```
 
 Source data info will be automatically stored at `data/metainfo.json`. You can run

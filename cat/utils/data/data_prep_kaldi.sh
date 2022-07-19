@@ -10,6 +10,8 @@ set -e
 ("--fbank-conf", type=str,
     help="Specify the configuration file for extracting FBank features. "
     "If not set, extract raw 80-dim.")
+("--apply-3way-speed-perturbation", action="store_true",
+    help="Enable 3way speed perturbation (0.9, 1.0, 1.1).")
 ("--not-apply-cmvn", action="store_true", help="Disable applying CMVN.")
 ("--nj", type=int, default=16, help="Number of jobs. default: 16")
 ("--kaldi-root", type=str, help="Path to kaldi folder. Not required if $KALDI_ROOT is set.")
@@ -41,6 +43,16 @@ export feat_dir=$(readlink -f $feat_dir)
 export data_dir=$(readlink -f $data_dir)
 cd $KALDI_ROOT/egs/wsj/s5 && . ./path.sh
 
+[ $apply_3way_speed_perturbation == "True" ] && {
+    all_sp_dir=""
+    for dir in $data_dir; do
+        sp_dir="$(echo $dir | sed -e 's/[/]$//g')-3sp"
+        utils/data/perturb_data_dir_speed_3way.sh $dir $sp_dir
+        all_sp_dir="$all_sp_dir $sp_dir"
+    done
+    data_dir="$data_dir $all_sp_dir"
+}
+
 mkdir -p $feat_dir
 for dir in $data_dir; do
     if [ ! -f $dir/.feats.done ]; then
@@ -68,6 +80,9 @@ for dir in $data_dir; do
             "ark,s,cs:apply-cmvn --norm-vars=true --utt2spk=ark:$dir/utt2spk \
                 scp:$dir/cmvn.scp scp:$dir/feats.scp ark:- |" \
             "ark,scp:$dir/applied_cmvn.ark,$dir/feats_cmvn.scp"
+
+        mv $dir/feats.scp $dir/feats_orin.scp
+        mv $dir/feats_cmvn.scp $dir/feats.scp
     }
 
 done
