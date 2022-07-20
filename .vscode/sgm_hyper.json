@@ -73,7 +73,7 @@
                     "description": "Type of Tokenizer",
                     "examples": [
                         "AbsTokenizer",
-                        "JiebaComposePhoneTokenizer",
+                        "JiebaComposeLexiconTokenizer",
                         "JiebaTokenizer",
                         "LexiconTokenizer",
                         "RawTokenizer",
@@ -110,7 +110,7 @@
                     "if": {
                         "properties": {
                             "type": {
-                                "const": "JiebaComposePhoneTokenizer"
+                                "const": "JiebaComposeLexiconTokenizer"
                             }
                         }
                     },
@@ -122,11 +122,17 @@
                                     "lexicon": {
                                         "type": "string"
                                     },
+                                    "add_special_token": {
+                                        "type": "boolean",
+                                        "default": true
+                                    },
                                     "bos_interface": {
-                                        "type": "string"
+                                        "type": "string",
+                                        "default": "<s>"
                                     },
                                     "unk_interface": {
-                                        "type": "string"
+                                        "type": "string",
+                                        "default": "<unk>"
                                     },
                                     "userdict": {}
                                 },
@@ -184,6 +190,10 @@
                                 "properties": {
                                     "lexicon": {
                                         "type": "string"
+                                    },
+                                    "add_special_token": {
+                                        "type": "boolean",
+                                        "default": true
                                     },
                                     "bos_interface": {
                                         "type": "string",
@@ -298,7 +308,8 @@
                                         "default": 1
                                     },
                                     "user_defined_symbols": {
-                                        "type": "string"
+                                        "type": "string",
+                                        "default": ""
                                     },
                                     "train_extremely_large_corpus": {
                                         "type": "boolean",

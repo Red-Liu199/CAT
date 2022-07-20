@@ -123,39 +123,6 @@ class AbsTokenizer:
         self.load_state_dict(state)
 
 
-class RawTokenizer(AbsTokenizer):
-    """A wrapper tokenizer that do nothing. encode('1 2 3') -> [1, 2, 3]"""
-
-    def __init__(self, num_units: int) -> None:
-        super().__init__()
-        assert isinstance(num_units, (float, int))
-        num_units = int(num_units)
-        assert num_units > 0
-        self.n_vocab = num_units
-
-    def _enc(self, s: str) -> List[int]:
-        return [int(x) for x in s.split()]
-
-    def _dec(self, indices: Iterable[int]) -> str:
-        return ' '.join(str(x) for x in indices)
-
-    @property
-    def vocab_size(self) -> int:
-        return self.n_vocab
-
-    def _vocab_to_dict(self) -> Dict[int, str]:
-        return {i: str(i) for i in range(self.n_vocab)}
-
-    def state_dict(self) -> OrderedDict:
-        return OrderedDict([('n_vocab', self.n_vocab)])
-
-    def load_state_dict(self, state_dict: OrderedDict):
-        self.n_vocab = state_dict['n_vocab']
-        return
-
-# FIXME (huahuan): I'm not quite familiar with jieba, so there might be inappropriate processing
-
-
 class JiebaTokenizer(AbsTokenizer):
     def __init__(self, userdict: Optional[Union[str, bytes]] = None, bos_id: int = 0) -> None:
         super().__init__()
@@ -197,13 +164,21 @@ class JiebaTokenizer(AbsTokenizer):
         for idx, w in enumerate(self._vocabulary):
             self._vocabulary[w] = idx
 
+    def cut(self, s: str) -> Generator[str, None, None]:
+        """Do segmentation"""
+        for w in self._tokenizer.cut(s.strip(), HMM=False):
+            if w == ' ':
+                continue
+            yield w
+        return
+
     def _enc(self, s: str) -> List[int]:
-        cut_words = self._tokenizer.cut(s.strip().replace(' ', ''), HMM=False)
         rt_indices = []     # type: List[int]
-        for w in cut_words:
+        for w in self.cut(s):
             if w not in self._vocabulary:
-                w = "<unk>"
-            rt_indices.append(self._vocabulary[w])
+                rt_indices.append(self._vocabulary["<unk>"])
+            else:
+                rt_indices.append(self._vocabulary[w])
         return rt_indices
 
     def _dec(self, indices: Iterable[int]) -> str:
@@ -239,6 +214,208 @@ class JiebaTokenizer(AbsTokenizer):
             os.remove(cachefile)
         else:
             self._tokenizer.initialize()
+
+
+class JiebaComposeLexiconTokenizer(JiebaTokenizer):
+    """Tokenizer composing jieba segmentation and word2phone mapping for Chinese."""
+
+    def __init__(
+            self,
+            lexicon: str,
+            add_special_token: bool = True,
+            bos_interface: str = '<s>',
+            unk_interface: str = '<unk>',
+            userdict: Optional[Union[str, bytes]] = None) -> None:
+        """
+        Args:
+            lexicon (str) : file contains the mapping of word to phone. Usually annotated as 'lexicon.txt'
+            add_special_token (bool) : add <s>, <unk> to the lexicon, otherwise they're assumed to be in the lexicon.
+            bos_interface (str) : start of an utterance, usually '<s>' or '<bos>'
+            unk_interface (str) : unknown word representation in the mapping. usually '<unk>' or '<UNK>'
+            userdict (str, optional) : custom dictionary file, if not set, use Jieba default one.
+        """
+        super().__init__(userdict, bos_id=0)
+
+        self._w2p_tokenizer = LexiconTokenizer(
+            lexicon=lexicon,
+            add_special_token=add_special_token,
+            bos_interface=bos_interface,
+            unk_interface=unk_interface
+        )
+        self._check_vocab_cover()
+
+        # now the vocabulary is useless
+        self._vocabulary.clear()
+        self._reverse_vocab = tuple()
+
+    def _check_vocab_cover(self):
+        absense = list(set(self._vocabulary)-set(self._w2p_tokenizer._w2pid))
+        promt = ' '.join(f"'{x}'" for x in absense[:5])
+        if len(absense) > 5:
+            promt += "..."
+        if len(absense) > 0:
+            sys.stderr.write(
+                f"WARNING: {len(absense)} word(s) defined in vocabulary but missing in lexicon:\n"
+                f"    {promt}\n"
+            )
+
+    @property
+    def vocab_size(self) -> int:
+        return self._w2p_tokenizer.vocab_size
+
+    def state_dict(self) -> OrderedDict:
+        parent_state = super().state_dict()
+        parent_state.update(self._w2p_tokenizer.state_dict())
+        return parent_state
+
+    def load_state_dict(self, state_dict: OrderedDict):
+        super().load_state_dict(state_dict)
+        self._w2p_tokenizer.load_state_dict(state_dict)
+
+    def _vocab_to_dict(self) -> Dict[int, str]:
+        raise NotImplementedError
+
+    def _enc(self, s: str) -> List[int]:
+        # do segmentation
+        cut_words = self.cut(s)
+        # encoder text to ids
+        return sum(self._w2p_tokenizer.encode(cut_words), [])
+
+    def decode(self, *args, **kwargs):
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support decode() method.")
+
+
+class LexiconTokenizer(AbsTokenizer):
+    """Lexicon-based tokenizer. A light wrapper."""
+
+    def __init__(
+            self,
+            lexicon: str,
+            add_special_token: bool = True,
+            bos_interface: str = '<s>',
+            unk_interface: str = '<unk>') -> None:
+        """
+        Args:
+            lexicon (str) : file contains the mapping of word to units. Usually annotated as 'lexicon.txt'
+                            Each line should be as 
+                            <word> <unit0> <unit1> ...
+            add_special_token (bool) : add <s>, <unk> to the lexicon, otherwise they're assumed to be in the lexicon.
+            bos_interface (str) : start of an utterance, usually '<s>' or '<bos>'
+            unk_interface (str) : unknown word representation in the mapping. usually '<unk>' or '<UNK>'
+        """
+        super().__init__()
+        assert os.path.isfile(lexicon), f"given w2p_map='{lexicon}' not exist."
+        self._bos_token = bos_interface
+        self._unk_token = unk_interface
+        self.init_lexicon(lexicon, add_special_token)
+
+    def init_lexicon(self, f_mapping: str, add_special_token: bool):
+        p_rm_consecutive_space = re.compile(r"\s+")
+        lexicon = []
+        with open(f_mapping, 'r') as fi:
+            for line in fi:
+                if line == '':
+                    continue
+                utt = re.sub(p_rm_consecutive_space, ' ', line).strip().split()
+                lexicon.append(
+                    (utt[0], utt[1:])
+                )
+
+        units = {}
+        word2phn = OrderedDict()
+        if add_special_token:
+            units[self._bos_token] = 0
+            units[self._unk_token] = 1
+            word2phn[self._bos_token] = (0,)
+            word2phn[self._unk_token] = (1,)
+
+        raw_units = set().union(*(utt for _, utt in lexicon))
+        lu = len(units)
+        units.update({
+            _unit: id+lu
+            for id, _unit in enumerate(raw_units)
+        })
+        for word, utt in lexicon:
+            word2phn[word] = tuple(units[x] for x in utt)
+
+        self._w2pid = word2phn
+        if not add_special_token and (self._bos_token not in self._w2pid or self._unk_token not in self._w2pid):
+            raise RuntimeError(
+                f"{self._bos_token} and(or) {self._unk_token} are not found in '{f_mapping}', "
+                "it's your duty to add these special tokens."
+            )
+
+        self._units = units
+        if self._w2pid[self._bos_token] != (0,):
+            sys.stderr.write(
+                f"warning: {self.__class__.__name__} bos token is set to {self._w2pid[self._bos_token]},\n"
+                "... but for most of the cases, we assume <s>=<blk>=0, so it might cause some underminted error.\n")
+
+    @property
+    def vocab_size(self) -> int:
+        return len(self._units)
+
+    def state_dict(self) -> OrderedDict:
+        return {
+            'w2pid': self._w2pid,
+            'units': self._units,
+            'bos': self._bos_token,
+            'unk': self._unk_token
+        }
+
+    def load_state_dict(self, state_dict: OrderedDict):
+        self._w2pid = state_dict['w2pid']
+        self._units = state_dict['units']
+        self._bos_token = state_dict['bos']
+        self._unk_token = state_dict['unk']
+
+    def _vocab_to_dict(self) -> Dict[int, str]:
+        raise NotImplementedError
+
+    def _enc(self, s: str) -> List[int]:
+        cut_words = s.split()
+        unkid = self._w2pid[self._unk_token]
+        rt_indices = [
+            list(self._w2pid.get(w, unkid))
+            for w in cut_words
+        ]     # type: List[List[int]]
+        return sum(rt_indices, [])
+
+    def decode(self, *args, **kwargs):
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support decode() method.")
+
+
+class RawTokenizer(AbsTokenizer):
+    """A wrapper tokenizer that do nothing. encode('1 2 3') -> [1, 2, 3]"""
+
+    def __init__(self, num_units: int) -> None:
+        super().__init__()
+        assert isinstance(num_units, (float, int))
+        num_units = int(num_units)
+        assert num_units > 0
+        self.n_vocab = num_units
+
+    def _enc(self, s: str) -> List[int]:
+        return [int(x) for x in s.split()]
+
+    def _dec(self, indices: Iterable[int]) -> str:
+        return ' '.join(str(x) for x in indices)
+
+    @property
+    def vocab_size(self) -> int:
+        return self.n_vocab
+
+    def _vocab_to_dict(self) -> Dict[int, str]:
+        return {i: str(i) for i in range(self.n_vocab)}
+
+    def state_dict(self) -> OrderedDict:
+        return OrderedDict([('n_vocab', self.n_vocab)])
+
+    def load_state_dict(self, state_dict: OrderedDict):
+        self.n_vocab = state_dict['n_vocab']
+        return
 
 
 class SentencePieceTokenizer(AbsTokenizer):
@@ -329,159 +506,6 @@ class SentencePieceTokenizer(AbsTokenizer):
             train_extremely_large_corpus=train_extremely_large_corpus,
             **options
         )
-
-
-class LexiconTokenizer(AbsTokenizer):
-    """Lexicon-based tokenizer. A light wrapper."""
-
-    def __init__(
-            self,
-            lexicon: str,
-            bos_interface: str = '<s>',
-            unk_interface: str = '<unk>') -> None:
-        """
-        Args:
-            lexicon (str) : file contains the mapping of word to phone. Usually annotated as 'lexicon_number.txt'
-                            Each line should be as 
-                            <word> <id0> <id1> ...
-            bos_interface (str) : start of an utterance, usually '<s>' or '<bos>'
-            unk_interface (str) : unknown word representation in the mapping. usually '<unk>' or '<UNK>'
-        """
-        super().__init__()
-        assert os.path.isfile(lexicon), f"given w2p_map='{lexicon}' not exist."
-        self._bos_token = bos_interface
-        self._unk_token = unk_interface
-        self.init_lexicon(lexicon)
-
-    def init_lexicon(self, f_mapping: Union[str, bytes]):
-        if isinstance(f_mapping, str):
-            fi = open(f_mapping, 'r')
-        elif isinstance(f_mapping, bytes):
-            fi = f_mapping.decode('utf-8').split('\n')
-        else:
-            raise ValueError(
-                f"{self.__class__.__name__}: unknown type of f_mapping: {type(f_mapping)}")
-
-        p_rm_consecutive_space = re.compile(r"\s+")
-        max_phnid = -1
-        word2phn = []
-        for line in fi:
-            if line == '':
-                continue
-            indices = re.sub(p_rm_consecutive_space, ' ', line).strip().split()
-            word = indices[0]
-            word2phn.append((word, tuple(int(x) for x in indices[1:])))
-            max_phnid = max(max_phnid, max(word2phn[-1][1]))
-
-        self._w2pid = OrderedDict(word2phn)
-        if self._bos_token not in self._w2pid or self._unk_token not in self._w2pid:
-            raise RuntimeError(
-                f"{self._bos_token} and(or) {self._unk_token} are not found in '{f_mapping}', "
-                "it's your duty to add these special tokens."
-            )
-
-        self.num_phns = max_phnid + 1
-        if self._w2pid[self._bos_token][0] != 0:
-            sys.stderr.write(
-                f"warning: {self.__class__.__name__} bos token is set to {self._w2pid[self._bos_token][0]},\n"
-                "... but for most of the cases, we assume <s>=<blk>=0, so it might cause some underminted error.\n")
-
-    @property
-    def vocab_size(self) -> int:
-        return self.num_phns
-
-    def state_dict(self) -> OrderedDict:
-        return {
-            '_w2pid': self._w2pid,
-            'num_phns': self.num_phns,
-            'bos': self._bos_token,
-            'unk': self._unk_token
-        }
-
-    def load_state_dict(self, state_dict: OrderedDict):
-        self._w2pid = state_dict['_w2pid']
-        self.num_phns = state_dict['num_phns']
-        self._bos_token = state_dict['bos']
-        self._unk_token = state_dict['unk']
-
-    def _vocab_to_dict(self) -> Dict[int, str]:
-        raise NotImplementedError
-
-    def _enc(self, s: str) -> List[int]:
-        cut_words = s.split()
-        unkid = self._w2pid[self._unk_token]
-        rt_indices = [
-            list(self._w2pid.get(w, unkid))
-            for w in cut_words
-        ]     # type: List[List[int]]
-        return sum(rt_indices, [])
-
-    def decode(self, *args, **kwargs):
-        raise NotImplementedError(
-            f"{self.__class__.__name__} does not support decode() method.")
-
-
-class JiebaComposePhoneTokenizer(JiebaTokenizer):
-    """Tokenizer composing jieba segmentation and word2phone mapping for Chinese."""
-
-    def __init__(
-            self,
-            lexicon: str,
-            bos_interface: str,
-            unk_interface: str,
-            userdict: Optional[Union[str, bytes]] = None) -> None:
-        """
-        Args:
-            lexicon (str) : file contains the mapping of word to phone. Usually annotated as 'lexicon_number.txt'
-                            Each line should be as 
-                            <word> <id0> <id1> ...
-            bos_interface (str) : start of an utterance, usually '<s>' or '<bos>'
-            unk_interface (str) : unknown word representation in the mapping. usually '<unk>' or '<UNK>'
-            userdict (str, optional) : custom dictionary file
-        """
-        super().__init__(userdict, bos_id=0)
-
-        self._w2p_tokenizer = LexiconTokenizer(
-            lexicon, bos_interface, unk_interface)
-
-        self._check_vocab_cover()
-
-        # now the vocabulary is useless
-        self._vocabulary.clear()
-        self._reverse_vocab = tuple()
-
-    def _check_vocab_cover(self):
-        for w in self._vocabulary.keys():
-            if w not in self._w2p_tokenizer._w2pid:
-                raise RuntimeError(
-                    f"{self.__class__.__name__}: '{w}' is not found in the lexicon."
-                )
-
-    @property
-    def vocab_size(self) -> int:
-        return self._w2p_tokenizer.vocab_size
-
-    def state_dict(self) -> OrderedDict:
-        parent_state = super().state_dict()
-        parent_state.update(self._w2p_tokenizer.state_dict())
-        return parent_state
-
-    def load_state_dict(self, state_dict: OrderedDict):
-        super().load_state_dict(state_dict)
-        self._w2p_tokenizer.load_state_dict(state_dict)
-
-    def _vocab_to_dict(self) -> Dict[int, str]:
-        raise NotImplementedError
-
-    def _enc(self, s: str) -> List[int]:
-        # do segmentation
-        cut_words = self._tokenizer.cut(s.strip().replace(' ', ''), HMM=False)
-        # encoder text to ids
-        return sum(self._w2p_tokenizer.encode(cut_words), [])
-
-    def decode(self, *args, **kwargs):
-        raise NotImplementedError(
-            f"{self.__class__.__name__} does not support decode() method.")
 
 
 def initialize(cfg: Dict) -> AbsTokenizer:
