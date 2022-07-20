@@ -18,7 +18,9 @@ compared to baseline `rnnt-v15`
 | model               | dev  | test |
 | ------------------- | ---- | ---- |
 | kaldi prep w/ CMVN  | 4.44 | 4.80 |
-| torchaudio w/o CMVN | 4.43 | 4.76 | 
+| kaldi prep w/o CMVN | 4.44 | 4.75 |
+| torchaudio w/o CMVN | 4.43 | 4.76 |
+| torchaudio w/ CMVN  | 4.60 | 5.03 |
 
 ```
 dev     %SER 33.79 | %CER 4.43 [ 9104 / 205341, 154 ins, 250 del, 8700 sub ]
