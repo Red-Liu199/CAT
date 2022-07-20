@@ -1,3 +1,6 @@
+#!/bin/bash
+# author: Huahuan Zheng
+
 set -e
 set -u
 
@@ -16,9 +19,13 @@ set -u
 PARSER
 eval $(python utils/parseopt.py $0 $*)
 
+# text normalize
+bash local/text_normalize.sh
+
 # Extract 80-dim FBank features
 python local/extract_meta.py \
-    $src/wav/wav_clean $src/trans.noseg $out \
+    $src/wav/wav_clean \
+    ./trans.noseg $out \
     --subset $subsets_fbank || exit 1
 
 echo "$0 done"
