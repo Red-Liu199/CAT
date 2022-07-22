@@ -265,12 +265,14 @@ class JiebaComposeLexiconTokenizer(JiebaTokenizer):
 
     def state_dict(self) -> OrderedDict:
         parent_state = super().state_dict()
-        parent_state.update(self._w2p_tokenizer.state_dict())
+        parent_state.update({
+            'w2p': pickle.dumps(self._w2p_tokenizer)
+        })
         return parent_state
 
     def load_state_dict(self, state_dict: OrderedDict):
         super().load_state_dict(state_dict)
-        self._w2p_tokenizer.load_state_dict(state_dict)
+        self._w2p_tokenizer = pickle.loads(state_dict['w2p'])
 
     def _vocab_to_dict(self) -> Dict[int, str]:
         raise NotImplementedError
