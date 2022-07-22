@@ -2,30 +2,37 @@
 # author: Huahuan Zheng
 set -e -u
 
-src="/mnt/nas3_workspace/spmiData/tasi2_16k/tasi2_8k.txt"
-keep_seg=trued
-f_out="trans.noseg"
+<<"PARSER"
+("src_trans", type=str, nargs='?',
+    default="/mnt/nas3_workspace/spmiData/tasi2_16k/tasi2_8k.txt",
+    help="Source data folder containing the audios and transcripts. ")
+("-keep-seg", action="store_true", 
+    help="Keep original segment spaces, otherwise extra spaces would be removed.")
+("-out", type=str, default="./trans.noseg",
+    help="Output location to the normalized text.")
+PARSER
+eval $(python utils/parseopt.py $0 $*)
 
-[ ! -f $src ] && {
-    echo "no such trancript file: '$src'"
+[ ! -f $src_trans ] && {
+    echo "no such trancript file: '$src_trans'"
     exit 1
 }
 
 opt_kp=""
-[ $keep_seg == "true" ] && opt_kp="--keep-space"
+[ $keep_seg == "True" ] && opt_kp="--keep-space"
 
 split -d -n l/16 \
-    $src ${f_out}_part_
+    $src_trans ${out}_part_
 
-for x in $(ls ${f_out}_part_*); do
+for x in $(ls ${out}_part_*); do
     sed <$x -e 's/<spn>//g' |
-        python process_mixing_zh_en.py $opt_kp \
+        python local/process_mixing_zh_en.py $opt_kp \
             >$x.done &
 done
 wait
 
-cat ${f_out}_part_*.done | sort -k 1,1 -u >$f_out
-rm ${f_out}_part_*
+cat ${out}_part_*.done | sort -k 1,1 -u >$out
+rm ${out}_part_*
 
 echo "Text is normalized."
 echo "To do further tokenizer training, there're some hints:"

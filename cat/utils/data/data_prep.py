@@ -14,8 +14,11 @@ import torchaudio
 import torchaudio.transforms as T
 from torch.utils.data import DataLoader, Dataset
 
-__all__ = ["Processor", "ReadProcessor", "ResampleProcessor",
-           "SpeedPerturbationProcessor", "FBankProcessor", "CMVNProcessor"]
+__all__ = [
+    "Processor", "ReadProcessor", "ResampleProcessor",
+    "SpeedPerturbationProcessor", "FBankProcessor", "CMVNProcessor",
+    "AudioData"
+]
 
 
 class Processor:

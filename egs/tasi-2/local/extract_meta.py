@@ -13,6 +13,8 @@ import argparse
 from typing import List, Dict, Any, Tuple
 from tqdm import tqdm
 
+from torch.utils.data import DataLoader, Dataset
+
 prepare_sets = [
     'accented_hearingdata',
     'aidatatang',
@@ -78,22 +80,18 @@ def pack_data(
     processor = (
         ReadProcessor()
         .append(FBankProcessor(16000, 80))
-        .append(CMVNProcessor())
     )
-    for _audio in tqdm(f_audios):
-        try:
-            fbank_spec = processor(_audio)
-        except Exception as e:
-            if "Error loading audio" in str(e):
-                sys.stderr.write(
-                    f"error loading audio: {str(e)}, skip\n")
-            else:
-                print(str(e))
-                shutil.move(
-                    _audio, f"/mnt/nas3_workspace/spmiData/tasi2_16k/wav/wav-trash/{os.path.basename(_audio)}")
-            continue
-
-        uid = os.path.basename(_audio).removesuffix('.wav')
+    # extract uid from audio files
+    raw_audios = [
+        (os.path.basename(file).removesuffix('.wav'), file)
+        for file in f_audios
+    ]
+    del f_audios
+    dataloader = DataLoader(
+        AudioData(processor=processor, audio_list=raw_audios),
+        shuffle=False, num_workers=16, batch_size=None
+    )
+    for uid, feat in tqdm(dataloader):
         target = label_dict.get(uid, None)
         if target is None:
             sys.stderr.write(
@@ -101,15 +99,16 @@ def pack_data(
             )
             continue
 
-        L = fbank_spec.shape[0]
+        L = feat.shape[0]
 
         for (l, u), _sink in zip(filter_bound, sinks):
             if l <= L and L < u:
                 _sink.write({
                     '__key__': uid,
-                    "mat.npy": fbank_spec.numpy(),
+                    "mat.npy": feat.numpy(),
                     "label.txt": target
                 })
+                break
 
     for s in sinks:
         s.close()
