@@ -307,7 +307,7 @@ if __name__ == "__main__":
                 if '{}' not in suffix:
                     sys.stdout.write(fmt.format(fmtstr_set(
                         'inference:infer:option:output',
-                        infr_option['outpu']
+                        infr_option['output']
                     )))
 
             if '{}' in infr_option['nbestlist']:
