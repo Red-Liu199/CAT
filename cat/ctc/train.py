@@ -23,8 +23,8 @@ from torch.cuda.amp import autocast
 
 # NOTE:
 #   1/4 subsampling is used for Conformer model defaultly
-#   for other sampling ratios, you may need to modify the values
-#   commonly, you can use a larger value for allowing some margin.
+#   for other sampling ratios, you may need to modify the values.
+#   Commonly, you can use a relatively larger value for allowing some margin.
 SUBSAMPLING = 4
 
 

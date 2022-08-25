@@ -132,7 +132,6 @@ class CRFContext:
         if isinstance(gpus, int):
             gpus = [gpus]
         nprocs = torch.cuda.device_count()
-        self._gpus = None
         if not all([i >= 0 and i < nprocs for i in gpus]):
             raise RuntimeError(
                 f"Available GPU={nprocs}, invalid GPU ids: {gpus}.")
@@ -141,6 +140,6 @@ class CRFContext:
         core.init_env(den_lm, self._gpus)
 
     def __del__(self):
-        if self._gpus is not None:
+        if hasattr(self, '_gpus'):
             core.release_env(self._gpus)
             del self._gpus
