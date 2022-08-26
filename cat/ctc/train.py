@@ -37,7 +37,7 @@ def filter_hook(dataset):
     return dataset.select(check_label_len_for_ctc)
 
 
-def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
+def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace, func_build_model=None):
     coreutils.set_random_seed(args.seed)
     args.gpu = gpu
     args.rank = args.rank * ngpus_per_node + gpu
@@ -51,7 +51,8 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         KaldiSpeechDataset,
         sortedPadCollateASR(flatten_target=True),
         args,
-        func_build_model=build_model,
+        func_build_model=(
+            build_model if func_build_model is None else func_build_model),
         _wds_hook=filter_hook
     )
 
@@ -59,8 +60,8 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
     #       ... when using webdataset (--largedataset) to load the data, we deal with
     #       ... the issue by `_wds_hook`; if not, we filter the unqualified utterances
     #       ... before training start.
-    tr_dataset = manager.trainloader.dl.dataset
-    if isinstance(tr_dataset, KaldiSpeechDataset):
+    if not args.large_dataset:
+        tr_dataset = manager.trainloader.dl.dataset
         orilen = len(tr_dataset)
         tr_dataset.filt_by_len(lambda x, y: x//SUBSAMPLING > y)
         if len(tr_dataset) < orilen:
