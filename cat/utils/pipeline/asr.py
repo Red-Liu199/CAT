@@ -126,6 +126,55 @@ def dumpjson(obj: dict, target: str):
         json.dump(obj, fo, indent=4)
 
 
+class TextUtterances:
+    """Read files with uid and sort the utterances in order by uid."""
+
+    def __init__(self, files: Union[str, List[str]]) -> None:
+        if isinstance(files, str):
+            files = [files]
+
+        checkExist('f', files)
+        # [(uid, seek, file_id), ...]
+        self._seeks = []    # type: List[Tuple[str, int, int]]
+        self._files = sorted(files)
+
+        for idf, f in enumerate(files):
+            with open(f, 'r') as fi:
+                while True:
+                    loc = fi.tell()
+                    line = fi.readline()
+                    if line == '':
+                        break
+                    uid = line.split(maxsplit=1)[0]
+                    self._seeks.append(
+                        (uid, loc, idf)
+                    )
+        self._seeks = sorted(self._seeks, key=lambda x: x[0])
+
+    def __len__(self) -> int:
+        return len(self._seeks)
+
+    def __getitem__(self, index: int):
+        return self._seeks[index]
+
+    def __iter__(self):
+        opened = {}
+        for uid, loc, idf in self._seeks:
+            if idf not in opened:
+                opened[idf] = open(self._files[idf], 'r')
+
+            opened[idf].seek(loc)
+            cont = opened[idf].readline().split(maxsplit=1)
+            if len(cont) == 1:
+                yield (uid, '')
+            else:
+                yield (uid, cont[1])
+
+        for f in opened.values():
+            f.close()
+        return
+
+
 def pack_data(
         f_scps: Union[List[str], str],
         f_labels: Union[List[str], str],
@@ -176,56 +225,44 @@ def pack_data(
         if u_bound != '':
             l_max = int(u_bound)
 
-    # process label files
-    labels = []
-    for _f_lb in f_labels:
-        with open(_f_lb, 'r') as fi_label:
-            labels += fi_label.readlines()
-
-    labels = [l.strip().split(maxsplit=1)
-              for l in labels]      # type: List[Tuple[str, str]]
-    num_label_lines = len(labels)
-
-    labels = {
-        uid: np.asarray(
-            tokenizer.encode(utt),
-            dtype=np.int64
-        )
-        for uid, utt in labels
-    }
-
-    num_utts = [sum(1 for _ in open(_f_scp, 'r')) for _f_scp in f_scps]
-    total_utts = sum(num_utts)
-    assert total_utts == num_label_lines, fmtstr_error(
+    # Read label files and scp files.
+    twrapper_label = TextUtterances(f_labels)
+    twrapper_scp = TextUtterances(f_scps)
+    assert len(twrapper_scp) == len(twrapper_label), fmtstr_error(
         "f_scp and f_label should match on the # of lines, "
-        f"instead {total_utts} != {len(labels)}",
+        f"instead {len(twrapper_scp)} != {len(twrapper_label)}",
         pack_data
     )
 
     f_opened = {}
     cnt_frames = 0
-    linfo = np.empty(total_utts, dtype=np.int64)
-    _keys = []
-    _ark_seeks = []
-    idx = 0
-    cnt_rm = 0
-    for n, _f_scp in enumerate(f_scps):
-        with open(_f_scp, 'r') as fi_scp:
-            for line in tqdm(fi_scp, total=num_utts[n], leave=False):
-                key, loc_ark = line.split()
-                mat = kaldiio.load_mat(
-                    loc_ark, fd_dict=f_opened)   # type:np.ndarray
+    linfo = np.empty(len(twrapper_scp), dtype=np.int64)
+    uids = []
+    arks = []
+    labels = []
+    cnt = 0
+    for (uid, lb), (uid1, ark) in tqdm(zip(twrapper_label, twrapper_scp), total=len(twrapper_scp), leave=False):
+        assert uid == uid1, f"UID in label and scp files mismatch: {uid} != {uid1}"
+        if lb == '':
+            fmtstr_warn(f"skip empty utt: {uid}", pack_data)
+            continue
 
-                if mat.shape[0] < l_min or mat.shape[0] > l_max:
-                    cnt_rm += 1
-                    continue
+        mat = kaldiio.load_mat(
+            ark, fd_dict=f_opened)   # type:np.ndarray
+        if mat.shape[0] < l_min or mat.shape[0] > l_max:
+            continue
 
-                linfo[idx] = mat.shape[0]
-                _keys.append(key)
-                _ark_seeks.append(loc_ark)
-
-                cnt_frames += mat.shape[0]
-                idx += 1
+        labels.append(
+            np.asarray(
+                tokenizer.encode(lb),
+                dtype=np.int64
+            )
+        )
+        linfo[cnt] = mat.shape[0]
+        uids.append(uid)
+        arks.append(ark)
+        cnt_frames += mat.shape[0]
+        cnt += 1
 
     for f in f_opened.values():
         f.close()
@@ -235,33 +272,29 @@ def pack_data(
     # then store the length in the last place, such as
     # [0 1 2 3] -> [0 1 2 3 -1 -1 4]
     # then we can access the data via array[:array[-1]]
-    labels = list([labels[k_] for k_ in _keys])
-    cnt_tokens = sum(_x.shape[0] for _x in labels)
+    cnt_tokens = sum(x.shape[0] for x in labels)
     max_len_label = max(x.shape[0] for x in labels)
     labels = np.array([
         np.concatenate((
             _x,
             np.array([-1]*(max_len_label-_x.shape[0]) + [_x.shape[0]])
         ))
-        for _x in labels])
-
-    linfo = linfo[:idx]
-    ark_locs = np.array(_ark_seeks)
-    assert len(linfo) == len(labels)
-    assert len(labels) == len(ark_locs)
+        for _x in labels
+    ])
 
     with open(f_out, 'wb') as fo:
         pickle.dump({
             'label': labels,
-            'linfo': linfo,
-            'arkname': ark_locs,
-            'key': np.array(_keys)
+            'linfo': linfo[:cnt],
+            'arkname': np.array(arks),
+            'key': np.array(uids)
         }, fo)
 
-    if cnt_rm > 0:
-        print(f"pack_data(): remove {cnt_rm} unqualified sequences.")
+    cntrm = len(twrapper_scp) - cnt
+    if cntrm > 0:
+        print(f"pack_data(): remove {cntrm} unqualified sequences.")
     print(
-        f"# of frames: {cnt_frames} | tokens: {cnt_tokens} | seqs: {idx}")
+        f"# of frames: {cnt_frames} | tokens: {cnt_tokens} | seqs: {cnt}")
 
 
 def checkExist(f_type: Literal['d', 'f'], f_list: Union[str, List[str]]):
@@ -452,8 +485,10 @@ def combine_text(datasets: Union[str, List[str]], f_out: Optional[str] = None) -
             with open(_text, 'r') as fi:
                 for line in fi:
                     # rm the seq id in first column
-                    _, utt = line.split(maxsplit=1)
-                    fo.write(utt)
+                    contents = line.split(maxsplit=1)
+                    if len(contents) == 1:
+                        continue
+                    fo.write(contents[1])
     return f_out
 
 
