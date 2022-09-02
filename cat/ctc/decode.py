@@ -119,7 +119,7 @@ def worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_out: mp.Queue
         # w/o LM, labels won't be used in decoding.
         labels = [''] * tokenizer.vocab_size
         searcher = CTCBeamDecoder(
-            labels, beam_width=args.beam_size, num_processes=1)
+            labels, beam_width=args.beam_size, num_processes=args.thread_per_woker)
     else:
         assert os.path.isfile(
             args.lm_path), f"--lm-path={args.lm_path} is not a valid file."
@@ -130,7 +130,7 @@ def worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_out: mp.Queue
                                      for i in range(2, tokenizer.vocab_size)]
         searcher = CTCBeamDecoder(
             labels, model_path=args.lm_path, alpha=args.alpha, beta=args.beta,
-            beam_width=args.beam_size, num_processes=1, is_token_based=True)
+            beam_width=args.beam_size, num_processes=args.thread_per_woker, is_token_based=True)
 
     # {'uid': {0: (-10.0, 'a b c'), 1: (-12.5, 'a b c d')}}
     nbest = {}  # type: Dict[str, Dict[int, Tuple[float, str]]]

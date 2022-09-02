@@ -386,7 +386,7 @@ def weighted_group(weighted_list: List[Tuple[Any, Union[float, int]]], N: int, c
     return [src_list[indices[i]:indices[i+1]] for i in range(N)]
 
 
-def main_spawner(args, _main_worker: Callable[[int, int, argparse.Namespace], None], extra_args=[]):
+def main_spawner(args: argparse.Namespace, _main_worker: Callable[[int, int, argparse.Namespace], None]):
     if not torch.cuda.is_available():
         highlight_msg("CPU only training is unsupported")
         return None
@@ -394,8 +394,7 @@ def main_spawner(args, _main_worker: Callable[[int, int, argparse.Namespace], No
     ngpus_per_node = torch.cuda.device_count()
     args.world_size = ngpus_per_node * args.world_size
     print(f"Total number of GPUs: {args.world_size}")
-    mp.spawn(_main_worker, nprocs=ngpus_per_node,
-             args=(ngpus_per_node, args, *extra_args))
+    mp.spawn(_main_worker, nprocs=ngpus_per_node, args=(ngpus_per_node, args))
 
 
 def setup_path(args: argparse.Namespace):

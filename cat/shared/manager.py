@@ -169,7 +169,7 @@ class Manager(object):
                 args.dynamic_batch_mode = -1
                 train_sampler = DistributedSampler(tr_set)
                 trainloader = DataLoader(
-                    tr_set, batch_size=args.batch_size//world_size, shuffle=False,
+                    tr_set, batch_size=args.batch_size//world_size,
                     num_workers=args.workers, sampler=train_sampler, collate_fn=collate_fn,
                     prefetch_factor=4, persistent_workers=True)
 

@@ -65,14 +65,15 @@ egs/[task]/exp/template
 ```
 {
     // for ASR only, code: cat/shared/_specaug.py
-    "specaug_config": {
+    "specaug": {
         ...
     },
     // required for CRF, optional for CTC, code: `build_model()` in cat/ctc/train.py
-    "ctc-trainer": {
+    "trainer": {
         "use_crf": false,           // enable CRF loss or not, if false, following two options would be useless.
         "lamb": 0.01,               // weight of CTC loss once enable CRF loss
         "den-lm": "/path/to/den_lm" // location of denominator LM
+        ...
     },
     // required for RNN-T, code: class 'TransducerTrainer' in cat/rnnt/train.py
     "transducer": {

@@ -5,7 +5,11 @@ Author: Huahuan Zheng (maxwellzh@outlook.com)
 """
 
 from . import ctc_builder
-from .train import AMTrainer
+from .train import (
+    AMTrainer,
+    build_beamdecoder,
+    main_worker as basic_worker
+)
 from ..shared import coreutils
 from ..shared.encoder import AbsEncoder
 from ..shared.manager import Manager
@@ -13,9 +17,7 @@ from ..shared.data import (
     KaldiSpeechDataset,
     sortedPadCollateASR
 )
-from ..shared import tokenizer as tknz
-from ..rnnt.train_nce import cal_wer, custom_evaluate
-from ctcdecode import CTCBeamDecoder
+from ..rnnt.train_nce import custom_evaluate
 
 
 import argparse
@@ -27,68 +29,23 @@ import torch.distributed as dist
 
 
 def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
-    coreutils.set_random_seed(args.seed)
-    args.gpu = gpu
-    args.rank = args.rank * ngpus_per_node + gpu
-    torch.cuda.set_device(args.gpu)
-
-    dist.init_process_group(
-        backend=args.dist_backend, init_method=args.dist_url,
-        world_size=args.world_size, rank=args.rank)
-
-    manager = Manager(
-        KaldiSpeechDataset,
-        sortedPadCollateASR(),
-        args, build_model,
+    basic_worker(
+        gpu, ngpus_per_node, args,
+        func_build_model=build_model,
         func_eval=custom_evaluate
     )
 
-    # training
-    manager.run(args)
-
 
 class CTCDiscTrainer(AMTrainer):
-    def __init__(self, beamdecoder: CTCBeamDecoder, ctc_weight: Optional[float] = 0., **kwargs):
+    def __init__(self, ctc_weight: Optional[float] = 0., **kwargs):
         super().__init__(**kwargs)
         assert isinstance(ctc_weight, (int, float))
         assert not self.is_crf, f"mmi mode is conflict with crf"
-        assert isinstance(beamdecoder, CTCBeamDecoder)
-        self.attach = {
-            'decoder': beamdecoder
-        }
+
         self.weights = {
             'ctc_loss': 1+ctc_weight
         }
         self.criterion = nn.CTCLoss(reduction='none', zero_infinity=True)
-
-    @torch.no_grad()
-    def get_wer(self, feats: torch.Tensor, labels: torch.Tensor, lx: torch.Tensor, ly: torch.Tensor):
-        logits, lx = self.am(feats, lx)
-        logits = logits.log_softmax(dim=-1)
-        bs = logits.size(0)
-
-        labels = labels.cpu()
-        ground_truth = [
-            ' '.join(
-                str(x)
-                for x in labels[n, :ly[n]].tolist()
-            )
-            for n in range(bs)
-        ]
-
-        # y_samples: (N, k, L),     ly_samples: (N, k)
-        y_samples, _, _, ly_samples = self.attach['decoder'].decode(
-            logits.cpu())
-        hypos = [
-            ' '.join(str(x)
-                     for x in y_samples[n, 0, :ly_samples[n, 0]].tolist())
-            for n in range(bs)
-        ]
-
-        err = cal_wer(ground_truth, hypos)
-        cnt_err = sum(x for x, _ in err)
-        cnt_sum = sum(x for _, x in err)
-        return cnt_err, cnt_sum
 
     def forward(self, feats: torch.Tensor, labels: torch.Tensor, lx: torch.Tensor, ly: torch.Tensor):
 
@@ -136,47 +93,18 @@ class CTCDiscTrainer(AMTrainer):
 
 def build_model(cfg: dict, args: argparse.Namespace) -> Union[AbsEncoder, CTCDiscTrainer]:
     """
-    cfg:
-        mmi:
-            decoder:
-                beam_size: 
-                kenlm: 
-                tokenizer: 
-                alpha: 
-                beta:
-                ...
-            trainer:
-                ...
-        # basic ctc config
-        ...
-
+    cfg: please refer to `cat.ctc.train.build_model`
     """
-    assert 'mmi' in cfg, f"missing 'mmi' in field:"
-
     # initialize beam searcher
-    assert 'decoder' in cfg['mmi'], f"missing 'decoder' in field:mmi"
-    decoder_cfg = cfg['mmi']['decoder']
-    for s in ['beam_size', 'kenlm', 'tokenizer']:
-        assert s in decoder_cfg, f"missing '{s}' in field:mmi:decoder"
-    tokenizer = tknz.load(decoder_cfg['tokenizer'])
-    labels = [str(i) for i in range(tokenizer.vocab_size)]
-    labels[0] = '<s>'
-    labels[1] = '<unk>'
-    searcher = CTCBeamDecoder(
-        labels=labels,
-        model_path=decoder_cfg['kenlm'],
-        beam_width=decoder_cfg['beam_size'],
-        alpha=decoder_cfg.get('alpha', 1.),
-        beta=decoder_cfg.get('beta', 0.),
-        num_processes=4,
-        log_probs_input=True,
-        is_token_based=True
-    )
-    del tokenizer
+    assert 'trainer' in cfg, f"missing 'trainer' in field:"
+    assert 'decoder' in cfg['trainer'], f"missing 'decoder' in field:trainer"
 
-    trainer_cfg = cfg['mmi'].get('trainer', {})
+    cfg['trainer']['decoder'] = build_beamdecoder(
+        cfg['trainer']['decoder']
+    )
+    cfg['trainer']['am'] = encoder
     encoder = ctc_builder(cfg, args, dist=False, wrapper=False)
-    model = CTCDiscTrainer(searcher, am=encoder, **trainer_cfg)
+    model = CTCDiscTrainer(**cfg['trainer'])
 
     # make batchnorm synced across all processes
     model = coreutils.convert_syncBatchNorm(model)

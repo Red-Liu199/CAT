@@ -6,15 +6,18 @@ __all__ = ["AMTrainer", "build_model", "_parser", "main"]
 
 from ..shared import Manager
 from ..shared import coreutils
+from ..shared import tokenizer as tknz
 from ..shared import encoder as model_zoo
 from ..shared.data import (
     KaldiSpeechDataset,
     sortedPadCollateASR
 )
+from ..rnnt.train_nce import cal_wer
 
 import os
 import argparse
 from typing import *
+from ctcdecode import CTCBeamDecoder
 
 import torch
 import torch.nn as nn
@@ -37,7 +40,7 @@ def filter_hook(dataset):
     return dataset.select(check_label_len_for_ctc)
 
 
-def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace, func_build_model=None):
+def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace, **mkwargs):
     coreutils.set_random_seed(args.seed)
     args.gpu = gpu
     args.rank = args.rank * ngpus_per_node + gpu
@@ -47,13 +50,16 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace, func_bu
         backend=args.dist_backend, init_method=args.dist_url,
         world_size=args.world_size, rank=args.rank)
 
+    if 'func_build_model' not in mkwargs:
+        mkwargs['func_build_model'] = build_model
+    if '_wds_hook' not in mkwargs:
+        mkwargs['_wds_hook'] = filter_hook
+
     manager = Manager(
         KaldiSpeechDataset,
         sortedPadCollateASR(flatten_target=True),
         args,
-        func_build_model=(
-            build_model if func_build_model is None else func_build_model),
-        _wds_hook=filter_hook
+        **mkwargs
     )
 
     # NOTE: for CTC training, the input feat len must be longer than the label len
@@ -80,6 +86,7 @@ class AMTrainer(nn.Module):
             am: model_zoo.AbsEncoder,
             use_crf: bool = False,
             lamb: Optional[float] = 0.01,
+            decoder: CTCBeamDecoder = None,
             **kwargs):
         super().__init__()
 
@@ -93,6 +100,10 @@ class AMTrainer(nn.Module):
         else:
             self.criterion = nn.CTCLoss()
 
+        self.attach = {
+            'decoder': decoder
+        }
+
     def register_crf_ctx(self, den_lm: Optional[str] = None):
         """Register the CRF context on model device."""
         assert self.is_crf
@@ -100,6 +111,29 @@ class AMTrainer(nn.Module):
         from ctc_crf import CRFContext
         self._crf_ctx = CRFContext(den_lm, next(
             iter(self.am.parameters())).device.index)
+
+    @torch.no_grad()
+    def get_wer(self, xs: torch.Tensor, ys: torch.Tensor, lx: torch.Tensor, ly: torch.Tensor):
+        if self.attach['decoder'] is None:
+            raise RuntimeError
+
+        logits, lx = self.am(xs, lx)
+        logits = logits.log_softmax(dim=-1)
+        bs = logits.size(0)
+
+        # y_samples: (N, k, L),     ly_samples: (N, k)
+        y_samples, _, _, ly_samples = self.attach['decoder'].decode(
+            logits.cpu())
+
+        """NOTE:
+            for CTC training, we flatten the label seqs to 1-dim,
+            so here we need to deal with that
+        """
+        ground_truth = [t.cpu().tolist() for t in torch.split(ys, ly.tolist())]
+        hypos = [y_samples[n, 0, :ly_samples[n, 0]].tolist()
+                 for n in range(bs)]
+
+        return cal_wer(ground_truth, hypos)
 
     def forward(self, feats, labels, lx, ly):
 
@@ -123,21 +157,57 @@ class AMTrainer(nn.Module):
         return loss
 
 
+def build_beamdecoder(cfg: dict) -> CTCBeamDecoder:
+    """
+    beam_size: 
+    kenlm: 
+    tokenizer: 
+    alpha: 
+    beta:
+    ...
+    """
+
+    for s in ['beam_size', 'kenlm', 'tokenizer']:
+        assert s in cfg, f"'{s}' is required."
+
+    tokenizer = tknz.load(cfg['tokenizer'])
+    labels = [str(i) for i in range(tokenizer.vocab_size)]
+    labels[0] = '<s>'
+    labels[1] = '<unk>'
+    del tokenizer
+    return CTCBeamDecoder(
+        labels=labels,
+        model_path=cfg['kenlm'],
+        beam_width=cfg['beam_size'],
+        alpha=cfg.get('alpha', 1.),
+        beta=cfg.get('beta', 0.),
+        num_processes=6,
+        log_probs_input=True,
+        is_token_based=True
+    )
+
+
 def build_model(
         cfg: dict,
         args: Optional[Union[argparse.Namespace, dict]] = None,
         dist: bool = True,
         wrapper: bool = True) -> Union[nn.parallel.DistributedDataParallel, AMTrainer, model_zoo.AbsEncoder]:
     """
-    for ctc-crf training, you need to add extra settings in cfg:
-    {
-        "trainer": {
-            "use_crf": true/false,
-            "lamb": 0.01,
-            "den-lm": "path/to/denlm"
-        },
+    for ctc-crf training, you need to add extra settings in 
+    cfg:
+        trainer:
+            use_crf: true/false,
+            lamb: 0.01,
+            den-lm: xxx
+
+            decoder:
+                beam_size: 
+                kenlm: 
+                tokenizer: 
+                alpha: 
+                beta:
+                ...
         ...
-    }
     """
     if 'trainer' not in cfg:
         cfg['trainer'] = {}
@@ -160,6 +230,12 @@ def build_model(
         **net_kwargs)  # type: model_zoo.AbsEncoder
     if not wrapper:
         return am_model
+
+    # initialize beam searcher
+    if 'decoder' in cfg['trainer']:
+        cfg['trainer']['decoder'] = build_beamdecoder(
+            cfg['trainer']['decoder']
+        )
 
     model = AMTrainer(am_model, **cfg['trainer'])
     if not dist:

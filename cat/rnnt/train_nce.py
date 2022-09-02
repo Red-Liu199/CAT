@@ -24,9 +24,9 @@ from ..shared.data import (
 
 
 import os
-import jiwer
 import math
 import argparse
+import Levenshtein
 from typing import *
 from tqdm import tqdm
 from warp_rnnt import rnnt_loss as RNNTLoss
@@ -279,22 +279,15 @@ class NCETransducerTrainer(TransducerTrainer):
             enc_out, lx)
 
         ground_truth = [
-            ' '.join(
-                str(x)
-                for x in targets[n, :target_lens[n]].cpu().tolist()
-            )
+            targets[n, :target_lens[n]].cpu().tolist()
             for n in range(bs)
         ]
         hypos = [
-            ' '.join(str(x) for x in list_hypos[0].pred[1:])
+            list_hypos[0].pred[1:]
             for list_hypos in batched_hypos
         ]
-        assert len(hypos) == len(ground_truth)
 
-        err = cal_wer(ground_truth, hypos)
-        cnt_err = sum(x for x, _ in err)
-        cnt_sum = sum(x for _, x in err)
-        return cnt_err, cnt_sum
+        return cal_wer(ground_truth, hypos)
 
 
 def custom_hook(
@@ -350,15 +343,18 @@ def custom_train(*args):
     return default_train_func(*args, hook_func=custom_hook)
 
 
-def cal_wer(gt: List[str], hy: List[str]) -> List[Tuple[int, int]]:
-    def _get_wer(_gt, _hy):
-        measure = jiwer.compute_measures(_gt, _hy)
-        cnt_err = measure['substitutions'] + \
-            measure['deletions'] + measure['insertions']
-        cnt_sum = measure['substitutions'] + \
-            measure['deletions'] + measure['hits']
-        return (cnt_err, cnt_sum)
-    return [_get_wer(_gt, _hy) for _gt, _hy in zip(gt, hy)]
+def cal_wer(gt: List[List[int]], hy: List[List[int]]) -> Tuple[int, int]:
+    """compute error count for list of tokens"""
+    assert len(gt) == len(hy)
+    err = 0
+    cnt = 0
+    for i in range(len(gt)):
+        err += Levenshtein.distance(
+            ''.join(chr(n) for n in hy[i]),
+            ''.join(chr(n) for n in gt[i])
+        )
+        cnt += len(gt[i])
+    return (err, cnt)
 
 
 @torch.no_grad()
