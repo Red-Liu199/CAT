@@ -3,6 +3,7 @@ This script is used for parsing the json schema for experiment settings.
 '''
 
 
+import importlib
 from cat.shared import decoder as pn_zoo
 from cat.shared import encoder as tn_zoo
 from cat.shared import scheduler, SpecAug
@@ -342,47 +343,39 @@ add_property(hyper_schema, {'tokenizer': processing})
 
 # schema for field:train
 # if you want to add a new training script, add it here.
-
-# fmt: off
-from cat.rnnt.train_unified import _parser as parser_rnnt_streaming
-from cat.rnnt.train_mwer import _parser as parser_rnnt_mwer
-from cat.rnnt.train_nce import _parser as parser_rnnt_nce
-from cat.rnnt.train import _parser as parser_rnnt
-from cat.lm.train import _parser as parser_lm
-from cat.ctc.train import _parser as parser_ctc
-from cat.ctc.train_mmi import _parser as parser_ctc_mmi
-# fmt: on
+binlist = [
+    'cat.rnnt.train_unified',
+    'cat.rnnt.train_mwer',
+    'cat.rnnt.train_nce',
+    'cat.rnnt.train',
+    'cat.lm.train',
+    'cat.ctc.train',
+    'cat.ctc.train_sa_crf',
+    'cat.ctc.train_smbr'
+]
 
 add_property(hyper_schema, {
     'train': bin_processing({
-        'cat.rnnt.train_unified': parser_rnnt_streaming(),
-        'cat.rnnt.train_mwer': parser_rnnt_mwer(),
-        'cat.rnnt.train_nce': parser_rnnt_nce(),
-        'cat.rnnt.train': parser_rnnt(),
-        'cat.lm.train': parser_lm(),
-        'cat.ctc.train': parser_ctc(),
-        'cat.ctc.train_mmi': parser_ctc_mmi()
+        name: importlib.import_module(name)._parser()
+        for name in binlist
     }, desc="Configuration of NN training")
 })
 
 
 # field:inference:infer
-# fmt: off
-from cat.rnnt.decode import _parser as parser_rnnt_decode
-from cat.lm.ppl_compute import _parser as parser_lm_ppl
-from cat.lm.rescore import _parser as parser_lm_rescore
-from cat.ctc.cal_logit import _parser as parser_ctc_cal_logit
-from cat.ctc.decode import _parser as parser_ctc_decode
-# fmt: on
+binlist = [
+    'cat.rnnt.decode',
+    'cat.lm.ppl_compute',
+    'cat.lm.rescore',
+    'cat.ctc.cal_logit',
+    'cat.ctc.decode'
+]
 
 inference = hyper_schema['properties']['inference']
 add_property(inference, {
     'infer': bin_processing({
-        'cat.rnnt.decode': parser_rnnt_decode(),
-        'cat.lm.ppl_compute': parser_lm_ppl(),
-        'cat.lm.rescore': parser_lm_rescore(),
-        'cat.ctc.cal_logit': parser_ctc_cal_logit(),
-        'cat.ctc.decode': parser_ctc_decode()
+        name: importlib.import_module(name)._parser()
+        for name in binlist
     }, desc="Configuration for inference.")
 })
 
