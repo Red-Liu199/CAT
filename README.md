@@ -8,9 +8,9 @@
   
    - CUDA compatible device, NVIDIA driver installed and CUDA available.
    - PyTorch: `>=1.9.0` is required. [Installation guide from PyTorch](https://pytorch.org/get-started/locally/#start-locally)
-   - [CAT](https://github.com/thu-spmi/CAT)**\[optional\]**: used for speech data preparation based on kaldi tool, [installation guide](tools/README.md#cat).
+   - [Kaldi](https://github.com/kaldi-asr/kaldi) **\[optional\]**: used for speech data preparation and some FST-related operations. This is optional for most of the basic functions. Only if you want to conduct [CTC-CRF](egs/TEMPLATE/exp/asr-ctc-crf) training, this is required.
       
-      Or you can use `egs/[task]/local/data.sh` to process data with `torchaudio`.
+      Besides Kaldi, you could use `torchaudio` for feature extraction. See `egs/[task]/local/data.sh` for prepare data with `torchaudio`.
 
 2. Clone and install Transducer packages
 
@@ -22,8 +22,15 @@
    ./install.sh -h
    ```
 
-## Examples and Usage
+## Get started
 
 To get started with this project, please refer to [TEMPLATE](egs/TEMPLATE/README.md) for tutorial.
 
-Once you're more familiar with the project, please read [the document](docs/configure_guide.md) for configuring the training.
+## Tutorials
+
+- [TEMPLATE doc](egs/TEMPLATE/README.md): run some template experiments in minutes.
+- [Guideline for configuring settings](docs/configure_guide.md)
+- [Contribute to this project](docs/contributing.md)
+- [Tutorial for CUSIDE](docs/cuside_ch.md) \[Chinese|中文\]: learn to run experiment with [CUSIDE](https://arxiv.org/abs/2203.16758)
+- [Some tips about the usage of third party tools](docs/guide_for_third_party_tools.md)
+- [Guide to train models on more than 1500 hours of speech data](docs/how_to_prepare_large_dataset_ch.md) \[Chinese|中文\]

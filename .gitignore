@@ -7,7 +7,6 @@ egs/**/data/
 egs/**/exp/
 egs/**/sentencepiece
 .vscode
-tools/CAT
 *.tar
 *.png
 *.jpg

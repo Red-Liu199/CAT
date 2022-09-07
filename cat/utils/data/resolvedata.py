@@ -1,29 +1,25 @@
 """
-Resolve the data location from CAT.
+Resolve the data location from data/src.
 
 e.g.
+$ cd path_to_transducer/egs/wsj
+$ python utils/data/resolvedata.py
 
-path_to_transducer/egs/wsj$ python utils/data/resolvedata.py
+Find datasets in `data/src`, which should satisfy:
+    1. Foler `data/src/SET` exist
+    2. Files `data/src/SET/feats.scp` and `data/src/SET/text` exist
 
-'wsj' will be recognized as the name of the recipe
-if data/src/ does not exist:
-    try to fine ../../tools/CAT/egs/wsj
-    link ../../tools/CAT/egs/wsj/data to data/src
-
-find datasets in data/src, which should satisfy:
-    1. data/src/SET and data/src/SET/text exist
-    2. data/src/SET/feats.scp exist
-
-the found datasets info would be stored at data/metainfo.json in JSON format
+The found datasets info would be stored at `data/metainfo.json` in JSON format
     {
-        "set-0":{
-            "scp": "path/to/scp-0",
-            "trans" : "path/to/trans-0"
+        "SET":{
+            "scp": "/abs/path/to/data/src/SET/feats.scp",
+            "trans" : "/abs/path/to/data/src/SET/text"
         },
         ...
     }
 
-all following pipeline would depend on data/metainfo.json, you can modify it manually for flexible usage
+All following pipeline of model training would depend on `data/metainfo.json`.
+You can modify the file manually for more flexible usage.
 """
 
 import os
@@ -65,20 +61,12 @@ def find_dataset(d_data: str) -> Dict[str, Dict[str, str]]:
 
 def main():
     from cat.shared._constants import F_DATAINFO
-    found_datasets = {}
     if os.path.isdir(D_SRCDATA):
-        found_datasets.update(find_dataset(D_SRCDATA))
+        found_datasets = find_dataset(D_SRCDATA)
     else:
-        recipe = os.path.basename(os.getcwd())
-        src_recipedata = f"../../tools/CAT/egs/{recipe}/data"
-        if not os.path.isdir("../../tools/CAT"):
-            print("warning: tool/CAT is not linked to ../../tools/CAT")
-        elif not os.path.isdir(src_recipedata):
-            print(f"'{recipe}' is not found under ../../tools/CAT/egs")
-        else:
-            os.makedirs(os.path.dirname(D_SRCDATA), exist_ok=True)
-            os.system(f"ln -s {os.path.abspath(src_recipedata)} {D_SRCDATA}")
-            found_datasets.update(find_dataset(src_recipedata))
+        sys.stderr.write(
+            f"{D_SRCDATA} is not found, did you run the pre-processing steps?")
+        exit(1)
 
     if os.path.isfile(F_DATAINFO):
         backup = json.load(open(F_DATAINFO, 'r'))

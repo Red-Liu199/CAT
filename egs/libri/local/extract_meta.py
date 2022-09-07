@@ -1,5 +1,5 @@
 """
-Compute FBank feature for aishell using torchaudio.
+Compute FBank feature for librispeech-960 using torchaudio.
 """
 
 
