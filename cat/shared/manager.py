@@ -239,20 +239,8 @@ class Manager(object):
             self.scheduler = build_scheduler(
                 cfg['scheduler'], self.model.parameters())
 
-        self.cm = CheckManager(
-            os.path.join(args._checkdir, F_CHECKPOINT_LIST),
-            header=f"created at {datetime.today().strftime('%Y-%m-%d %H:%M:%S')}"
-        )
-        self.monitor = MonitorWriter(args._logdir)
-        self.monitor.addWriter(tuple(monitor_anno.values()))
-        if extra_tracks is not None:
-            self.monitor.addWriter(extra_tracks)
-
-        if args.rank == 0:
-            self.writer = SummaryWriter(os.path.join(
-                args._logdir, "{0:%Y%m%d-%H%M%S/}".format(datetime.now())))
-        else:
-            self.writer = None
+        # Initialize the grad scaler
+        self.scaler = GradScaler(enabled=args.amp)
 
         self.rank = args.rank   # type: int
         self.DEBUG = args.debug  # type: bool
@@ -293,6 +281,24 @@ class Manager(object):
                 else:
                     raise RuntimeError(str(re))
             del checkpoint
+
+        # Initialize the checkpoint manager
+        self.cm = CheckManager(
+            os.path.join(args._checkdir, F_CHECKPOINT_LIST),
+            header=f"created at {datetime.today().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+
+        # Initialize the monitor
+        self.monitor = MonitorWriter(args._logdir)
+        self.monitor.addWriter(tuple(monitor_anno.values()))
+        if extra_tracks is not None:
+            self.monitor.addWriter(extra_tracks)
+
+        if args.rank == 0:
+            self.writer = SummaryWriter(os.path.join(
+                args._logdir, "{0:%Y%m%d-%H%M%S/}".format(datetime.now())))
+        else:
+            self.writer = None
 
     def run(self, args: argparse.Namespace):
         coreutils.check_parser(
@@ -381,6 +387,7 @@ class Manager(object):
             # monitor is only for backup, never load it in manager.load()
             'monitor': self.monitor.state_dict(),
             'epoch': self.epoch,
+            'scaler': self.scaler.state_dict(),
             'step': self.step,
             'step_by_last_epoch': self.step_by_last_epoch
         })
@@ -404,6 +411,10 @@ class Manager(object):
                 raise RuntimeError(str(re))
 
         self.scheduler.load_state_dict(checkpoint['scheduler'])
+
+        # FIXME: This is for old ver. compatible.
+        if 'scaler' in checkpoint:
+            self.scaler.load_state_dict(checkpoint['scaler'])
 
         # monitor is not required to load
         self.epoch = checkpoint['epoch']
@@ -485,11 +496,11 @@ def train(trainloader: ReadBatchDataLoader, args: argparse.Namespace, manager: M
                                   'print_freq', 'check_freq', 'rank', 'gpu', 'debug', 'amp', 'grad_norm'])
 
     model = manager.model
+    scaler = manager.scaler
     scheduler = manager.scheduler
     optimizer = scheduler.optimizer
     optimizer.zero_grad()
     use_amp = args.amp
-    scaler = GradScaler(enabled=use_amp)
     grad_norm = args.grad_norm
 
     world_size = dist.get_world_size()
