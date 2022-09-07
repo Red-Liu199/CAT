@@ -1,6 +1,6 @@
 {
     "decoder": {
-        "type": "LSTMPredictNet",
+        "type": "LSTM",
         "kwargs": {
             "hdim": 512,
             "with_head": true,
