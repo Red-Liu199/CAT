@@ -160,30 +160,31 @@ class AMTrainer(nn.Module):
 def build_beamdecoder(cfg: dict) -> CTCBeamDecoder:
     """
     beam_size: 
-    kenlm: 
-    tokenizer: 
+    num_classes:
+    kenlm:
     alpha: 
     beta:
     ...
     """
 
-    for s in ['beam_size', 'kenlm', 'tokenizer']:
-        assert s in cfg, f"'{s}' is required."
+    assert 'num_classes' in cfg, "number of vocab size is required."
 
-    tokenizer = tknz.load(cfg['tokenizer'])
-    labels = [str(i) for i in range(tokenizer.vocab_size)]
-    labels[0] = '<s>'
-    labels[1] = '<unk>'
-    del tokenizer
+    if 'kenlm' in cfg:
+        labels = [str(i) for i in range(cfg['num_classes'])]
+        labels[0] = '<s>'
+        labels[1] = '<unk>'
+    else:
+        labels = ['']*cfg['num_classes']
+
     return CTCBeamDecoder(
         labels=labels,
-        model_path=cfg['kenlm'],
-        beam_width=cfg['beam_size'],
+        model_path=cfg.get('kenlm', None),
+        beam_width=cfg.get('beam_size', 16),
         alpha=cfg.get('alpha', 1.),
         beta=cfg.get('beta', 0.),
         num_processes=6,
         log_probs_input=True,
-        is_token_based=True
+        is_token_based=('kenlm' in cfg)
     )
 
 
