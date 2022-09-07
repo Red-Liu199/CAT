@@ -34,16 +34,25 @@ if __name__ == "__main__":
     parser.add_argument("src_data", type=str, default="/data/librispeech/LibriSpeech",
                         help="Directory to source audio files, "
                         f"expect sub-dir: {', '.join(prepare_sets)} in the directory.")
+
+    parser.add_argument("--subset", type=str, nargs='*', default=None,
+                        choices=prepare_sets, help="Subset to be processes, default all.")
+    parser.add_argument("--speed-perturbation", type=float, dest='sp',
+                        nargs='*', default=[], help=f"Add speed perturbation to subset: {', '.join(prepare_sets)}")
     args = parser.parse_args()
 
+    process_sets = args.subset
+    if process_sets is None:
+        process_sets = prepare_sets
+
     assert os.path.isdir(args.src_data)
-    for _set in prepare_sets:
+    for _set in process_sets:
         assert os.path.isdir(os.path.join(args.src_data, _set)
                              ), f"subset '{_set}' not found in {args.src_data}"
 
     trans = {}      # type: Dict[str, List[Tuple[str, str]]]
     audios = {}     # type: Dict[str, List[Tuple[str, str]]]
-    for _set in prepare_sets:
+    for _set in process_sets:
         d_audio = os.path.join(args.src_data, _set)
         _audios = glob.glob(f"{d_audio}/**/**/*.flac")
         trans[_set] = []
@@ -66,9 +75,9 @@ if __name__ == "__main__":
 
     from cat.utils.data import data_prep
     data_prep.prepare_kaldi_feat(
-        subsets=prepare_sets,
+        subsets=process_sets,
         trans=trans,
         audios=audios,
         num_mel_bins=80,
-        speed_perturb=[]
+        speed_perturb=args.sp
     )

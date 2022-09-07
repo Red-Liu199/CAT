@@ -9,7 +9,11 @@
    bash local/data.sh -h
    ```
 
-- [ ] Prepare data with Kaldi.
+- Prepare data with Kaldi
+
+   ```bash
+   bash local/data_kaldi.sh -h
+   ```
 
 Source data info will be automatically stored at `data/metainfo.json`. You can run
 
