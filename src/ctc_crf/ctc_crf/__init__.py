@@ -95,21 +95,42 @@ class _CTC_CRF(Function):
 
 
 class CTC_CRF_LOSS(Module):
-    def __init__(self, lamb=0.1, size_average=True):
+    def __init__(self, lamb: float = 0.1, size_average: bool = True):
+        """
+        lamb (float): weight for auxiliary CTC loss, final loss = lamb * loss_ctc + loss_crf
+        size_average (bool): whether to do average over batch size dimension.
+        """
         super(CTC_CRF_LOSS, self).__init__()
         self.ctc_crf = _CTC_CRF.apply
         self.lamb = lamb
         self.size_average = size_average
 
-    def forward(self, logits, labels, input_lengths, label_lengths):
+    def forward(self, logits, labels, lx, ly) -> torch.FloatTensor:
+        """
+        logits (torch.FloatTensor): size (N, T, V), on GPU device.
+        labels (torch.IntTensor)  : size (\sum {Ui}, ) labels are flattened without paddings,
+            and should be placed on CPU.
+        lx (torch.IntTensor) : size (N, ), on CPU
+        ly (torch.IntTensor) : size (N, ), on CPU
+        """
         assert len(labels.size()) == 1
+        assert logits.dtype == torch.float, f"expect logits to be torch.float object, instead: {logits.dtype}"
+        assert labels.dtype == torch.int, f"expect labels to be torch.int object, instead: {labels.dtype}"
+        assert lx.dtype == torch.int, f"expect lx to be torch.int object, instead: {lx.dtype}"
+        assert ly.dtype == torch.int, f"expect ly to be torch.int object, instead: {ly.dtype}"
+
         _assert_no_grad(labels)
-        _assert_no_grad(input_lengths)
-        _assert_no_grad(label_lengths)
-        return self.ctc_crf(logits, labels, input_lengths, label_lengths, self.lamb, self.size_average)
+        _assert_no_grad(lx)
+        _assert_no_grad(ly)
+        return self.ctc_crf(logits, labels, lx, ly, self.lamb, self.size_average)
 
 
 class WARP_CTC_LOSS(Module):
+    """
+    This impl of CTC loss is not recommended.
+    Please consider using torch.nn.CTCLoss
+    """
+
     def __init__(self, size_average=True):
         super(WARP_CTC_LOSS, self).__init__()
         self.ctc = _WARP_CTC_GPU.apply
@@ -125,6 +146,11 @@ class WARP_CTC_LOSS(Module):
 
 class CRFContext:
     def __init__(self, den_lm: str, gpus: Union[int, List[int]]) -> None:
+        """
+        den_lm (str): path to the denominator LM. For how to prepare a den_lm, please refer to
+            cat/utils/tool/prep_den_lm.sh
+        gpus   (int, List[int]): Specify which GPU to be used.
+        """
         if not os.path.isfile(den_lm):
             raise RuntimeError(
                 f"Denominator LM model location is invalid: {den_lm}.")

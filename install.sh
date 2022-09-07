@@ -3,13 +3,27 @@
 # install the requirement packages
 set -e
 <<"PARSER"
-('-p', "--package", type=str, default=['all'], nargs='*',
+("package", type=str, default='cat', nargs='*',
     choices=['all', 'cat', 'ctcdecode', 'kenlm', 'ctc-crf', 'fst-decoder'],
     help="Select modules to be installed/uninstalled. Default: all.")
 ('-r', "--remove", action='store_true', default=False,
     help="Remove modules instead of installing.")
+('-f', "--force", action='store_true', default=False,
+    help="Force to install modules whatever they exist or not.")
 PARSER
 eval $(python cat/utils/parseopt.py $0 $*)
+
+function check_py_package() {
+    name=$1
+    [ -z $name ] && {
+        echo "error calling check_py_package()"
+        return 1
+    }
+
+    cd /tmp
+    python -c "import $name" >/dev/null 2>&1
+    return $?
+}
 
 function exc_install() {
     name=$1
@@ -19,38 +33,27 @@ function exc_install() {
     }
 
     case $name in
-    cat | all)
-        # change dir to a different one to test whether cat module has been installed.
-        $(cd egs && python -c "import cat" >/dev/null 2>&1) || {
-            python -m pip install -r requirements.txt || return 1
-
-            # check installation
-            $(cd egs && python -c "import cat") >/dev/null || return 1
-        }
-        ;;&
-    ctcdecode | all)
+    ctcdecode | cat | all)
         # install ctcdecode is annoying...
-        $(python -c "import ctcdecode" >/dev/null 2>&1) || {
-            [ ! -d src/ctcdecode ] &&
+        [[ $force == "False" && $(check_py_package ctcdecode) -eq 0 ]] || {
+            if [ ! -d src/ctcdecode ]; then
                 git clone --recursive git@github.com:maxwellzh/ctcdecode.git src/ctcdecode
+            else
+                cd src/ctcdecode
+                git pull --recurse-submodules
+                cd - >/dev/null
+            fi
 
             # ctcdecode doesn't support -e, but we want to install locally
             # ... so we cannot put it in requirements.txt
             python -m pip install src/ctcdecode || return 1
         }
         ;;&
-    kenlm | all)
+    kenlm | cat | all)
         # install kenlm
-        # kenlm is a denpendency of cat, so we first check the python installation
-        $(python -c "import kenlm" >/dev/null 2>&1) ||
+        # kenlm is a denpendency of cat, so we first check the python package installation
+        [[ $force == "False" && $(check_py_package kenlm) -eq 0 && -x src/bin/lmplz && -x src/bin/build_binary ]] || {
             python -m pip install -e git+ssh://git@github.com/kpu/kenlm.git#egg=kenlm
-
-        ! [[ -x "$(command -v src/bin/lmplz)" && -x "$(command -v src/bin/build_binary)" ]] && {
-            [ ! -d src/kenlm ] && {
-                echo "No 'src/kenlm' folder found, seems you haven't done previous installation."
-                echo "... Or you've installed the module somewhere else, then please copy the src/bin to current repo/src/bin"
-                return 1
-            }
 
             cd src/kenlm
             mkdir -p build && cd build
@@ -67,43 +70,56 @@ function exc_install() {
             ln -snf ../kenlm/build/bin/* ./ && cd ../../
         }
         ;;&
-    ctc-crf | all)
+    ctc-crf | cat | all)
         # install ctc-crf loss function
-        if [ $(command -v gcc-7) ]; then
-            export ver=7
-        elif [ $(command -v gcc-6) ]; then
-            export ver=6
-        else
-            echo "gcc-6/gcc-7 command not found. You may need to install one of them."
-            return 1
-        fi
+        [[ $force == "False" && $(check_py_package ctc_crf) -eq 0 ]] || {
+            if [ $(command -v gcc-7) ]; then
+                export ver=7
+            elif [ $(command -v gcc-6) ]; then
+                export ver=6
+            else
+                echo "gcc-6/gcc-7 command not found. You may need to install one of them."
+                return 1
+            fi
 
-        cd src/ctc_crf
-        CC=gcc-${ver} CXX=g++-${ver} make || return 1
-        # test the installation
-        echo "Test CTC-CRF installation:"
-        cd test && python main.py || return 1
-        cd ../../../
-        ;;
-    fst-decoder )
+            cd src/ctc_crf
+            CC=gcc-${ver} CXX=g++-${ver} make || return 1
+            # test the installation
+            echo "Test CTC-CRF installation:"
+            cd test && python main.py || return 1
+            cd ../../../
+        }
+        ;;&
+    cat | all)
+        # change dir to a different one to test whether cat module has been installed.
+        [[ $force == "False" && $(check_py_package cat) -eq 0 ]] || {
+            python -m pip install -r requirements.txt || return 1
+
+            # check installation
+            $(cd egs && python -c "import cat") >/dev/null || return 1
+        }
+        ;;&
+    fst-decoder | all)
         # install the fst decoder
         # test kaldi installation
-        [ -z $KALDI_ROOT ] && {
-            echo "\$KALDI_ROOT variable is not set, try"
-            echo "  KALDI_ROOT=<path to kaldi> $0 ..."
-            return 1
+        [[ $force == "False" && -x src/bin/latgen-faster ]] || {
+            [ -z $KALDI_ROOT ] && {
+                echo "\$KALDI_ROOT variable is not set, try"
+                echo "  KALDI_ROOT=<path to kaldi> $0 ..."
+                return 1
+            }
+            export KALDI_ROOT=$KALDI_ROOT
+            cd src/fst-decoder && make || return 1
+            [ ! -f $(command -v ./latgen-faster) ] && {
+                echo "It seems the installation is success, but executable"
+                echo "... binary 'latgen-faster' not found at src/fst-decoder."
+                return 1
+            }
+            cd - >/dev/null
+            [ ! -d src/bin ] && mkdir src/bin
+            cd src/bin/ && ln -snf ../fst-decoder/latgen-faster ./
+            cd - >/dev/null
         }
-        export KALDI_ROOT=$KALDI_ROOT
-        cd src/fst-decoder && make || return 1
-        [ ! -f $(command -v ./latgen-faster) ] && {
-            echo "It seems the installation is success, but executable"
-            echo "... binary 'latgen-faster' not found at src/fst-decoder."
-            return 1
-        }
-        cd - >/dev/null
-        [ ! -d src/bin ] && mkdir src/bin
-        cd src/bin/ && ln -snf ../fst-decoder/latgen-faster ./
-        cd - >/dev/null
         ;;
     *) ;;
     esac
@@ -120,9 +136,7 @@ function exc_rm() {
     cat | all)
         python -m pip uninstall -y cat
         python setup.py clean --all
-        # clean building dependencies
-        pip uninstall -y gather warp_rnnt webdataset kenlm
-        rm -rf src/{gather,warp-rnnt,webdataset,kenlm}
+        # FIXME: maybe we should clean building dependencies ?
         ;;&
     ctcdecode | all)
         python -m pip uninstall -y ctcdecode
@@ -149,7 +163,7 @@ function exc_rm() {
         make clean
         cd - >/dev/null
         ;;
-    fst-decoder )
+    fst-decoder)
         rm -if src/bin/latgen-faster
         rm -rf src/fst-decoder/latgen-faster
         ;;
@@ -191,8 +205,6 @@ if [ $remove == "False" ]; then
         echo "logging at $f_log" 1>&2
         exc_install $p >$f_log 2>&1 || {
             echo "failed to install $p, check the log at $f_log" 1>&2
-            echo "clean installation..." 1>&2
-            $0 $* -r >/dev/null 2>&1
             exit 1
         }
     done
