@@ -28,6 +28,7 @@ from .monitor import (
 )
 
 import os
+import sys
 import glob
 import time
 import shutil
@@ -532,8 +533,9 @@ def train(trainloader: ReadBatchDataLoader, args: argparse.Namespace, manager: M
                 cnt_step_update += 1
                 p_bar.update()
                 if args.verbose and args.gpu == 0:
-                    print(
-                        f"\rIn skipping steps: {cnt_step_update + manager.step_by_last_epoch}/{manager.step}", end='')
+                    sys.stderr.write(
+                        f"\rIn skipping steps: {cnt_step_update + manager.step_by_last_epoch}/{manager.step}")
+                    sys.stderr.flush()
             continue
 
         dist.all_reduce(is_quit, op=dist.ReduceOp.MAX)

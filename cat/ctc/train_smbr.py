@@ -59,12 +59,12 @@ class SMBRTrainer(AMTrainer):
 
         # get alignment seqs
         # (N, T, K) -> (N, K, T) -> (N*K, T)
-        pis = orin_pis.transpose(1, 2).contiguous().view(-1, T)
+        ysamples = orin_pis.transpose(1, 2).contiguous().view(-1, T)
 
-        # (N*K, T) -> (N*K, U)
+        # in-place modifed (N*K, T) -> (N*K, U)
         lx = lx.to(device=device, dtype=torch.int)
         ysamples, lsamples = ctc_align.align_(
-            pis,
+            ysamples,
             # (N, ) -> (N, 1) -> (N, K) -> (N*K, )
             lx.unsqueeze(1).repeat(1, K).contiguous().view(-1)
         )
@@ -76,7 +76,6 @@ class SMBRTrainer(AMTrainer):
         # (N, T, K) -> (N, K)
         q = q.sum(dim=1)
 
-        # count of error words
         ly = ly.to(device=device, dtype=torch.int)
         # (\sum Ui, ) -> [(U0, ), ...] -> (N, U) -> (N*K, U)
         yref = (coreutils.pad_list(torch.split(labels, ly.cpu().tolist()))
@@ -86,6 +85,7 @@ class SMBRTrainer(AMTrainer):
                 .view(N*K, -1)
                 )
 
+        # count of error words
         # dis: (N*K, 4) [ins, del, sub, len]
         dis = levenshtein_distance(
             ysamples,

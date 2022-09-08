@@ -1,6 +1,6 @@
 # Author: Huahuan Zheng (maxwellzh@outlook.com)
 #
-# Prepare the extra corpus from wenetspeech train-l
+# Fetch n lines from source corpus and exclude part of the source if needed.
 #
 import sys
 import os
@@ -10,11 +10,11 @@ import argparse
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("corpus", type=str,
-                        help="Path to the wenetspeech train-L text corpus.")
+                        help="Path to the source text corpus.")
     parser.add_argument("--exclude-corpus", type=str, dest="f_exc",
-                        help="Specify if you want to exclude part of the corpus, take first column as index.")
+                        help="Add this option if you want to exclude it from source corpus, take first column as index.")
     parser.add_argument("-n", "--num-lines", type=int,
-                        help="Number of lines to be prepared, if not specified, would take all of them.")
+                        help="Number of lines to be prepared, if not specified, would take all of them (after excluded).")
     args = parser.parse_args()
 
     if not os.path.isfile(args.corpus):
