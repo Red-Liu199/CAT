@@ -85,11 +85,11 @@ class SACRFTrainer(AMTrainer):
 
         # get alignment seqs
         # (N, T, K) -> (N, K, T) -> (N*K, T)
-        pis = orin_pis.transpose(1, 2).contiguous().view(-1, T)
+        ysamples = orin_pis.transpose(1, 2).contiguous().view(-1, T)
 
         # (N*K, T) -> (N*K, U)
         ysamples, lsamples = ctc_align.align_(
-            pis,
+            ysamples,
             # (N, ) -> (N, 1) -> (N, K) -> (N*K, )
             lx.unsqueeze(1).repeat(1, K).contiguous().view(-1)
         )
@@ -106,7 +106,7 @@ class SACRFTrainer(AMTrainer):
         p_y = self.attach['lm'].score(
             padded_targets,
             dummy_targets,
-            lsamples
+            lsamples+1
         ) * self.weights['lm_weight']
         # (N*K, ) -> (N, K)
         p_y = p_y.view(N, K)

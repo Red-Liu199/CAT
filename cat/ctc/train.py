@@ -115,7 +115,7 @@ class AMTrainer(nn.Module):
     @torch.no_grad()
     def get_wer(self, xs: torch.Tensor, ys: torch.Tensor, lx: torch.Tensor, ly: torch.Tensor):
         if self.attach['decoder'] is None:
-            raise RuntimeError
+            raise RuntimeError(f"{self.__class__.__name__}: self.attach['decoder'] is not initialized.")
 
         logits, lx = self.am(xs, lx)
         logits = logits.log_softmax(dim=-1)
