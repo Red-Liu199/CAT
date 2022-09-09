@@ -5,7 +5,7 @@
 # webdataset do not use 'pip install webdataset', that's outdated
 -e git+ssh://git@github.com/webdataset/webdataset.git@d7334016f44a03c4a385971aa835c4f460d3f30a#egg=webdataset
 # kenlm
--e git+ssh://git@github.com/kpu/kenlm.git#egg=kenlm
+# -e git+ssh://git@github.com/kpu/kenlm.git#egg=kenlm
 # cuda edit distance
 -e git+ssh://git@github.com/maxwellzh/pytorch-edit-distance.git#egg=torch_edit_distance
 # cuda ctc align
