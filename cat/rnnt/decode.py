@@ -218,7 +218,7 @@ def main_worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_nbest: m
 
 
 def build_model(args, device) -> Tuple[torch.nn.Module, Union[torch.nn.Module, None]]:
-    
+
     if isinstance(device, int):
         device = f'cuda:{device}'
     if args.unified:
@@ -254,7 +254,8 @@ def build_model(args, device) -> Tuple[torch.nn.Module, Union[torch.nn.Module, N
 def _parser():
     parser = coreutils.basic_trainer_parser(
         prog='RNN-Transducer decoder.',
-        training=False
+        training=False,
+        isddp=False
     )
 
     parser.add_argument("--lm-config", type=str, default=None,

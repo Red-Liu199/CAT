@@ -8,8 +8,8 @@ For other algorithm, check previous commits
 https://github.com/maxwellzh/Transducer-dev/blob/e711c3b5582d981afe40b8453a1f268025f8de9a/cat/rnnt/beam_search_transducer.py
 
 where there are:
-- vallina decoding (with prefix tree merge)
-- latency controlled decoding (with prefix tree merge)
+- vallina decoding (with prefix merge)
+- latency controlled decoding (with prefix merge)
 - alignment-length synchronous decoding
 
 Author: Huahuan Zhengh (maxwellzh@outlook.com)
@@ -49,7 +49,7 @@ class Hypothesis():
             self,
             pred: torch.LongTensor,
             log_prob: Union[torch.Tensor, float],
-            cache: Union[Dict[str, Union[AbsStates, torch.Tensor]], None],
+            cache: Dict[str, Union[AbsStates, torch.Tensor]],
             lm_score: Union[torch.Tensor, float] = 0.0) -> None:
 
         self._last_token = pred[-1:]
@@ -155,7 +155,7 @@ class PrefixCacheDict():
 # 4.[done] rename tn -> encoder
 
 
-class BeamSearcher():
+class BeamSearcher:
 
     def __init__(
         self,
@@ -171,13 +171,10 @@ class BeamSearcher():
         est_ilm: bool = False,
         ilm_weight: Optional[float] = 0.
     ):
-        super(BeamSearcher, self).__init__()
         assert blank_id == bos_id
 
         if alpha == 0.0:
             # NOTE: alpha = 0 will disable LM interation whatever beta is.
-            beta = None
-            alpha = None
             lm_module = None
 
         if lm_module is None:
@@ -201,8 +198,8 @@ class BeamSearcher():
         if ilm_weight == 0.0:
             self.est_ilm = False
 
-    def __call__(self, enc_out: torch.Tensor, frame_lens: Optional[torch.Tensor] = None) -> List[Tuple[List[List[int]], List[float], Union[None, List[float]]]]:
-        hypos = self.batching_rna(enc_out, frame_lens)
+    def __call__(self, enc_out: torch.Tensor, frame_lens: Optional[torch.Tensor] = None) -> List[Tuple[List[List[int]], List[float]]]:
+        hypos = self.batch_decode(enc_out, frame_lens)
 
         return [
             (
@@ -212,11 +209,11 @@ class BeamSearcher():
             for _hyps in hypos
         ]
 
-    def batching_rna(self, encoder_out: torch.Tensor, frame_lens: Optional[torch.Tensor] = None) -> List[List[Hypothesis]]:
+    def batch_decode(self, encoder_out: torch.Tensor, frame_lens: Optional[torch.Tensor] = None) -> List[List[Hypothesis]]:
         """
         An implementation of batched RNA decoding
 
-        encoder_out: (N, T, V)
+        encoder_out: (N, T, H)
         """
         use_lm = self.lm is not None
         if isinstance(self.predictor, LSTM):
