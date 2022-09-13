@@ -33,6 +33,11 @@ egs/[task]/exp/template
         "option-train": ...,
         "option-init": ...
     },
+    // environment settings, this is on top of all other settings.
+    "env": {
+        // for example, specify to use GPU0 and GPU1
+        "CUDA_VISIBLE_DEVICES": "0,1"
+    },
     // NN training related setting:
     "train": {
         "bin": ...          // any module with main() and _parser() function.
@@ -64,36 +69,29 @@ egs/[task]/exp/template
 
 ```
 {
-    // for ASR only, code: cat/shared/_specaug.py
+    // spec augument settings, for ASR only, code: cat/shared/specaug.py
     "specaug": {
         ...
     },
-    // required for CRF, optional for CTC, code: `build_model()` in cat/ctc/train.py
+    // trainer settings, optional for some tasks, code: `build_model()` function according to your hyper:train:bin script.
     "trainer": {
-        "use_crf": false,           // enable CRF loss or not, if false, following two options would be useless.
-        "lamb": 0.01,               // weight of CTC loss once enable CRF loss
-        "den-lm": "/path/to/den_lm" // location of denominator LM
         ...
     },
-    // required for RNN-T, code: class 'TransducerTrainer' in cat/rnnt/train.py
-    "transducer": {
-        ...
-    },
-    // required for RNN-T, code: cat/rnnt/joint.py
+    // joint net settings, required for RNN-T, code: cat/rnnt/joiner.py
     "joiner": {
-        "type": ...,   // can be any class derived from 'AbsJointNet' in cat/rnnt/joint.py
+        "type": ...,   // can be any class derived from 'AbsJointNet' in cat/rnnt/joiner.py
         "kwargs": {    // arguments according to 'type'
             ...
         }
     },
-    // required for ASR task, code: cat/shared/encoder.py
+    // audio encoder settings, required for ASR task, code: cat/shared/encoder.py
     "encoder": {
         "type": ...,   // can be any class derived from 'AbsEncoder' in cat/shared/encoder.py
         "kwargs": {    // arguments according to 'type'
             ...
         }
     },
-    // required for both RNN-T and LM, code: cat/shared/decoder.py 
+    // decoder settings, required for both RNN-T and LM tasks, code: cat/shared/decoder.py 
     "decoder": {
         "type": ...,   // can be any class derived from 'AbsDecoder' in cat/shared/decoder.py 
         "kwargs": {    // arguments according to 'type'

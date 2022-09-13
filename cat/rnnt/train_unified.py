@@ -69,9 +69,6 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
 class UnifiedTTrainer(TransducerTrainer):
     def __init__(
         self,
-        encoder: AbsEncoder,
-        predictor: AbsDecoder,
-        joiner: AbsJointNet,
         # chunk related parameters
         # configure according to the encoder
         downsampling_ratio: int,
@@ -83,8 +80,8 @@ class UnifiedTTrainer(TransducerTrainer):
         mel_dim: int = 80,
         simu: bool = False,
         simu_loss_weight: float = 1.,
-            *args, **kwargs) -> None:
-        super().__init__(encoder, predictor, joiner, *args, **kwargs)
+            **kwargs) -> None:
+        super().__init__(**kwargs)
 
         self.simu = simu
         if self.simu:
@@ -346,20 +343,18 @@ def custom_train(*args):
 def build_model(cfg: dict, args: argparse.Namespace, dist: bool = True) -> UnifiedTTrainer:
     """
     cfg:
-        chunking:
-            # chunk related arguments
-        # basic transducer config
+        trainer:
+            please refer to UnifiedTTrainer.__init__() for support options
         ...
 
     """
 
     enc, pred, join = rnnt_builder(cfg, dist=False, wrapped=False)
+    cfg['trainer']['encoder'] = enc
+    cfg['trainer']['predictor'] = pred
+    cfg['trainer']['joiner'] = join
     model = UnifiedTTrainer(
-        encoder=enc,
-        predictor=pred,
-        joiner=join,
-        **cfg.get('chunking', {}),
-        **cfg['transducer']
+        **cfg['trainer']
     )
 
     if not dist:

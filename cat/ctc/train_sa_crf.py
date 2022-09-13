@@ -17,6 +17,7 @@ from ..shared.decoder import AbsDecoder
 from ..rnnt.train_nce import custom_evaluate
 
 import ctc_align
+import gather
 import argparse
 from typing import *
 
@@ -39,6 +40,8 @@ class SACRFTrainer(AMTrainer):
             lm_weight: float = 1.0,
             ctc_weight: float = 0.,
             n_samples: int = 256,
+            # compute gradients via mapped y seqs by CTC loss, instead of computing probs of pi seqs.
+            compute_gradient_via_y: bool = False,
             **kwargs):
         super().__init__(**kwargs)
         assert isinstance(n_samples, int) and n_samples > 0
@@ -46,6 +49,7 @@ class SACRFTrainer(AMTrainer):
         assert isinstance(ctc_weight, (int, float))
         assert not self.is_crf, f"sa-crf mode is conflict with crf"
 
+        self._compute_y_grad = compute_gradient_via_y
         self.attach['lm'] = lm
         self.weights = {
             'lm_weight': lm_weight,
@@ -93,7 +97,6 @@ class SACRFTrainer(AMTrainer):
             # (N, ) -> (N, 1) -> (N, K) -> (N*K, )
             lx.unsqueeze(1).repeat(1, K).contiguous().view(-1)
         )
-
         ysamples = ysamples[:, :lsamples.max()]
         ysamples *= torch.arange(ysamples.size(1), device=device)[
             None, :] < lsamples[:, None]
@@ -111,12 +114,25 @@ class SACRFTrainer(AMTrainer):
         # (N*K, ) -> (N, K)
         p_y = p_y.view(N, K)
 
-        # log Q(pi|X): (N, T, K)
-        q = torch.gather(logits, dim=-1, index=orin_pis)
-        q *= (torch.arange(q.size(1), device=device)[
-            None, :] < lx[:, None])[:, :, None]
-        # (N, T, K) -> (N, K)
-        q = q.sum(dim=1)
+        if self._compute_y_grad:
+            # cal q from CTC: (N*K, )
+            # fmt: off
+            q = -self.criterion(
+                # (N, T, V) -> (T, N, V) -> (T, N, 1, V) -> (T, N, K, V) -> (T, N*K, V)
+                logits.transpose(0,1).unsqueeze(2).expand(-1, -1, K, -1).contiguous().view(T, N*K, -1),
+                gather.cat(ysamples, lsamples).to(device='cpu'),
+                # (N, ) -> (N, 1) -> (N, K) -> (N*K, )
+                lx.unsqueeze(1).repeat(1, K).contiguous().view(-1),
+                lsamples
+            ).view(N, K)
+            # fmt:on
+        else:
+            # log Q(pi|X): (N, T, K)
+            q = torch.gather(logits, dim=-1, index=orin_pis)
+            q *= (torch.arange(q.size(1), device=device)[
+                None, :] < lx[:, None])[:, :, None]
+            # (N, T, K) -> (N, K)
+            q = q.sum(dim=1)
 
         # estimate = (P(Y_0)*log Q(pi_0|X)+...) / (P(Y_0)+...)
         # estimate = (p_y.exp()*q).sum(dim=1) / p_y.exp().sum(dim=1)

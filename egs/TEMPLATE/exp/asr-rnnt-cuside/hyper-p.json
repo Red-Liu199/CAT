@@ -19,6 +19,9 @@
         "|V|": 8,
         "file": "exp/asr-rnnt-cuside/tokenizer.tknz"
     },
+    "env": {
+        "CUDA_VISIBLE_DEVICES": "0"
+    },
     "train": {
         "bin": "cat.rnnt.train_unified",
         "option": {
@@ -35,7 +38,7 @@
                 "streaming": true,
                 "beam_size": 16,
                 "cpu": true,
-                "nj": 40
+                "nj": 8
             }
         },
         "er": {

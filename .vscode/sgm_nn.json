@@ -1,39 +1,10 @@
 {
     "type": "object",
     "properties": {
-        "transducer": {
+        "trainer": {
             "type": "object",
-            "properties": {
-                "encoder": {},
-                "predictor": {},
-                "joiner": {},
-                "compact": {
-                    "type": "boolean",
-                    "default": false
-                },
-                "ilme_weight": {},
-                "predictor_mask_range": {
-                    "type": "number",
-                    "default": 0.1
-                },
-                "num_predictor_mask": {
-                    "type": "number",
-                    "default": -1
-                },
-                "bos_id": {
-                    "type": "number",
-                    "default": 0
-                },
-                "sampled_softmax": {
-                    "type": "boolean",
-                    "default": false
-                },
-                "sampled_softmax_uniform_ratio": {
-                    "type": "number",
-                    "default": 0.0
-                }
-            },
-            "description": "Configuration of Transducer."
+            "properties": {},
+            "description": "Please refer to build_model() function in hyper:train:bin for configuring help."
         },
         "encoder": {
             "type": "object",

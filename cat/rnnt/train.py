@@ -202,7 +202,17 @@ def build_model(
         args: Optional[Union[argparse.Namespace, dict]] = None,
         dist: bool = True,
         wrapped: bool = True) -> Union[nn.parallel.DistributedDataParallel, TransducerTrainer, Tuple[tn_zoo.AbsEncoder, pn_zoo.AbsDecoder, joiner_zoo.AbsJointNet]]:
-
+    """
+    cfg:
+        trainer:
+            please refer to TransducerTrainer.__init__() for support arguments
+        joiner:
+            ...
+        encoder:
+            ...
+        decoder:
+            ...
+    """
     if args is not None:
         if isinstance(args, argparse.Namespace):
             args = vars(args)
@@ -270,10 +280,7 @@ def build_model(
         return encoder, predictor, joiner
 
     # for compatible of old settings
-    if 'transducer' in cfg:
-        transducer_kwargs = cfg["transducer"]     # type: dict
-    else:
-        transducer_kwargs = {}
+    transducer_kwargs = cfg.get('trainer', {})
 
     model = TransducerTrainer(
         encoder=encoder,

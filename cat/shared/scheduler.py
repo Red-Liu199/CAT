@@ -350,6 +350,7 @@ class SchedulerEarlyStopWithWarmup(SchedulerEarlyStop):
 class SchedulerNoam(SchedulerFixedStop):
     """
     The standard scheduler of "Attention is all you need"
+
     peak learning rate = peak_factor / sqrt(warmup_step * dim_model)
     """
 
@@ -381,6 +382,7 @@ class SchedulerNoam(SchedulerFixedStop):
 class SchedulerNoamEarlyStop(SchedulerEarlyStop):
     """
     Linear warmup by step + decay by step + early stop by iteration
+
     peak lr = peak_factor / sqrt(dim_model * warmup_step)
     """
 

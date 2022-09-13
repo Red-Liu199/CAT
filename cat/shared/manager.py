@@ -343,7 +343,7 @@ class Manager(object):
                     self.monitor.export()
 
                 coreutils.distprint(
-                    f" Epoch: {self.epoch} | Step: {self.step} | Loss: {metrics:.3e} | LR: {self.scheduler.lr_cur:.3e}",
+                    f"Epoch: {self.epoch:<3} | Step: {self.step} | Loss: {metrics:.3e} | LR: {self.scheduler.lr_cur:.3e}",
                     args.gpu)
                 if state == State.TERMINATED:
                     # backup the last checkpoint
@@ -515,13 +515,16 @@ def train(trainloader: ReadBatchDataLoader, args: argparse.Namespace, manager: M
     cnt_step_update = 0
     is_quit = torch.tensor(0, dtype=torch.bool, device=args.gpu)
 
-    p_bar = tqdm(
-        desc=f'Epoch: {manager.epoch} | train',
-        unit='batch',
-        total=args.n_steps,
-        disable=(args.gpu != 0 or args.verbose),
-        leave=False
-    )
+    def get_progress_bar():
+        return tqdm(
+            desc=f'Epoch: {manager.epoch} | train',
+            unit='batch',
+            total=(args.n_steps if args.check_freq == -1 else args.check_freq),
+            disable=(args.gpu != 0 or args.verbose),
+            leave=False
+        )
+    # when check_freq > epoch size, the progress bar would display in mistake.
+    p_bar = get_progress_bar()
     for i, (bs, minibatch) in enumerate(trainloader):
         # since the gradient fold could be > 1, we need to accumulate the time
         if args.verbose:
@@ -591,7 +594,9 @@ def train(trainloader: ReadBatchDataLoader, args: argparse.Namespace, manager: M
                 t_last_step = time.time()
 
             if args.check_freq != -1 and (manager.step % args.check_freq) == 0:
+                p_bar.close()
                 yield None
+                p_bar = get_progress_bar()
 
             # reset accumulated loss
             accum_loss = 0.

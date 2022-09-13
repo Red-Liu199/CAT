@@ -19,6 +19,9 @@
         "|V|": 8,
         "file": "exp/asr-rnnt/tokenizer.tknz"
     },
+    "env": {
+        "CUDA_VISIBLE_DEVICES": "0"
+    },
     "train": {
         "bin": "cat.rnnt.train",
         "option": {

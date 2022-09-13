@@ -11,7 +11,6 @@ from cat.shared import tokenizer as tknz
 from cat.shared.scheduler import Scheduler
 from cat.rnnt import joiner as joiner_zoo
 from cat.rnnt.joiner import AbsJointNet
-from cat.rnnt.train import TransducerTrainer
 from cat.shared._constants import (
     SCHEMA_NN_CONFIG,
     SCHEMA_HYPER_CONFIG,
@@ -198,9 +197,8 @@ schema = gen_object(dict, desc="Settings of NN training.")
 schema['required'] = ['scheduler']
 
 # Transducer
-processing = gen_object(dict, desc="Configuration of Transducer.")
-module_processing(processing, [TransducerTrainer])
-add_property(schema, {'transducer': processing})
+add_property(schema, {'trainer': gen_object(
+    dict, desc="Please refer to build_model() function in hyper:train:bin for configuring help.")})
 
 
 # Encoder

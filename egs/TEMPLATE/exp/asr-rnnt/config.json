@@ -1,5 +1,5 @@
 {
-    "transducer": {
+    "trainer": {
         "compact": true
     },
     "joiner": {

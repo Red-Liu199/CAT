@@ -1550,35 +1550,6 @@
                                         "type": "object",
                                         "description": "RNN-Transducer decoder. options",
                                         "properties": {
-                                            "workers": {
-                                                "type": "number",
-                                                "description": "number of data loading workers (default: 1)",
-                                                "default": 1
-                                            },
-                                            "rank": {
-                                                "type": "number",
-                                                "description": "node rank for distributed training",
-                                                "default": 0
-                                            },
-                                            "dist_url": {
-                                                "type": "string",
-                                                "description": "url used to set up distributed training",
-                                                "default": "tcp://localhost:13457"
-                                            },
-                                            "dist_backend": {
-                                                "type": "string",
-                                                "description": "distributed backend",
-                                                "default": "nccl"
-                                            },
-                                            "world_size": {
-                                                "type": "number",
-                                                "description": "number of nodes for distributed training",
-                                                "default": 1
-                                            },
-                                            "gpu": {
-                                                "type": "number",
-                                                "description": "GPU id to use."
-                                            },
                                             "config": {
                                                 "type": "string",
                                                 "description": "Path to configuration file of backbone."

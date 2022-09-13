@@ -72,17 +72,14 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
 class NCETransducerTrainer(TransducerTrainer):
     def __init__(
             self,
-            encoder: AbsEncoder,
-            predictor: AbsDecoder,
-            joiner: AbsJointNet,
             ext_lm: AbsDecoder,
             beamdecoder: RNNTDecoder,
             ilm_weight: float,
             elm_weight: float,
             mle_weight: Optional[float] = 0.,
             trainable_weight: bool = False,
-            *args, **kwargs) -> None:
-        super().__init__(encoder, predictor, joiner, *args, **kwargs)
+            **kwargs) -> None:
+        super().__init__(*args, **kwargs)
 
         assert isinstance(ext_lm, AbsDecoder)
         assert isinstance(beamdecoder, RNNTDecoder)
@@ -413,40 +410,38 @@ def custom_evaluate(testloader, args: argparse.Namespace, manager: Manager) -> f
 def build_model(cfg: dict, args: argparse.Namespace, dist: bool = True) -> NCETransducerTrainer:
     """
     cfg:
-        nce:
+        trainer:
             init-n-model: # the noise model shares the encoder of training one.
                 check:
-            init-elm:
+            init-elm:     # settings for the ELM
                 config:
                 check:
-            decoder:
+            decoder:      # settings for the beam search decoder 
                 ...
-            trainer:
-                ...
-        # basic transducer config
+            ...     # other settings
         ...
 
     """
-    assert 'nce' in cfg, f"missing 'nce' in field:"
 
     # initialize noise model.
     dummy_trainer = rnnt_builder(cfg, dist=False, wrapped=True)
     coreutils.load_checkpoint(
-        dummy_trainer, cfg['nce']['init-n-model']['check'])
+        dummy_trainer, cfg['trainer']['init-n-model']['check'])
     dummy_trainer.eval()
     dummy_trainer.requires_grad_(False)
     beam_searcher = RNNTDecoder(
         predictor=dummy_trainer.predictor,
         joiner=dummy_trainer.joiner,
-        **cfg['nce']['decoder']
+        **cfg['trainer']['decoder']
     )
     del dummy_trainer
 
     # initialize external lm
     dummy_lm = lm_builder(coreutils.readjson(
-        cfg['nce']['init-elm']['config']), dist=False)
-    if cfg['nce']['init-elm'].get('check', None) is not None:
-        coreutils.load_checkpoint(dummy_lm, cfg['nce']['init-elm']['check'])
+        cfg['trainer']['init-elm']['config']), dist=False)
+    if cfg['trainer']['init-elm'].get('check', None) is not None:
+        coreutils.load_checkpoint(
+            dummy_lm, cfg['trainer']['init-elm']['check'])
     elm = dummy_lm.lm
     elm.eval()
     elm.requires_grad_(False)
@@ -454,14 +449,16 @@ def build_model(cfg: dict, args: argparse.Namespace, dist: bool = True) -> NCETr
 
     # initialize the real model
     enc, pred, join = rnnt_builder(cfg, dist=False, wrapped=False)
+    cfg['trainer'].update({
+        'encoder': enc,
+        'predictor': pred,
+        'joiner': join
+    })
+
     model = NCETransducerTrainer(
-        encoder=enc,
-        predictor=pred,
-        joiner=join,
         ext_lm=elm,
         beamdecoder=beam_searcher,
-        **cfg['nce']['trainer'],
-        **cfg['transducer']
+        **cfg['trainer']
     )
 
     if not dist:

@@ -23,11 +23,11 @@ eval $(python utils/parseopt.py $0 $*)
     echo "No such transcription file: '$trans'"
     exit 1
 }
-! [[ -d $KALDI_ROOT && -d $KALDI_ROOT/egs/wsj/s5 ]] && (
+[[ -d $KALDI_ROOT && -d $KALDI_ROOT/egs/wsj/s5 ]] || {
     echo "kaldi tool at '$KALDI_ROOT' not installed. You could specify it with:"
     echo "KALDI_ROOT=... $0 ..."
     exit 1
-)
+}
 
 mkdir -p $dest
 export dest=$(readlink -f $dest)
