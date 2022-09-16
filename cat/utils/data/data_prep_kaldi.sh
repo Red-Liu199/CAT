@@ -47,7 +47,8 @@ cd $KALDI_ROOT/egs/wsj/s5 && . ./path.sh
     all_sp_dir=""
     for dir in $data_dir; do
         sp_dir="$(echo $dir | sed -e 's/[/]$//g')-3sp"
-        utils/data/perturb_data_dir_speed_3way.sh $dir $sp_dir
+        [ ! -f $sp_dir/feats.scp ] &&
+            utils/data/perturb_data_dir_speed_3way.sh $dir $sp_dir
         all_sp_dir="$all_sp_dir $sp_dir"
     done
     data_dir="$data_dir $all_sp_dir"
