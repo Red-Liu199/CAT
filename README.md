@@ -10,7 +10,7 @@
    - PyTorch: `>=1.9.0` is required. [Installation guide from PyTorch](https://pytorch.org/get-started/locally/#start-locally)
    - [Kaldi](https://github.com/kaldi-asr/kaldi) **\[optional\]**: used for speech data preparation and some FST-related operations. This is optional for most of the basic functions. Only if you want to conduct [CTC-CRF](egs/TEMPLATE/exp/asr-ctc-crf) training, this is required.
       
-      Besides Kaldi, you could use `torchaudio` for feature extraction. See `egs/[task]/local/data.sh` for prepare data with `torchaudio`.
+      Besides Kaldi, you could use `torchaudio` for feature extraction. See `egs/[task]/local/data.sh` for preparing data with `torchaudio`.
 
 2. Clone and install Transducer packages
 
