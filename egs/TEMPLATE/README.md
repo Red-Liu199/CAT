@@ -69,7 +69,9 @@ tokenizer training -> data packing -> nn training -> inference
 
 Where for ASR pipeline, the inference is the stage of decoding, and that for LM is the stage of calculating perplexity. Pipeline for n-gram training is kind of special, since there is no NN model and all operations are conduct on CPUs. Therefore, the "nn training" stage for n-gram pipeline is replaced by KenLM (the n-gram training tool) `lmplz` trainining.
 
-Note that data prepare is not included in standard pipelines. It's your duty to prepare the data in proper format in my design. I recommend to implement this part in the file `local/data.sh` (in fact, I've already made that for several recipes), so others can easily reproduce your experiments.
+Note that data prepare is not included in standard pipelines. It's your duty to prepare the data in proper format in my design. I recommend to implement this part in the file `local/data.sh` (in fact, I've already made that for several recipes), so others can easily reproduce your experiments. Here is an illustration of RNN-T pipeline:
+
+![pipeline-asr](../../assets/pipeline_rnnt.png)
 
 **What is done at each stage**
 
