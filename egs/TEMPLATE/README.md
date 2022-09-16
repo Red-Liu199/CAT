@@ -71,7 +71,9 @@ Where for ASR pipeline, the inference is the stage of decoding, and that for LM 
 
 Note that data prepare is not included in standard pipelines. It's your duty to prepare the data in proper format in my design. I recommend to implement this part in the file `local/data.sh` (in fact, I've already made that for several recipes), so others can easily reproduce your experiments. Here is an illustration of RNN-T pipeline:
 
-![pipeline-asr](../../assets/pipeline_rnnt.png)
+<p align="center">
+   <img src="../../assets/pipeline_rnnt.png" width=480px/>
+</p>
 
 **What is done at each stage**
 
