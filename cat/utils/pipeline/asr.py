@@ -136,7 +136,7 @@ class TextUtterances:
         checkExist('f', files)
         # [(uid, seek, file_id), ...]
         self._seeks = []    # type: List[Tuple[str, int, int]]
-        self._files = sorted(files)
+        self._files = files
 
         for idf, f in enumerate(files):
             with open(f, 'r') as fi:
@@ -164,7 +164,8 @@ class TextUtterances:
                 opened[idf] = open(self._files[idf], 'r')
 
             opened[idf].seek(loc)
-            cont = opened[idf].readline().split(maxsplit=1)
+            cont = opened[idf].readline()[:-1].split(maxsplit=1)
+
             if len(cont) == 1:
                 yield (uid, '')
             else:

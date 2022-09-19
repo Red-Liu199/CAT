@@ -17,7 +17,7 @@ from torch.utils.data import DataLoader, Dataset
 __all__ = [
     "Processor", "ReadProcessor", "ResampleProcessor",
     "SpeedPerturbationProcessor", "FBankProcessor", "CMVNProcessor",
-    "AudioData"
+    "AudioData", "prepare_kaldi_feat"
 ]
 
 
@@ -75,16 +75,25 @@ class ReadProcessor(Processor):
 class SpeedPerturbationProcessor(Processor):
     """Processor wrapper to do speed perturbation"""
 
-    def __init__(self, factor: float) -> None:
+    def __init__(self, factor: float, sample_rate: int) -> None:
         super().__init__()
-        assert isinstance(factor, float) or isinstance(factor, int)
+        assert isinstance(factor, (float, int))
         assert factor > 0
+        assert isinstance(sample_rate, int)
+        assert sample_rate > 0
 
-        self._sp_factor = factor
+        # see https://pytorch.org/audio/stable/sox_effects.html#torchaudio.sox_effects.apply_effects_tensor
+        self.effects = [
+            ['speed', f'{factor:.5f}'],
+            ['rate', str(sample_rate)]
+        ]
+        self._rate = sample_rate
 
-    def _process_fn(self, file: str) -> torch.Tensor:
-        return torchaudio.sox_effects.apply_effects_file(
-            file, [['speed', f'{self._sp_factor:.5f}']])[0]
+    def _process_fn(self, wave: torch.Tensor) -> torch.Tensor:
+        return torchaudio.sox_effects.apply_effects_tensor(
+            wave,
+            sample_rate=self._rate,
+            effects=self.effects)[0]
 
 
 class FBankProcessor(Processor):
@@ -175,34 +184,65 @@ class AudioData(Dataset):
         return uid, self._processor(f_audio)
 
 
-def process_feat_as_kaldi(raw_audios: List[Tuple[str, str]], f_scp: str, f_ark: str, processor: Processor, desc: str = ''):
+def _process_feat_as_kaldi(raw_audios: List[Tuple[str, str]], f_scp: str, f_ark: str, processor: Processor, uidsuffix: str = '', desc: str = ''):
     dataloader = DataLoader(
         AudioData(processor=processor, audio_list=raw_audios),
         # if you have a high speed disk, try increase num_worker to fasten
         # the dataloding
         shuffle=False, num_workers=16, batch_size=None
     )
+    f_ark = os.path.abspath(f_ark)
     with kaldiio.WriteHelper(f'ark,scp:{f_ark},{f_scp}') as writer:
         for uid, feat in tqdm(dataloader, desc=desc):
-            writer(uid, feat.numpy())
+            writer(uid+uidsuffix, feat.numpy())
 
 
 def prepare_kaldi_feat(
+        # subsets to be prepared, e.g. ['train', 'dev', 'test']
         subsets: List[str],
-        trans: Dict[str, List[Tuple[str, str]]],
-        audios: Dict[str, List[Tuple[str, str]]],
+        # transcript of all subsets, {'train': [(UID0, 'a b c'), ...], ...}
+        trans: Union[Dict[str, List[Tuple[str, str]]], List[str]],
+        # audio paths of all subsets, {'train': [(UID0, 'path/to/uid0.wav'), ...], ...}
+        audios: Union[Dict[str, List[Tuple[str, str]]], List[str]],
         num_mel_bins: int = 80,
         apply_cmvn: bool = False,
         sample_frequency: Optional[int] = None,
         speed_perturb: Optional[List[float]] = [],
         fmt_scp: str = "data/src/{}/feats.scp",
         fmt_trans: str = "data/src/{}/text",
-        fmt_ark: str = "data/src/.arks/{}.ark"):
+        fmt_ark: str = "data/src/.arks/{}.ark",
+        # read from kaldi-like meta info, i.e., read from text & wav.scp
+        # in this case, input argument `trans` and `audios`
+        # ... should be lists of path-like objects directing to the files.
+        read_from_extracted_meta: bool = False):
 
-    subsets = list(set(subsets))
-    for _set in subsets:
-        assert _set in trans
-        assert _set in audios
+    if read_from_extracted_meta:
+        assert len(trans) == len(subsets)
+        assert len(audios) == len(subsets)
+
+        trans_d = {}
+        audios_d = {}
+        for _set, f_text, f_wav in zip(subsets, trans, audios):
+            """NOTE: It's your duty to assure uids in text and wav.scp are sorted."""
+            lmeta = []
+            with open(f_text, 'r') as fit:
+                for line in fit:
+                    lmeta.append(line[:-1].split(sep='\t', maxsplit=1))
+            trans_d[_set] = lmeta
+            lmeta = []
+            with open(f_wav, 'r') as fia:
+                for line in fia:
+                    lmeta.append(line[:-1].split(sep='\t', maxsplit=1))
+            audios_d[_set] = lmeta
+
+        trans = trans_d
+        audios = audios_d
+        del trans_d, audios_d
+    else:
+        subsets = list(set(subsets))
+        for _set in subsets:
+            assert _set in trans
+            assert _set in audios
 
     if sample_frequency is None:
         sample_frequency = torchaudio.load(audios[subsets[0]][0][1])[1]
@@ -211,7 +251,6 @@ def prepare_kaldi_feat(
     if apply_cmvn:
         fbank_processor = fbank_processor.append(CMVNProcessor())
     audio2fbank = ReadProcessor().append(fbank_processor)
-    process_fn = process_feat_as_kaldi
 
     for _set in subsets:
         f_trans = fmt_trans.format(_set)
@@ -236,21 +275,31 @@ def prepare_kaldi_feat(
                 sys.stderr.write(
                     f"warning: scp file {f_scp} exists, skip.\n")
             else:
-                process_fn(audios[_set], f_scp, f_ark, audio2fbank, desc=_set)
+                _process_feat_as_kaldi(
+                    audios[_set], f_scp, f_ark, audio2fbank, desc=_set)
         except Exception as e:
             if os.path.isfile(f_scp):
                 os.remove(f_scp)
             if os.path.isfile(f_ark):
                 os.remove(f_ark)
-            if os.path.isfile(f_trans):
-                os.remove(f_ark)
+            if not read_from_extracted_meta and os.path.isfile(f_trans):
+                os.remove(f_trans)
             raise RuntimeError(str(e))
 
     for _factor in speed_perturb:
         if _factor == 1.0:
             continue
-        sp_processor = SpeedPerturbationProcessor(
-            _factor).append(fbank_processor)
+        sp_processor = (
+            ReadProcessor()
+            .append(
+                SpeedPerturbationProcessor(
+                    _factor,
+                    sample_frequency
+                )
+            )
+            .append(fbank_processor)
+        )
+        spsuffix = f"#sp{_factor}"
         for _set in subsets:
             try:
                 f_trans = fmt_trans.format(f"{_set}-sp{_factor}")
@@ -266,19 +315,22 @@ def prepare_kaldi_feat(
                 else:
                     with open(f_trans, 'w') as fo:
                         for uid, utt in trans[_set]:
-                            fo.write(f"{uid}#sp{_factor}\t{utt}\n")
+                            fo.write(f"{uid}{spsuffix}\t{utt}\n")
+
                 # write feats
                 if os.path.isfile(f_scp):
                     sys.stderr.write(
                         f"warning: scp file {f_scp} exists, skip.\n")
                 else:
-                    process_fn(audios[_set], f_scp, f_ark,
-                               sp_processor, desc=f"{_set} sp {_factor}")
+                    _process_feat_as_kaldi(
+                        audios[_set], f_scp, f_ark,
+                        sp_processor, uidsuffix=spsuffix,
+                        desc=f"{_set} sp {_factor}")
             except Exception as e:
                 if os.path.isfile(f_scp):
                     os.remove(f_scp)
                 if os.path.isfile(f_ark):
                     os.remove(f_ark)
-                if os.path.isfile(f_trans):
-                    os.remove(f_ark)
+                if not read_from_extracted_meta and os.path.isfile(f_trans):
+                    os.remove(f_trans)
                 raise RuntimeError(str(e))
