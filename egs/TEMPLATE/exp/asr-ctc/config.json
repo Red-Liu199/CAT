@@ -1,4 +1,10 @@
 {
+    "trainer": {
+        "decoder": {
+            "beam_size": 16,
+            "num_classes": 4
+        }
+    },
     "encoder": {
         "type": "LSTM",
         "kwargs": {
