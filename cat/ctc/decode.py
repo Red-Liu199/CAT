@@ -1,5 +1,8 @@
 """CTC decode module
 
+NOTE (Huahuan):
+    I deprecate the batch decoding function for bs=1 gives best RTF.
+    Currently, bs=1 is hard-coded.
 Derived from
 https://github.com/parlance/ctcdecode
 """
@@ -103,9 +106,8 @@ def datawriter(args, q: mp.Queue):
                 continue
             key, content = nbestlist
             nbest[key] = content
-            del nbestlist
-
             fo.write(f"{key}\t{content[0][1]}\n")
+            del nbestlist
 
     with open(args.output_prefix+'.nbest', 'wb') as fo:
         pickle.dump(nbest, fo)
@@ -119,18 +121,18 @@ def worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_out: mp.Queue
         # w/o LM, labels won't be used in decoding.
         labels = [''] * tokenizer.vocab_size
         searcher = CTCBeamDecoder(
-            labels, beam_width=args.beam_size, num_processes=args.thread_per_woker)
+            labels, beam_width=args.beam_size, log_probs_input=True, num_processes=args.thread_per_woker)
     else:
         assert os.path.isfile(
             args.lm_path), f"--lm-path={args.lm_path} is not a valid file."
-        if pid == 0:
-            print(
-                "warning: ctc decoding with an ext. LM assumes <s> -> 0 and <unk> -> 1.")
+
+        # NOTE: ctc decoding with an ext. LM assumes <s> -> 0 and <unk> -> 1
         labels = ['<s>', '<unk>'] + [str(i)
                                      for i in range(2, tokenizer.vocab_size)]
         searcher = CTCBeamDecoder(
             labels, model_path=args.lm_path, alpha=args.alpha, beta=args.beta,
-            beam_width=args.beam_size, num_processes=args.thread_per_woker, is_token_based=True)
+            beam_width=args.beam_size, num_processes=args.thread_per_woker,
+            log_probs_input=True, is_token_based=True)
 
     # {'uid': {0: (-10.0, 'a b c'), 1: (-12.5, 'a b c d')}}
     nbest = {}  # type: Dict[str, Dict[int, Tuple[float, str]]]
@@ -139,12 +141,12 @@ def worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_out: mp.Queue
             batch = q_data.get(block=True)
             if batch is None:
                 break
-            key, x, x_lens = batch
-            assert len(key) == 1, "Batch size > 1 is not currently support."
+            key, x, x_len = batch
             key = key[0]
-            probs = torch.softmax(model(x, x_lens)[0], dim=-1)
+            # beam decoder conducts the softmax internally
+            # probs = torch.softmax(logits, dim=-1)
             beam_results, beam_scores, _, out_lens = searcher.decode(
-                probs)
+                *model(x, x_len))
             # make it in decending order
             # -log(p) -> log(p)
             beam_scores = -beam_scores

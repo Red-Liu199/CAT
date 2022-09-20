@@ -315,8 +315,11 @@ class Manager(object):
             if self.step == 0 and not self.DEBUG:
                 # get the initialized perf. before training start
                 self.model.eval()
-                self.evaluate(self.valloader, args, self)
+                metrics = self.evaluate(self.valloader, args, self)
                 self.model.train()
+                coreutils.distprint(
+                    f"Epoch: {self.epoch:<3} | Step: {self.step} | Eval metric: {metrics:.3e} | LR: {self.scheduler.lr_cur:.3e}",
+                    args.gpu)
 
             for _ in self.train(self.trainloader, args, self):
                 self.model.eval()
@@ -343,7 +346,7 @@ class Manager(object):
                     self.monitor.export()
 
                 coreutils.distprint(
-                    f"Epoch: {self.epoch:<3} | Step: {self.step} | Loss: {metrics:.3e} | LR: {self.scheduler.lr_cur:.3e}",
+                    f"Epoch: {self.epoch:<3} | Step: {self.step} | Eval metric: {metrics:.3e} | LR: {self.scheduler.lr_cur:.3e}",
                     args.gpu)
                 if state == State.TERMINATED:
                     # backup the last checkpoint

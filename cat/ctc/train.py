@@ -120,13 +120,14 @@ class AMTrainer(nn.Module):
             raise RuntimeError(
                 f"{self.__class__.__name__}: self.attach['decoder'] is not initialized.")
 
+        bs = xs.size(0)
         logits, lx = self.am(xs, lx)
-        logits = logits.log_softmax(dim=-1)
-        bs = logits.size(0)
+        # NOTE: the beam decoder conduct softmax internally
+        # logits = logits.log_softmax(dim=-1)
 
-        # y_samples: (N, k, L),     ly_samples: (N, k)
+        # y_samples: (N, k, L), ly_samples: (N, k)
         y_samples, _, _, ly_samples = self.attach['decoder'].decode(
-            logits.cpu())
+            logits.float().cpu(), lx.cpu())
 
         """NOTE:
             for CTC training, we flatten the label seqs to 1-dim,
@@ -206,8 +207,8 @@ def build_model(
 
             decoder:
                 beam_size: 
+                num_classes: 
                 kenlm: 
-                tokenizer: 
                 alpha: 
                 beta:
                 ...
