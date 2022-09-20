@@ -5,7 +5,7 @@ set -e
 <<"PARSER"
 ("package", type=str, default='cat', nargs='*',
     choices=['all', 'cat', 'ctcdecode', 'kenlm', 'ctc-crf', 'fst-decoder'],
-    help="Select modules to be installed/uninstalled. Default: all.")
+    help="Select modules to be installed/uninstalled. Default: cat.")
 ('-r', "--remove", action='store_true', default=False,
     help="Remove modules instead of installing.")
 ('-f', "--force", action='store_true', default=False,
