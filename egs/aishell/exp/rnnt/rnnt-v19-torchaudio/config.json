@@ -6,7 +6,7 @@
         "time_mask_width_range": 0.1,
         "time_warp_window": 0.2
     },
-    "transducer": {
+    "trainer": {
         "compact": true,
         "predictor_mask_range": 0.2,
         "num_predictor_mask": 4

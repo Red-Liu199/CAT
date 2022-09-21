@@ -7,22 +7,15 @@
         ],
         "dev": "dev",
         "test": [
-            "dev",
-            "test"
+            "thaudio-dev",
+            "thaudio-test"
         ],
         "filter": ":2000",
         "lang": "zh-cn"
     },
     "tokenizer": {
         "type": "SentencePieceTokenizer",
-        "property": {
-            "model_type": "char",
-            "vocab_size": 4232,
-            "add_dummy_prefix": false,
-            "use_all_vocab": true,
-            "model_prefix": "sentencepiece/aishell_char/spm"
-        },
-        "location": "exp/rnnt/rnnt-v15/tokenizer.tknz"
+        "file": "exp/rnnt/rnnt-v15/tokenizer.tknz"
     },
     "train": {
         "bin": "cat.rnnt.train",
@@ -45,12 +38,13 @@
             "option": {
                 "beam_size": 16,
                 "cpu": true,
-                "nj": 48
+                "nj": 48,
+                "resume": "exp/rnnt/rnnt-v19-torchaudio/check/best-10.pt"
             }
         },
         "er": {
             "cer": true
         }
     },
-    "commit": "9a543d851e94ccbccb2172b950bd715634d164cf"
+    "commit": "d1b16c2de4e755d8b2535e64002d454532d920c3"
 }
