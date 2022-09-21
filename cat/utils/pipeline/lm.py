@@ -183,8 +183,8 @@ if __name__ == "__main__":
             D_CHECKPOINT
         )
         if not args.silent:
-            print(fmtstr_header("Stage 4 Decode"))
-            fmt = _fmtstr(_fmtstr("Decode: ",
+            print(fmtstr_header("Stage 4 Evaluate"))
+            fmt = _fmtstr(_fmtstr("Evaluate: ",
                           tcolors.BOLD), tcolors.OKCYAN) + "{}\n"
         else:
             fmt = ''
