@@ -54,8 +54,10 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace, **mkwar
         mkwargs['func_build_model'] = build_model
     if '_wds_hook' not in mkwargs:
         mkwargs['_wds_hook'] = filter_hook
-    if 'func_eval' not in mkwargs:
-        mkwargs['func_eval'] = custom_evaluate
+    
+    # NOTE: uncomment following lines to enable wer evaluation.
+    # if 'func_eval' not in mkwargs:
+    #     mkwargs['func_eval'] = custom_evaluate
 
     manager = Manager(
         KaldiSpeechDataset,

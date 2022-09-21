@@ -10,6 +10,41 @@
 
 * derived from `rnnt-v27`, trained with CTC-CRF phone-based
 
+### Data preparation
+
+```bash
+# configure experiment path
+export dir=exp/crf-v1
+
+# 0. prepare librispeech data
+bash local/data_kaldi.sh
+
+# 1. prepare librispeech lexicon
+bash local/prepare_lexicon.sh
+
+# 2. train the tokenizer
+python utils/pipeline/asr.py $dir --sto 1
+
+# 3. prepare denominator LM
+mkdir -p $dir/den_meta
+## configute kaldi path accoring to yours
+export KALDI_ROOT=/opt/kaldi
+
+cat data/src/train-*/text |
+    bash utils/tool/prep_den_lm.sh \
+        /dev/stdin $dir/den_meta/den-lm.fst \
+        -tokenizer $dir/tokenizer.tknz
+
+# 4. set den lm path in config.json, this requires hand-craft modification
+# set $dir/config.json:trainer:den-lm="exp/crf-v1/tokenizer.tknz"
+
+# 5. train the nn model
+python utils/pipeline/asr.py $dir --sta 2 --sto 3
+
+# 6. decode with FST, this is on TODO list.
+```
+
+
 ### Result
 ```
 best 10

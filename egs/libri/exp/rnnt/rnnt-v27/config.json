@@ -1,28 +1,27 @@
 {
-    "specaug_config": {
+    "specaug": {
         "freq_mask_width_range": 0.34,
         "num_freq_mask": 2,
         "num_time_mask": 10,
         "time_mask_width_range": 0.05,
         "apply_time_warp": false
     },
-    "transducer": {
-        "compact": true,
-        "fused": true
+    "trainer": {
+        "compact": true
     },
-    "joint": {
+    "joiner": {
+        "type": "JointNet",
         "kwargs": {
             "num_classes": 1024,
-            "odim_decoder": 640,
-            "odim_encoder": 512
-        },
-        "type": "JointNet"
+            "odim_enc": 512,
+            "odim_pred": 640,
+            "compact": true
+        }
     },
     "encoder": {
         "type": "ConformerNet",
         "kwargs": {
             "conv": "conv2d",
-            "d_head": -1,
             "dropout": 0.1,
             "hdim": 512,
             "idim": 80,
@@ -34,7 +33,7 @@
         }
     },
     "decoder": {
-        "type": "LSTMPredictNet",
+        "type": "LSTM",
         "kwargs": {
             "hdim": 640,
             "num_classes": 1024,
@@ -47,17 +46,15 @@
         }
     },
     "scheduler": {
-        "type": "SchedulerTransformer",
+        "type": "SchedulerNoam",
         "kwargs": {
-            "d_model": 512,
-            "epoch_max": 200,
+            "dim_model": 512,
             "peak_factor": 5.0,
-            "reverse_metric_direc": true,
-            "warmup_steps": 10000
+            "warmup_step": 10000,
+            "stop_step": 30000
         },
         "optimizer": {
             "type": "Adam",
-            "use_zero": true,
             "kwargs": {
                 "lr": 0.0003,
                 "betas": [

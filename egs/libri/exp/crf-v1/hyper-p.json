@@ -1,24 +1,39 @@
 {
     "data": {
-        "train": "train_960",
+        "train": [
+            "train-clean-100",
+            "train-clean-360",
+            "train-other-500"
+        ],
         "dev": [
-            "dev_clean",
-            "dev_other"
+            "dev-clean",
+            "dev-other"
         ],
         "test": [
-            "test_clean",
-            "test_other"
+            "dev-clean",
+            "dev-other",
+            "test-clean",
+            "test-other"
         ],
         "filter": ":2000"
     },
-    "topo": "ctc",
-    "train": {
-        "batch_size": 128,
-        "grad-accum-fold": 16,
-        "grad-norm": 5.0,
-        "databalance": true,
-        "checkall": true,
-        "amp": true
+    "tokenizer": {
+        "type": "LexiconTokenizer",
+        "option-init": {
+            "lexicon": "data/local/librispeech-lexicon.txt"
+        },
+        "|V|": 71,
+        "file": "exp/crf-v1/tokenizer.tknz"
     },
-    "commit": "c2ed81fb61f91da1e68870b953fb89937846ebd4"
+    "train": {
+        "bin": "cat.ctc.train",
+        "option": {
+            "amp": true,
+            "batch_size": 128,
+            "grad_accum_fold": 16,
+            "grad_norm": 5.0,
+            "dynamic_batch_mode": 1
+        }
+    },
+    "commit": "52c7fd3a68b35719b7cfa9e7aeb0a831e606e401"
 }
