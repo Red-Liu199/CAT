@@ -64,9 +64,9 @@ def main():
     if os.path.isdir(D_SRCDATA):
         found_datasets = find_dataset(D_SRCDATA)
     else:
+        found_datasets = {}
         sys.stderr.write(
-            f"{D_SRCDATA} is not found, did you run the pre-processing steps?")
-        exit(1)
+            f"speech data resolve: {D_SRCDATA} is not found, did you run the pre-processing steps?\n")
 
     if os.path.isfile(F_DATAINFO):
         backup = json.load(open(F_DATAINFO, 'r'))
