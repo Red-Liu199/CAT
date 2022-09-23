@@ -31,6 +31,12 @@ to refresh the information. Manually modifying is also OK.
 
 ## Result
 
+Data prepare with command:
+
+```bash
+bash local/data.sh -sp 1.1 0.9
+```
+
 Summarize experiments here.
 
 NOTE: some of the experiments are conduct on previous code base, therefore, the settings might not be compatible to the latest. In that case, you could:

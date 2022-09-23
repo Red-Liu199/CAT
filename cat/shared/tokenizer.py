@@ -123,6 +123,75 @@ class AbsTokenizer:
         self.load_state_dict(state)
 
 
+class SimpleTokenizer(AbsTokenizer):
+    """Passing a file, a list of words, or a word-to-index mapping to build a simple tokenizer.
+
+    When passed a file, assume one word per line, 
+    if `read_index_from_file=False`, use the first one as word, and the lineid+1 as token id;
+    if `read_index_from_file=True`, take first column as words, second column as token id.
+    """
+
+    def __init__(self, dmap: Union[str, List[str], Dict[str, int]], read_index_from_file: bool = False) -> None:
+        super().__init__()
+        self._r_vocab = OrderedDict([('<s>', 0), ('<unk>', 1)])
+        if isinstance(dmap, str) and os.path.isfile(dmap):
+            if read_index_from_file:
+                consturctd = {}
+                with open(dmap, 'r') as fi:
+                    for line in fi:
+                        line = line.strip()
+                        if line == '':
+                            continue
+                        w, i = line.split(maxsplit=3)[:2]
+                        consturctd[w] = i
+            else:
+                consturctd = []
+                with open(dmap, 'r') as fi:
+                    for line in fi:
+                        line = line.strip()
+                        if line == '':
+                            continue
+                        consturctd.append(line.split(maxsplit=1)[0])
+            dmap = consturctd
+
+        if isinstance(dmap, list):
+            offset = 2
+            for c in dmap:
+                if c in self._r_vocab:
+                    continue
+                self._r_vocab[c] = offset
+                offset += 1
+        elif isinstance(dmap, dict):
+            if '<s>' in dmap:
+                del dmap['<s>']
+            if '<unk>' in dmap:
+                del dmap['<unk>']
+            self._r_vocab.update(dmap)
+        else:
+            raise ValueError(str(type(dmap)))
+        self._i_vocab = [c for c in self._r_vocab.keys()]
+
+    @property
+    def vocab_size(self) -> int:
+        return len(self._r_vocab)
+
+    def _enc(self, s: str) -> List[int]:
+        return [self._r_vocab.get(c, 1) for c in s.split()]
+
+    def _dec(self, indices: Iterable[int]) -> str:
+        return ' '.join(self._i_vocab[i] for i in indices)
+
+    def _vocab_to_dict(self) -> Dict[int, str]:
+        return {i: c for i, c in enumerate(self._i_vocab)}
+
+    def state_dict(self) -> OrderedDict:
+        return self._r_vocab
+
+    def load_state_dict(self, state_dict: OrderedDict):
+        self._r_vocab = state_dict
+        self._i_vocab = [c for c in self._r_vocab.keys()]
+
+
 class JiebaTokenizer(AbsTokenizer):
     def __init__(self, userdict: Optional[Union[str, bytes]] = None, bos_id: int = 0) -> None:
         super().__init__()

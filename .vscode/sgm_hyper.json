@@ -77,7 +77,8 @@
                         "JiebaTokenizer",
                         "LexiconTokenizer",
                         "RawTokenizer",
-                        "SentencePieceTokenizer"
+                        "SentencePieceTokenizer",
+                        "SimpleTokenizer"
                     ]
                 }
             },
@@ -316,6 +317,35 @@
                                         "default": false
                                     }
                                 },
+                                "description": "options for traininig tokenizer."
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "type": {
+                                "const": "SimpleTokenizer"
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "option-init": {
+                                "type": "object",
+                                "properties": {
+                                    "dmap": {},
+                                    "read_index_from_file": {
+                                        "type": "boolean",
+                                        "default": false
+                                    }
+                                },
+                                "description": "options for initializing the tokenizer."
+                            },
+                            "option-train": {
+                                "type": "object",
+                                "properties": {},
                                 "description": "options for traininig tokenizer."
                             }
                         }

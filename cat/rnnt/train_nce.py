@@ -396,7 +396,7 @@ def custom_evaluate(testloader, args: argparse.Namespace, manager: Manager) -> f
     if args.rank == 0:
         l_err, l_sum = list(zip(*gather_obj))
         wer = sum(l_err) / sum(l_sum)
-        manager.writer.add_scalar('loss/dev-wer', wer, manager.step)
+        manager.writer.add_scalar('loss/dev-token-error-rate', wer, manager.step)
         manager.monitor.update(ANNOTATION['dev-metric'], (wer, manager.step))
 
         scatter_list = [wer]
