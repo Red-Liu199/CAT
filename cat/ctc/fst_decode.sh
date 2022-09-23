@@ -2,7 +2,7 @@
 # Author: Huahuan Zheng (maxwellzh@outlook.com)
 # Decoding the logits (obtained by cat/ctc/cal_logit.py)
 # ... with FST decoding graph (obtained by utils/tool/build_decoding_graph.sh).
-set -e -u
+set -e
 
 <<"PARSER"
 ("rspecifier", type=str,
