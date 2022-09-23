@@ -7,7 +7,7 @@ set -e
 <<"PARSER"
 ("dir", type=str, help="Path to the LM directory.")
 ("--start-stage", type=int, default=1, help="Start stage of the script.")
-("--stop-stage", type=int, default=1, help="Stop stage of the script.")
+("--stop-stage", type=int, default=100, help="Stop stage of the script.")
 ("-o", "--order", type=int, default=5, help="Max order of n-gram. default: 5")
 ("--output", type=str, default="$dir/${order}gram.klm",
     help="Path of output N-gram file. default: [dir]/[order]gram.klm")
