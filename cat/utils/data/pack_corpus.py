@@ -9,6 +9,7 @@ would create two files: (suppose --output=<f_text>)
 
 How to get the parsed data:
     with open('<f_text>', 'rb') as fi:
+        # mode: 0 for 1 sentence per item, 1 for tuple of two sentence (input, target)
         f_bin = os.path.join(os.path.dirname('<f_text>'), pickle.load(fi))
         f_seeks = pickle.load(fi)
     
@@ -29,8 +30,7 @@ from multiprocessing import Pool
 from typing import Union, Tuple, List
 
 
-def chunk(X: List[int], Y: List[int], chunk_size: int, drop_res: bool = True):
-    assert len(X) == len(Y)
+def chunk(X: List[int],  chunk_size: int, drop_res: bool = True, Y: List[int] = None):
     lx = len(X)
     if drop_res:
         assert lx >= chunk_size
@@ -38,55 +38,49 @@ def chunk(X: List[int], Y: List[int], chunk_size: int, drop_res: bool = True):
     else:
         res_size = 0
 
-    for bound in range(0, lx-res_size, chunk_size):
-        yield X[bound:bound+chunk_size], Y[bound:bound+chunk_size]
+    if Y is None:
+        for bound in range(0, lx-res_size, chunk_size):
+            yield X[bound:bound+chunk_size]
+    else:
+        for bound in range(0, lx-res_size, chunk_size):
+            yield X[bound:bound+chunk_size], Y[bound:bound+chunk_size]
 
 
 def text2bin(arguments: Tuple[argparse.Namespace, str, int, int]):
-
     args, binfile, idx_beg, idx_end = arguments
     if idx_end == -1:
         idx_end = float('inf')
 
-    if args.raw_tokenizer:
-        def processor(line): return [int(x) for x in line.split()]
-    else:
-        tokenizer = tknz.load(args.tokenizer)
-        processor = tokenizer.encode
+    processor = tknz.load(args.tokenizer).encode
+    bos = [args.bos_id]
+    eos = [args.eos_id]
+
+    def file_reader():
+        with open(args.intext, 'r') as fi:
+            for i, line in (enumerate(fi)):
+                if i < idx_beg:
+                    continue
+                if i >= idx_end:
+                    break
+                yield bos + processor(line.strip())+eos
+        return
 
     dataset = []
-    cnt_process = 0
-    tot_line = 0
-    concat_lines = []   # type: List[int]
-    with open(args.intext, 'r') as fi:
-        for i, line in (enumerate(fi)):
-            if i < idx_beg or i >= idx_end:
-                continue
-            tot_line += 1
-            l_data = processor(line.strip())
-
-            if args.truncate != -1:
-                # <s> + seq
-                X = [args.bos_id]+l_data
-                # seq + </s>
-                Y = l_data+[args.eos_id]
-                for x, y in chunk(X, Y, args.truncate, drop_res=False):
-                    dataset.append((x, y))
-                    cnt_process += 1
-            elif args.concat != -1:
-                concat_lines.append(args.bos_id)
-                concat_lines += l_data
-            else:
-                # (<s> + seq, seq + </s>)
-                dataset.append(
-                    ([args.bos_id]+l_data, l_data+[args.eos_id]))
-
-    if args.concat != -1:
-        X = concat_lines
-        Y = concat_lines[1:] + [args.bos_id]
-        for x, y in chunk(X, Y, args.concat, drop_res=True):
-            dataset.append((x, y))
-            cnt_process += 1
+    # mode = 0
+    if args.truncate != -1:
+        # mode = 1
+        chunksize = args.truncate
+        for indices in file_reader():
+            for x, y in chunk(indices[:-1], chunksize, drop_res=False, Y=indices[1:]):
+                dataset.append((x, y))
+    elif args.concat != -1:
+        chunksize = args.concat
+        for indices in file_reader():
+            for x in chunk(indices, chunksize, drop_res=True):
+                dataset.append(x)
+    else:
+        for indices in file_reader():
+            dataset.append(indices)
 
     with open(binfile, 'wb') as fo:
         pickle.dump(dataset, fo)
@@ -148,21 +142,17 @@ def main(args: argparse.Namespace):
         pickle.dump(os.path.basename(f_data), fo)
         # save the location information
         pickle.dump(_seeks, fo)
-        # dump a nonetype to ensure previous operation is done
-        pickle.dump(None, fo)
 
     if not args.quiet:
         print("> Merged: Index {} --> binary {}".format(args.output, f_data))
 
 
-def TextProcessingParser():
+def _parser():
     parser = argparse.ArgumentParser(
         'Convert pure text into pickle data with multi-processing')
     parser.add_argument("intext", type=str,
                         help="Input text files.")
     parser.add_argument("output", type=str, help="Ouput file.")
-    parser.add_argument("--raw-tokenizer", action="store_true",
-                        help="Assume input text file as tokenized one, would overwrite --tokenizer")
     parser.add_argument("--tokenizer", type=str,
                         help="Tokenizer model file. See cat/shared/tokenizer.py for details.")
     parser.add_argument("--nj", type=int, default=1,
@@ -181,6 +171,6 @@ def TextProcessingParser():
 
 
 if __name__ == "__main__":
-    parser = TextProcessingParser()
+    parser = _parser()
     args = parser.parse_args()
     main(args)

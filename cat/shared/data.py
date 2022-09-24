@@ -95,6 +95,11 @@ class IndexMappingDataset(AbsDataset):
                     f"... but {self.f_data} is not found.")
             self.offsets = pickle.load(fi)
 
+    def __del__(self):
+        if self.dataset is not None:
+            self.dataset.close()
+            self.dataset = None
+
     def impl_get_len(self):
         _ls = np.empty(len(self), dtype=np.int64)
         for i in range(len(self)):
@@ -202,10 +207,26 @@ class CorpusDataset(IndexMappingDataset):
     def __init__(self, f_index: str) -> None:
         super().__init__(f_index)
 
-    @staticmethod
-    def _readbuffer(fileio: "io.BufferedReader"):
-        x, y = pickle.load(fileio)
-        return torch.LongTensor(x), torch.LongTensor(y)
+        self._mode = 0
+        if len(self) > 0:
+            with open(self.f_data, 'rb') as fi:
+                fi.seek(self.offsets[0], 0)
+                item = pickle.load(fi)
+            if isinstance(item, tuple) and len(item) == 2:
+                self._mode = 1
+
+    @property
+    def mode(self):
+        # 1 for return tuple of tensors, 0 for return tensor
+        return self._mode
+
+    def _readbuffer(self, fileio: "io.BufferedReader"):
+        if self._mode:
+            x, y = pickle.load(fileio)
+            return torch.LongTensor(x), torch.LongTensor(y)
+        else:
+            x = pickle.load(fileio)
+            return torch.LongTensor(x[:-1]), torch.LongTensor(x[1:])
 
 
 class ScpDataset(AbsDataset):
@@ -359,9 +380,9 @@ class sortedPadCollateLM():
     """Collect data into batch by desending order and add padding.
 
     Args:
-        batch  : [(labels, targets)]
-            labels  : torch.LongTensor
-            targets : torch.LongTensor
+        batch  : [sentences] or [(labels, targets)] 
+            labels  : torch.LongTensor, sentences[:-1]
+            targets : torch.LongTensor, sentences[1:]
 
     Return:
         (labels, label_lengths, targets, `torch.empty(1)`)
@@ -370,13 +391,15 @@ class sortedPadCollateLM():
     def __init__(self, flatten_target: bool = True) -> None:
         self.flatten_target = flatten_target
 
-    def __call__(self, batch: Tuple[List[torch.LongTensor], List[torch.LongTensor]]):
+    def __call__(self, batch: List[Tuple[torch.LongTensor, torch.LongTensor]]):
         batch_sorted = sorted(
             batch, key=lambda item: item[0].size(0), reverse=True)
 
         X, Y = list(zip(*batch_sorted))
-        input_lengths = torch.LongTensor(
-            [x.size(0) for x in X])  # type: torch.LongTensor
+        xlens = torch.LongTensor([x.size(0)
+                                 for x in X])  # type: torch.LongTensor
+        ylens = torch.LongTensor([y.size(0) for y in Y])
+
         xs = coreutils.pad_list(X)   # type: torch.Tensor
 
         if self.flatten_target:
@@ -384,7 +407,7 @@ class sortedPadCollateLM():
         else:
             target = coreutils.pad_list(Y)
 
-        return xs, input_lengths, target, torch.empty(1)
+        return xs, xlens, target, ylens
 
 
 class sortedScpPadCollate():

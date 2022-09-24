@@ -24,9 +24,15 @@ You can modify the file manually for more flexible usage.
 
 import os
 import sys
-import glob
 import json
 from typing import Dict, List
+# fmt:off
+try:
+    import utils.pipeline
+except ModuleNotFoundError:
+    sys.path.append(os.path.abspath(os.path.dirname(__file__)+'/../..'))
+from utils.pipeline._constants import *
+# fmt:on
 
 D_SRCDATA = 'data/src'
 
@@ -60,7 +66,6 @@ def find_dataset(d_data: str) -> Dict[str, Dict[str, str]]:
 
 
 def main():
-    from cat.shared._constants import F_DATAINFO
     if os.path.isdir(D_SRCDATA):
         found_datasets = find_dataset(D_SRCDATA)
     else:

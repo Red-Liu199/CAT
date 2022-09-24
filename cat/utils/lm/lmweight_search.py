@@ -9,17 +9,23 @@ import shutil
 import argparse
 from typing import Union, Dict
 
-from interpolate_nbests import GetParser as InterpolateParser
-from interpolate_nbests import main as interpolate_main
 
-from cat.utils.wer import (
+# fmt:off
+import sys
+sys.path.append('.')
+from utils.lm.interpolate_nbests import (
+    main as interpolate_main,
+    GetParser as InterpolateParser
+)
+from utils.pipeline.common_utils import parse_args_from_var
+from utils.wer import (
     _parser as WERParser,
     main as WERMain
 )
+# fmt:on
 
 
 def main(args: argparse):
-    from cat.utils.pipeline.asr import get_args
     assert args.ground_truth is not None and os.path.isfile(args.ground_truth)
     assert len(args.nbestlist) == len(args.search), (
         "\n"
@@ -61,10 +67,11 @@ def main(args: argparse):
         if len(f_nbest_fixed) == 1 and weight_fixed[0] == 1.0:
             shutil.copyfile(f_nbest_fixed[0], cache_file)
         else:
-            interpolate_main(get_args(
-                {'nbestlist': f_nbest_fixed,
-                 'weights': weight_fixed,
-                 }, InterpolateParser(), [cache_file]
+            interpolate_main(parse_args_from_var(
+                InterpolateParser(), {
+                    'nbestlist': f_nbest_fixed,
+                    'weights': weight_fixed,
+                }, [cache_file]
             ))
         variable_list = [f_nbest for i, f_nbest in enumerate(
             args.nbestlist) if args.search[i] == 1]
@@ -77,20 +84,20 @@ def main(args: argparse):
         if mapkey in _searchout:
             return _searchout[mapkey]['wer']
         cache_file = os.path.join('/tmp', str(uuid.uuid4())+'.nbest')
-        interpolate_main(get_args(
-            {
+        interpolate_main(parse_args_from_var(
+            InterpolateParser(), {
                 'nbestlist': tuned_list,
                 'weights': tuned_metric if num_param_fixed == 0 else ([1.0] + tuned_metric),
                 'one-best': True
-            }, InterpolateParser(), [cache_file]
+            }, [cache_file]
         ))
         print('tuning: ' +
               ' | '.join([f"{x:4.2f}" for x in tuned_metric]) + '  ', end='')
-        wer = WERMain(get_args(
-            {
+        wer = WERMain(parse_args_from_var(
+            WERParser(), {
                 'cer': args.cer,
                 'force-cased': args.force_cased
-            }, WERParser(), [args.ground_truth, cache_file]
+            },  [args.ground_truth, cache_file]
         ))
         os.remove(cache_file)
         _searchout[mapkey] = wer
@@ -167,7 +174,7 @@ def main(args: argparse):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--nbestlist", type=str, nargs='+',
+    parser.add_argument("nbestlist", type=str, nargs='+',
                         help="N-best list files")
     parser.add_argument("--search", type=int, nargs='+', choices=[0, 1], default=[0],
                         help="Flag of whether search weight of the file or not. ")

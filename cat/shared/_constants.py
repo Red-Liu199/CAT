@@ -20,6 +20,7 @@ F_MONITOR_FIG = "monitor.png"
 F_CHECKPOINT_LIST = "checkpoint.list"
 
 ## others
+F_TOKENIZER = 'tokenizer.tknz'
 F_TRAINING_INFO = "readme.md"
 F_DATAINFO = "data/metainfo.json"
 

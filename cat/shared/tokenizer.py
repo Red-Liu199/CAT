@@ -142,7 +142,7 @@ class SimpleTokenizer(AbsTokenizer):
                         line = line.strip()
                         if line == '':
                             continue
-                        w, i = line.split(maxsplit=3)[:2]
+                        w, i = line.split(maxsplit=2)[:2]
                         consturctd[w] = i
             else:
                 consturctd = []

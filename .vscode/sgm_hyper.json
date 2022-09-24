@@ -36,32 +36,52 @@
                     "type": "string",
                     "default": ":2000"
                 },
-                "text_processing": {
-                    "description": "Configuration of text processing. See utils/transText2Bin.py for details",
+                "packing-text-lm": {
                     "type": "object",
                     "properties": {
+                        "intext": {
+                            "type": "string",
+                            "description": "Input text files."
+                        },
+                        "output": {
+                            "type": "string",
+                            "description": "Ouput file."
+                        },
+                        "tokenizer": {
+                            "type": "string",
+                            "description": "Tokenizer model file. See cat/shared/tokenizer.py for details."
+                        },
+                        "nj": {
+                            "type": "number",
+                            "description": "Number of threads. Default: 1",
+                            "default": 1
+                        },
                         "concat": {
                             "type": "number",
+                            "description": "Use concat mode instead valid mode with given length. Default: -1 (disable)",
                             "default": -1
                         },
                         "truncate": {
                             "type": "number",
+                            "description": "Truncate the seq longer than trunc and take res of it as new seq. Default: -1 (disable)",
                             "default": -1
                         },
                         "bos_id": {
                             "type": "number",
+                            "description": "Begin of sequence index, used when concat > 1. Default: 0",
                             "default": 0
+                        },
+                        "eos_id": {
+                            "type": "number",
+                            "description": "End of sequence index, used when concat > 1. Default: -1 (same as --bos_id)",
+                            "default": -1
+                        },
+                        "quiet": {
+                            "description": "Supress hint messages",
+                            "default": false
                         }
-                    }
-                },
-                "lang": {
-                    "description": "Language of data. Refer to https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes",
-                    "type": "string",
-                    "examples": [
-                        "zh",
-                        "en"
-                    ],
-                    "default": "en"
+                    },
+                    "description": "Convert pure text into pickle data with multi-processing"
                 }
             }
         },

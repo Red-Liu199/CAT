@@ -32,7 +32,7 @@ fi
 cd $KALDI_ROOT/egs/wsj/s5 && . ./path.sh
 cd - >/dev/null
 
-python utils/tool/trans_text2id.py $tokenizer $r_specifier |
+python utils/data/corpus2index.py $r_specifier -t --tokenizer=$tokenizer |
     chain-est-phone-lm \
         --no-prune-ngram-order=$no_prune_ngram_order \
         --ngram-order=$ngram_order \

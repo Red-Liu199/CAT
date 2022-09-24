@@ -60,7 +60,9 @@ def main(args: argparse.Namespace = None):
     try:
         mp.set_start_method('spawn')
     except RuntimeError as re:
-        print(re)
+        if str(re) != "context has already been set":
+            raise RuntimeError(str(re))
+
     q = mp.Queue(maxsize=1)
     consumer = mp.Process(target=consume_worker, args=(world_size, q, args))
     consumer.start()
@@ -168,6 +170,7 @@ def consume_worker(wsize: int, q: mp.Queue, args):
         data = q.get(block=True)
         output.append(data)
 
+    sys.stdout.write("ppl: ")
     for i_f, f_data in enumerate(args.evaluate):
         ppl = math.exp(
             -sum(
@@ -178,18 +181,19 @@ def consume_worker(wsize: int, q: mp.Queue, args):
                 for i_worker in range(wsize)
             )
         )
-        sys.stdout.write("Test file: {} -> ppl: {:.2f}\n".format(f_data, ppl))
+        sys.stdout.write("  {:.2f}  |".format(ppl))
+    sys.stdout.write('\n')
 
 
 def text2corpusbin(f_text: str, f_bin: str, tokenizer):
-    from ..utils.pipeline.asr import get_args
+    from ..utils.pipeline.common_utils import parse_args_from_var
     from ..utils.data import pack_corpus as t2b
-    t2b.main(get_args(
+    t2b.main(parse_args_from_var(
+        t2b._parser(),
         {
             'tokenizer': tokenizer,
             'quiet': True
         },
-        t2b.TextProcessingParser(),
         [f_text, f_bin]
     ))
 

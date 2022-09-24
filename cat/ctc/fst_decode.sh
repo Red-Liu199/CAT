@@ -11,13 +11,15 @@ set -e
     help="Directory of decoding graph, where TLG.fst and r_words.txt are expected.")
 ("out_dir", type=str,
     help="Output directory, where lattice, hypotheses and logs would be saved.")
+("-f", "--force", action="store_true", default=False,
+    help="Force to do the decoding whatever the result exists or not.")
 ("--nj", type=int, default=-1, help="Number of jobs. This should match the nj of cal_logit.py")
 ("--acwt", type=float, default=1.0, help="AC score weight. default: 1.0")
 ("--lmwt", type=float, default=0.2, help="LM score weight. default: 0.2")
 ("--wip", type=float, default=0.0, help="Word insertion penalty factor. default: 0.0")
 
 ("--beam", type=float, default=17.0, help="latgen-faster args: --beam")
-("--lattice-beam", type=float, default=6.0, help="latgen-faster args: --lattice-beam")
+("--lattice-beam", type=float, default=10.0, help="latgen-faster args: --lattice-beam")
 PARSER
 eval $(python utils/parseopt.py $0 $*)
 
@@ -50,8 +52,8 @@ symtab="$graph/r_words.txt"
 [ -d $hyps_dir ] && rm -r $hyps_dir
 mkdir -p $log_dir
 mkdir -p $hyps_dir
-f_out=$out_dir/text_ac${acwt}_lm${lmwt}_wip${wip}.hyp
-if [ ! -f $f_out ]; then
+f_out=$out_dir/text_$(basename $graph)_ac${acwt}_lm${lmwt}_wip${wip}.hyp
+if [[ ! -f $f_out || $force == "True" ]]; then
     run.pl JOB=1:$nj $log_dir/JOB.log latgen-faster \
         --max-mem=200000000 --minimize=false --allow-partial=true \
         --min-active=200 --max-active=7000 \

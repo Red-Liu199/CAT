@@ -13,15 +13,21 @@ set -e -u
     help="LM score weight.")
 ("--wip", type=float, default=0.0, 
     help="Word insertion penalty.")
+("-f", "--force", action="store_true", default=False,
+    help="Force to do the decoding whatever the result exists or not.")
 PARSER
 eval $(python utils/parseopt.py $0 $*)
+
+opt_force=""
+[ $force == "True" ] &&
+    opt_force="-f"
 
 cache="/tmp/$(
     tr -dc A-Za-z0-9 </dev/urandom | head -c 13
     echo ''
 ).log"
 for set in $data; do
-    fout=$(bash cat/ctc/fst_decode.sh \
+    fout=$(bash cat/ctc/fst_decode.sh $opt_force \
         --acwt $acwt \
         --lmwt $lmwt \
         --wip $wip \

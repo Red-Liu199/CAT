@@ -10,6 +10,14 @@ import shutil
 from datetime import datetime
 from typing import *
 
+# fmt:off
+try:
+    import utils.pipeline
+except ModuleNotFoundError:
+    sys.path.append(os.path.abspath(os.path.dirname(__file__)+'/..'))
+from utils.pipeline._constants import *
+# fmt:on
+
 
 def rm(path):
     if os.path.isfile(path):
@@ -48,8 +56,6 @@ if __name__ == "__main__":
 
     join = JoinPath(path)
 
-    from cat.shared._constants import *
-
     res = []        # type: List[Tuple[str, str]]
     # checkdir
     if os.path.isdir(d := join(D_CHECKPOINT)):
@@ -74,10 +80,6 @@ if __name__ == "__main__":
         res.append(
             (d, "data folder")
         )
-    if os.path.isdir(d := join('lmbin')):
-        res.append(
-            (d, "data folder")
-        )
 
     # temp folder
     if os.path.isdir(d := join(D_TMP)):
@@ -95,6 +97,12 @@ if __name__ == "__main__":
     if os.path.isfile(f := join(F_TRAINING_INFO)):
         res.append(
             (f, "readme")
+        )
+
+    # tokenizer
+    if os.path.isfile(f := join(F_TOKENIZER)):
+        res.append(
+            (f, "tokenizer")
         )
 
     try:

@@ -3,10 +3,18 @@ Compute FBank feature for aishell using torchaudio.
 """
 
 import os
-import sys
 import glob
 import argparse
 from typing import List, Dict, Any, Tuple
+
+# fmt: off
+import sys
+try:
+    import utils.data
+except ModuleNotFoundError:
+    sys.path.append(".")
+from utils.data import data_prep
+# fmt: on
 
 
 prepare_sets = [
@@ -73,7 +81,6 @@ if __name__ == "__main__":
             sys.stderr.write(
                 f"warning: found {len(audios[_set])} audios in {_set} subset, but expected {expect_len[_set]}\n")
 
-    from cat.utils.data import data_prep
     data_prep.prepare_kaldi_feat(
         subsets=prepare_sets,
         trans=subtrans,

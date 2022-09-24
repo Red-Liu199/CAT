@@ -30,11 +30,19 @@ python local/extract_meta.py $src/wav \
 python utils/data/resolvedata.py
 
 # remove spaces
-for file in $(python -c "import json;\
-print(' '.join(x['trans'] for x in json.load(open('data/metainfo.json', 'r')).values()))"); do
-    [ ! -f $file.bak ] && mv $file $file.bak
-    python utils/data/clean_space.py -i $file.bak -o $file || exit 1
-done
+# remove spaces
+python -c "
+import sys,os,shutil
+sys.path.append('.')
+import utils.pipeline.common_utils as cu
+for f in cu.readjson('data/metainfo.json').values():
+    f = f['trans']
+    if os.path.isfile(f+'.bak'):
+        continue
+    dst = list(cu.get_corpus(adding_data=[f], ops=['rm-space'], skipid=True))[0]
+    shutil.move(f, f+'.bak')
+    shutil.move(dst, f)
+"
 
 echo "$0 done"
 exit 0
