@@ -14,7 +14,3 @@
 ```
 exp/asr-ctc-lexicon/decode/yesno/text_ac1.0_lm0.2_wip0.0.hyp    %SER 100.00 | %CER 85.14 [ 1031 / 1211, 0 ins, 1031 del, 0 sub ]
 ```
-
-|     training process    |
-|:-----------------------:|
-|![monitor](./monitor.png)|

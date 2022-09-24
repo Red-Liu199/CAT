@@ -3,7 +3,7 @@
 set -e -u
 
 dir="exp/asr-ctc-lexicon"
-KALDI_ROOT=
+KALDI_ROOT=/opt/kaldi
 export KALDI_ROOT=$KALDI_ROOT
 
 # prepare a word to char lexicon

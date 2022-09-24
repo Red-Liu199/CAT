@@ -2,7 +2,11 @@
     "trainer": {
         "use_crf": true,
         "lamb": 0.1,
-        "den-lm": "exp/asr-ctc-crf/den_lm.fst"
+        "den-lm": "exp/asr-ctc-crf/den_lm.fst",
+        "decoder": {
+            "beam_size": 4,
+            "num_classes": 8
+        }
     },
     "encoder": {
         "type": "LSTM",

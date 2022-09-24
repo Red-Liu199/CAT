@@ -514,7 +514,7 @@ def get_corpus(
 
         with open(f, 'r') as fi:
             for line in fi:
-                line = line[:-1]
+                line = line.strip('\n')
                 if skipid:
                     uid, line = line.split(maxsplit=1)
                 elif isrmid:
