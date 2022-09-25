@@ -383,34 +383,35 @@ class LexiconTokenizer(AbsTokenizer):
 
     def init_lexicon(self, f_mapping: str, add_special_token: bool):
         p_rm_consecutive_space = re.compile(r"\s+")
-        lexicon = []
+
+        lexicon = {}
         with open(f_mapping, 'r') as fi:
             for line in fi:
                 if line == '':
                     continue
                 utt = re.sub(p_rm_consecutive_space, ' ', line).strip().split()
-                lexicon.append(
-                    (utt[0], utt[1:])
-                )
+                if utt[0] not in lexicon:
+                    # for words with multiple pronounciations, keep the first.
+                    lexicon[utt[0]] = utt[1:]
 
         units = {}
-        word2phn = OrderedDict()
+        word2unitid = OrderedDict()
         if add_special_token:
             units[self._bos_token] = 0
             units[self._unk_token] = 1
-            word2phn[self._bos_token] = (0,)
-            word2phn[self._unk_token] = (1,)
+            word2unitid[self._bos_token] = (0,)
+            word2unitid[self._unk_token] = (1,)
 
-        raw_units = set().union(*(utt for _, utt in lexicon))
+        raw_units = set().union(*(lexicon.values()))
         lu = len(units)
         units.update({
             _unit: id+lu
             for id, _unit in enumerate(raw_units)
         })
-        for word, utt in lexicon:
-            word2phn[word] = tuple(units[x] for x in utt)
+        for word, utt in lexicon.items():
+            word2unitid[word] = tuple(units[x] for x in utt)
 
-        self._w2pid = word2phn
+        self._w2pid = word2unitid
         if not add_special_token and (self._bos_token not in self._w2pid or self._unk_token not in self._w2pid):
             raise RuntimeError(
                 f"{self._bos_token} and(or) {self._unk_token} are not found in '{f_mapping}', "

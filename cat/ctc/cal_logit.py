@@ -91,10 +91,9 @@ def worker(pid: int, args: argparse.Namespace, q: mp.Queue, model: AbsEncoder):
                 break
             key, x, x_lens = batch
             assert len(key) == 1, "Batch size > 1 is not currently support."
-            logits, _ = model(x, x_lens)
-            log_probs = logits.log_softmax(dim=-1).data.numpy()
-            log_probs[log_probs == -np.inf] = -1e16
-            results[key[0]] = log_probs[0]
+            logits = model(x, x_lens)[0].data.numpy()
+            logits[logits == -np.inf] = -1e16
+            results[key[0]] = logits[0]
             del batch
 
     kaldiio.save_ark(os.path.join(
