@@ -20,7 +20,8 @@
                         "LSTMrowCONV",
                         "TDNN_LSTM",
                         "TDNN_NAS",
-                        "VGGLSTM"
+                        "VGGLSTM",
+                        "Wav2Vec2Encoder"
                     ]
                 },
                 "freeze": {
@@ -416,6 +417,39 @@
                                     "bidirectional": {
                                         "type": "number",
                                         "default": false
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "type": {
+                                "const": "Wav2Vec2Encoder"
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "kwargs": {
+                                "type": "object",
+                                "properties": {
+                                    "pretrained_model": {
+                                        "type": "string"
+                                    },
+                                    "use_wav2vec2_encoder": {
+                                        "type": "boolean",
+                                        "default": false
+                                    },
+                                    "tune_wav2vec2": {
+                                        "type": "boolean",
+                                        "default": false
+                                    },
+                                    "enc_head_type": {
+                                        "type": "string",
+                                        "default": "ConformerNet"
                                     }
                                 }
                             }

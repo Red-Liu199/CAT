@@ -54,7 +54,7 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace, **mkwar
         mkwargs['func_build_model'] = build_model
     if '_wds_hook' not in mkwargs:
         mkwargs['_wds_hook'] = filter_hook
-    
+
     # NOTE: uncomment following lines to enable wer evaluation.
     # if 'func_eval' not in mkwargs:
     #     mkwargs['func_eval'] = custom_evaluate
@@ -107,6 +107,12 @@ class AMTrainer(nn.Module):
         self.attach = {
             'decoder': decoder
         }
+        # NOTE: For CTC beam search decoding, if there's no lm,
+        #       we don't need to do normalization over logits.
+        if decoder._is_token_based:
+            self.normalized_decoding = False
+        else:
+            self.normalized_decoding = True
 
     def register_crf_ctx(self, den_lm: Optional[str] = None):
         """Register the CRF context on model device."""
@@ -124,8 +130,8 @@ class AMTrainer(nn.Module):
 
         bs = xs.size(0)
         logits, lx = self.am(xs, lx)
-        # NOTE: the beam decoder conduct softmax internally
-        # logits = logits.log_softmax(dim=-1)
+        if self.normalized_decoding:
+            logits = logits.log_softmax(dim=-1)
 
         # y_samples: (N, k, L), ly_samples: (N, k)
         y_samples, _, _, ly_samples = self.attach['decoder'].decode(
@@ -188,7 +194,7 @@ def build_beamdecoder(cfg: dict) -> CTCBeamDecoder:
         beam_width=cfg.get('beam_size', 16),
         alpha=cfg.get('alpha', 1.),
         beta=cfg.get('beta', 0.),
-        num_processes=6,
+        num_processes=cfg.get('num_processes', 6),
         log_probs_input=True,
         is_token_based=('kenlm' in cfg)
     )

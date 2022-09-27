@@ -98,8 +98,10 @@ utils/make_lexicon_fst.pl --pron-probs $out_dir/lexiconp_disambig.txt |
         --read-symbol-table=$out_dir/words.txt \
         $lm_path $out_dir/G.fst
 
-# 6.1 check G, the first of these numbers should be small
-# fstisstochastic $out_dir/G.fst
+# 6.1 check G, the first number should be small
+# ... if it's not, I guess there're many words in your lm.arpa 
+# ... which are not present in --read-symbol-table
+fstisstochastic $out_dir/G.fst || true
 
 # 7. Compose TLG.fst
 cd - >/dev/null

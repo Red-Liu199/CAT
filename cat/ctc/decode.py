@@ -117,12 +117,14 @@ def worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_out: mp.Queue
     torch.set_num_threads(args.thread_per_woker)
 
     tokenizer = tknz.load(args.tokenizer)
+    uselm = False
     if args.lm_path is None:
         # w/o LM, labels won't be used in decoding.
         labels = [''] * tokenizer.vocab_size
         searcher = CTCBeamDecoder(
             labels, beam_width=args.beam_size, log_probs_input=True, num_processes=args.thread_per_woker)
     else:
+        uselm = True
         assert os.path.isfile(
             args.lm_path), f"--lm-path={args.lm_path} is not a valid file."
 
@@ -144,10 +146,12 @@ def worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_out: mp.Queue
             key, x, x_len = batch
             key = key[0]
             # beam decoder conducts the softmax internally
-            # probs = torch.softmax(logits, dim=-1)
+            logits, olens = model(x, x_len)
+            if uselm:
+                logits = torch.log_softmax(logits, dim=-1)
             beam_results, beam_scores, _, out_lens = searcher.decode(
-                *model(x, x_len))
-            # make it in decending order
+                logits, olens)
+            # make it in descending order
             # -log(p) -> log(p)
             beam_scores = -beam_scores
 

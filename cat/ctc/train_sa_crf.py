@@ -40,6 +40,7 @@ class SACRFTrainer(AMTrainer):
             lm_weight: float = 1.0,
             ctc_weight: float = 0.,
             n_samples: int = 256,
+            local_normalized: bool = True,
             # compute gradients via mapped y seqs by CTC loss, instead of computing probs of pi seqs.
             compute_gradient_via_y: bool = False,
             **kwargs):
@@ -56,21 +57,27 @@ class SACRFTrainer(AMTrainer):
             'ctc_loss': 1+ctc_weight
         }
         self.n_samples = n_samples
+        self._is_local_normalized = local_normalized
+        self.normalized_decoding &= local_normalized
         self.criterion = nn.CTCLoss(reduction='none', zero_infinity=True)
         self._pad = nn.ConstantPad1d((1, 0), 0)
 
     def forward(self, feats: torch.Tensor, labels: torch.Tensor, lx: torch.Tensor, ly: torch.Tensor):
 
+        device = feats.device
         logits, lx = self.am(feats, lx)
-        logits = logits.log_softmax(dim=-1)
-        device = logits.device
+        log_probs = logits.log_softmax(dim=-1)
         lx = lx.to(device=device, dtype=torch.int)
         ly = ly.to(device=device, dtype=torch.int)
         labels = labels.to(torch.int)
 
         # numerator: (N, )
+        if self._is_local_normalized:
+            score = log_probs
+        else:
+            score = logits
         num = self.criterion(
-            logits.transpose(0, 1),
+            score.transpose(0, 1),
             labels.to(device='cpu'),
             lx, ly
         )
@@ -83,7 +90,7 @@ class SACRFTrainer(AMTrainer):
 
         # (N, T, K)
         orin_pis = torch.multinomial(
-            logits.exp().view(-1, V),
+            log_probs.exp().view(-1, V),
             K, replacement=True
         ).view(N, T, K)
 
@@ -115,11 +122,11 @@ class SACRFTrainer(AMTrainer):
         p_y = p_y.view(N, K)
 
         if self._compute_y_grad:
-            # cal q from CTC: (N*K, )
+            # cal s := score(pi) from CTC: (N, K)
             # fmt: off
-            q = -self.criterion(
+            s = -self.criterion(
                 # (N, T, V) -> (T, N, V) -> (T, N, 1, V) -> (T, N, K, V) -> (T, N*K, V)
-                logits.transpose(0,1).unsqueeze(2).expand(-1, -1, K, -1).contiguous().view(T, N*K, -1),
+                score.transpose(0,1).unsqueeze(2).expand(-1, -1, K, -1).contiguous().view(T, N*K, -1),
                 gather.cat(ysamples, lsamples).to(device='cpu'),
                 # (N, ) -> (N, 1) -> (N, K) -> (N*K, )
                 lx.unsqueeze(1).repeat(1, K).contiguous().view(-1),
@@ -127,18 +134,18 @@ class SACRFTrainer(AMTrainer):
             ).view(N, K)
             # fmt:on
         else:
-            # log Q(pi|X): (N, T, K)
-            q = torch.gather(logits, dim=-1, index=orin_pis)
-            q *= (torch.arange(q.size(1), device=device)[
+            # score(pi|X): (N, T, K)
+            s = torch.gather(score, dim=-1, index=orin_pis)
+            s *= (torch.arange(s.size(1), device=device)[
                 None, :] < lx[:, None])[:, :, None]
             # (N, T, K) -> (N, K)
-            q = q.sum(dim=1)
+            s = s.sum(dim=1)
 
-        # estimate = (P(Y_0)*log Q(pi_0|X)+...) / (P(Y_0)+...)
-        # estimate = (p_y.exp()*q).sum(dim=1) / p_y.exp().sum(dim=1)
+        # estimate = (P(Y_0)*s(pi_0|X)+...) / (P(Y_0)+...)
+        # estimate = (p_y.exp()*s).sum(dim=1) / p_y.exp().sum(dim=1)
         # (N, ), a more numerical stable ver.
         estimate = torch.sum(
-            q * (p_y - torch.logsumexp(p_y, dim=1, keepdim=True)).exp(), dim=1)
+            s * (p_y - torch.logsumexp(p_y, dim=1, keepdim=True)).exp(), dim=1)
 
         return (self.weights['ctc_loss']*num + estimate).mean(dim=0)
 

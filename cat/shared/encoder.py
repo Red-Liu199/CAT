@@ -5,6 +5,8 @@
 
 """Decoder modules impl
 """
+from torchaudio.models.wav2vec2.utils import import_huggingface_model
+from transformers import Wav2Vec2ForCTC
 from . import layer as c_layers
 
 import numpy as np
@@ -14,6 +16,9 @@ from typing import Literal
 import math
 import torch
 import torch.nn as nn
+
+import transformers
+transformers.logging.set_verbosity_error()
 
 
 def get_vgg2l_odim(idim, in_channel=1, out_channel=128):
@@ -227,7 +232,7 @@ class ConformerNet(AbsEncoder):
             idim: int,
             hdim: int,
             num_classes: int = -1,
-            conv: Literal['conv2d', 'vgg2l'] = 'conv2d',
+            conv: Literal['conv2d', 'vgg2l', 'none'] = 'conv2d',
             conv_multiplier: int = None,
             dropout_in: float = 0.2,
             res_factor: float = 0.5,
@@ -261,6 +266,9 @@ class ConformerNet(AbsEncoder):
             self.conv_subsampling = c_layers.Conv2dSubdampling(
                 conv_multiplier, norm=subsample_norm, stacksup=delta_feats)
             conv_dim = conv_multiplier * (((idim//in_channel)//2)//2)
+        elif conv == 'none':
+            self.conv_subsampling = None
+            conv_dim = idim
         else:
             raise RuntimeError(f"Unknown type of convolutional layer: {conv}")
 
@@ -285,9 +293,11 @@ class ConformerNet(AbsEncoder):
             self.cells.append(c_layers.TimeReduction(time_reduction_factor))
 
     def impl_forward(self, x: torch.Tensor, lens: torch.Tensor):
-        x_subsampled, ls_subsampled = self.conv_subsampling(x, lens)
+        if self.conv_subsampling is None:
+            x_subsampled, ls = x, lens
+        else:
+            x_subsampled, ls = self.conv_subsampling(x, lens)
         out = self.linear_drop(x_subsampled)
-        ls = ls_subsampled
         for cell in self.cells:
             out, ls = cell(out, ls)
 
@@ -310,5 +320,53 @@ class ConformerLSTM(ConformerNet):
         conv_x, conv_ls = super().impl_forward(x, lens)
         return self.lstm(conv_x, conv_ls)
 
-# TODO: (Huahuan) I removed all chunk-related modules.
-#       cc @aky15 you may need to add it in v2 standard
+
+class Wav2Vec2Encoder(AbsEncoder):
+    def __init__(
+            self,
+            pretrained_model: str,
+            use_wav2vec2_encoder: bool = False,
+            tune_wav2vec2: bool = False,
+            enc_head_type: str = 'ConformerNet', **enc_head_kwargs) -> None:
+        """
+        pretrained_model (str) : huggingface pretrained model, e.g. facebook/wav2vec2-base
+        use_wav2vec2_encoder (bool) : if True, use the pretrained wav2vec2 transformer
+        tune_wav2vec2 (bool) : if True, allow wav2vec models to be updated
+        enc_head_type (str): any of the AbsEncoder class, or 'Linear'
+        enc_head_kwargs : options passed to enc_head_type()
+
+        dataflow in forward:
+            x -> wav2vec2_feature_extractor -> (wav2vec2_encoder) -> enc_head -> out
+        """
+        super().__init__(False)
+
+        assert enc_head_type.isidentifier(), "invalid type"
+        if enc_head_type == 'Linear':
+            # generally, odim of _wav2vec2_feat_extractor is 512
+            # ... and that of _wav2vec2_encoder is 768
+            self._enc_head = nn.Linear(
+                enc_head_kwargs['idim'], enc_head_kwargs['num_classes'])
+        else:
+            T_enc = eval(enc_head_type)
+            assert issubclass(T_enc, AbsEncoder)
+            self._enc_head = T_enc(**enc_head_kwargs)   # type: AbsEncoder
+
+        wav2vec2_one = import_huggingface_model(
+            Wav2Vec2ForCTC.from_pretrained(pretrained_model))
+        self._wav2vec2_feat_extractor = wav2vec2_one.feature_extractor
+        if use_wav2vec2_encoder:
+            self._wav2vec2_encoder = wav2vec2_one.encoder
+        else:
+            self._wav2vec2_encoder = None
+
+        if not tune_wav2vec2:
+            self._wav2vec2_feat_extractor.requires_grad_(False)
+            if use_wav2vec2_encoder:
+                self._wav2vec2_encoder.requires_grad_(False)
+
+    def forward(self, x: torch.Tensor, xlens: torch.Tensor):
+        x, xlens = self._wav2vec2_feat_extractor(
+            x.squeeze(2), xlens)
+        if self._wav2vec2_encoder is not None:
+            x = self._wav2vec2_encoder(x, xlens)
+        return self._enc_head(x, xlens)

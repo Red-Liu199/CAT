@@ -19,7 +19,7 @@ set -e
 ("--wip", type=float, default=0.0, help="Word insertion penalty factor. default: 0.0")
 
 ("--beam", type=float, default=17.0, help="latgen-faster args: --beam")
-("--lattice-beam", type=float, default=10.0, help="latgen-faster args: --lattice-beam")
+("--lattice-beam", type=float, default=6.0, help="latgen-faster args: --lattice-beam")
 PARSER
 eval $(python utils/parseopt.py $0 $*)
 
