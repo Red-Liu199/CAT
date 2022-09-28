@@ -151,10 +151,11 @@ def worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_out: mp.Queue
             # beam decoder conducts the softmax internally
             logits, olens = model(x, x_len)
             # NOTE: log_softmax makes no difference in ctc beam search
-            #       however, if would like to do further work with the AM score,
+            #       however, if you would like to do further work with the AM score,
             #       you may need to do the normalization.
             if args.do_normalize:
                 logits = torch.log_softmax(logits, dim=-1)
+
             beam_results, beam_scores, _, out_lens = searcher.decode(
                 logits, olens)
             # make it in descending order

@@ -362,8 +362,8 @@ binlist = [
     'cat.rnnt.train',
     'cat.lm.train',
     'cat.ctc.train',
-    'cat.ctc.train_sa_crf',
-    'cat.ctc.train_smbr'
+    'cat.ctc.train_sa_crf'
+    # 'cat.ctc.train_smwer'
 ]
 
 add_property(hyper_schema, {

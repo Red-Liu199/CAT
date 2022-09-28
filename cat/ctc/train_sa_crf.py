@@ -33,22 +33,22 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
     )
 
 
-class SACRFTrainer(AMTrainer):
+class SCRFTrainer(AMTrainer):
     def __init__(
             self,
             lm: AbsDecoder,
             lm_weight: float = 1.0,
-            ctc_weight: float = 0.,
+            num_aux_weight: float = 0.,
             n_samples: int = 256,
             local_normalized: bool = True,
-            ctc_weight_decay: float = 1.0,
+            num_aux_weight_decay: float = 1.0,
             # compute gradients via mapped y seqs by CTC loss, instead of computing probs of pi seqs.
             compute_gradient_via_y: bool = False,
             **kwargs):
         super().__init__(**kwargs)
         assert isinstance(n_samples, int) and n_samples > 0
         assert isinstance(lm_weight, (int, float)) and lm_weight > 0
-        assert isinstance(ctc_weight, (int, float))
+        assert isinstance(num_aux_weight, (int, float))
         assert not self.is_crf, f"sa-crf mode is conflict with crf"
 
         self._compute_y_grad = compute_gradient_via_y
@@ -57,19 +57,75 @@ class SACRFTrainer(AMTrainer):
             'lm_weight': lm_weight
         }
         # aux_ctc[t] = aux_ctc[t-1] * aux_ctc_decay
-        if not local_normalized and ctc_weight != 0.0:
+        if not local_normalized and num_aux_weight != 0.0:
             print(
                 "warning: with a global normalized model, auxilliary numerator weight might not be proper.")
 
         # register as a buffer, so we can restore it when resuming from a stop training.
-        self.register_buffer('_aux_ctc', torch.tensor(ctc_weight))
-        self._aux_decay_factor = ctc_weight_decay
+        self.register_buffer('_aux_ctc', torch.tensor(num_aux_weight))
+        self._aux_decay_factor = num_aux_weight_decay
 
         self.n_samples = n_samples
         self._is_local_normalized = local_normalized
-        self.normalized_decoding &= local_normalized
         self.criterion = nn.CTCLoss(reduction='none', zero_infinity=True)
         self._pad = nn.ConstantPad1d((1, 0), 0)
+
+    def _IS(self, log_probs: torch.Tensor, lx: torch.Tensor):
+        """Importance Sampling
+
+        Return:
+            (w_hat, pi_samples, y_samples, lysample)
+            w_hat: (N, K)
+            pi_samples: (N, T, K)
+            y_samples: (N*K, U)
+            lysample: (N*K, ), max(lysample) = U
+
+        Note that in following formulas, p() is NOT prob().
+        Use q(pi|x) = \prod_t prob(pi_t|x) as the proposal distribution.
+        The importance weihgt w = p(pi|x) / q(pi|x) = prior(y) / Z(x),
+            where the Z(x) is the normalized constant, we expect to avoid
+            computing it, so we just return the re-normalized weight
+            w_hat = [..., w_hat_i, ...], w_hat_i = prior(y_i) / \sum_j prior(y_j)
+            here the piror(y) is generally P(Y)^lm_weight, P(Y) is obtained by a LM.
+            If you're confused what this means, you may need to take a look
+            at the Monte Carlo Sampling (expecially Importance Sampling.)
+        """
+        N, T, V = log_probs.shape
+        K = self.n_samples
+
+        # (N, T, K)
+        pi_samples = torch.multinomial(
+            log_probs.exp().view(-1, V),
+            K, replacement=True
+        ).view(N, T, K)
+
+        # get alignment seqs
+        # (N, T, K) -> (N, K, T) -> (N*K, T)
+        ysamples = pi_samples.transpose(1, 2).contiguous().view(-1, T)
+
+        # (N*K, T) -> (N*K, U)
+        ysamples, lsamples = ctc_align.align_(
+            ysamples,
+            # (N, ) -> (N, 1) -> (N, K) -> (N*K, )
+            lx.unsqueeze(1).repeat(1, K).contiguous().view(-1)
+        )
+        ysamples = ysamples[:, :lsamples.max()]
+        ysamples *= torch.arange(ysamples.size(1), device=ysamples.device)[
+            None, :] < lsamples[:, None]
+
+        padded_ys = self._pad(ysamples)
+        # <s> A B C -> A B C <s>
+        dummy_targets = torch.roll(padded_ys, -1, dims=1)
+
+        # piror(y): (N*K, ) -> (N, K)
+        # here indeed is the log prob.
+        w_hat = self.attach['lm'].score(
+            padded_ys,
+            dummy_targets,
+            lsamples+1
+        ).view(N, K) * self.weights['lm_weight']
+        w_hat = w_hat - torch.logsumexp(w_hat, dim=1, keepdim=True)
+        return w_hat.exp(), pi_samples, ysamples, lsamples
 
     def forward(self, feats: torch.Tensor, labels: torch.Tensor, lx: torch.Tensor, ly: torch.Tensor):
 
@@ -80,56 +136,15 @@ class SACRFTrainer(AMTrainer):
         ly = ly.to(device=device, dtype=torch.int)
         labels = labels.to(torch.int)
 
-        if self.training:
-            self._aux_ctc *= self._aux_decay_factor
+        N, T, V = logits.shape
+        K = self.n_samples
 
-        # numerator: (N, )
+        w_hat, pi_samples, ysamples, lsamples = self._IS(log_probs, lx)
+
         if self._is_local_normalized:
             score = log_probs
         else:
             score = logits
-        num = self.criterion(
-            score.transpose(0, 1),
-            labels.to(device='cpu'),
-            lx, ly
-        )
-
-        N, T, V = logits.shape
-        K = self.n_samples
-
-        # (N, T, K)
-        orin_pis = torch.multinomial(
-            log_probs.exp().view(-1, V),
-            K, replacement=True
-        ).view(N, T, K)
-
-        # get alignment seqs
-        # (N, T, K) -> (N, K, T) -> (N*K, T)
-        ysamples = orin_pis.transpose(1, 2).contiguous().view(-1, T)
-
-        # (N*K, T) -> (N*K, U)
-        ysamples, lsamples = ctc_align.align_(
-            ysamples,
-            # (N, ) -> (N, 1) -> (N, K) -> (N*K, )
-            lx.unsqueeze(1).repeat(1, K).contiguous().view(-1)
-        )
-        ysamples = ysamples[:, :lsamples.max()]
-        ysamples *= torch.arange(ysamples.size(1), device=device)[
-            None, :] < lsamples[:, None]
-
-        padded_targets = self._pad(ysamples)
-        # <s> A B C -> A B C <s>
-        dummy_targets = torch.roll(padded_targets, -1, dims=1)
-
-        # log P(Y): (N*K, )
-        p_y = self.attach['lm'].score(
-            padded_targets,
-            dummy_targets,
-            lsamples+1
-        ) * self.weights['lm_weight']
-        # (N*K, ) -> (N, K)
-        p_y = p_y.view(N, K)
-
         if self._compute_y_grad:
             # cal s := score(pi) from CTC: (N, K)
             # fmt: off
@@ -144,22 +159,27 @@ class SACRFTrainer(AMTrainer):
             # fmt:on
         else:
             # score(pi|X): (N, T, K)
-            s = torch.gather(score, dim=-1, index=orin_pis)
+            s = torch.gather(score, dim=-1, index=pi_samples)
             s *= (torch.arange(s.size(1), device=device)[
                 None, :] < lx[:, None])[:, :, None]
             # (N, T, K) -> (N, K)
             s = s.sum(dim=1)
 
-        # estimate = (P(Y_0)*s(pi_0|X)+...) / (P(Y_0)+...)
-        # estimate = (p_y.exp()*s).sum(dim=1) / p_y.exp().sum(dim=1)
         # (N, ), a more numerical stable ver.
-        estimate = torch.sum(
-            s * (p_y - torch.logsumexp(p_y, dim=1, keepdim=True)).exp(), dim=1)
+        estimate = torch.sum(s * w_hat, dim=1)
 
+        # numerator: (N, )
+        num = self.criterion(
+            score.transpose(0, 1),
+            labels.to(device='cpu'),
+            lx, ly
+        )
+        if self.training:
+            self._aux_ctc *= self._aux_decay_factor
         return ((1+self._aux_ctc)*num + estimate).mean(dim=0)
 
 
-def build_model(cfg: dict, args: argparse.Namespace) -> Union[AbsEncoder, SACRFTrainer]:
+def build_model(cfg: dict, args: argparse.Namespace) -> Union[AbsEncoder, SCRFTrainer]:
     """
     cfg:
         trainer:
@@ -188,28 +208,21 @@ def build_model(cfg: dict, args: argparse.Namespace) -> Union[AbsEncoder, SACRFT
 
     # initialize beam searcher
     assert 'decoder' in trainer_cfg, f"missing 'decoder' in field:trainer"
-    ctc_kwargs = {}
-    if 'alpha' not in cfg['trainer']['decoder']:
-        cfg['trainer']['decoder']['alpha'] = trainer_cfg['lm'].get(
-            'weight', 1.0)
-    if 'kenlm' not in cfg['trainer']['decoder']:
+    trainer_cfg['decoder']['alpha'] = trainer_cfg['decoder'].get(
+        'alpha', trainer_cfg['lm'].get('weight', 1.0))
+    if 'kenlm' not in trainer_cfg['decoder']:
         lmconfig = coreutils.readjson(trainer_cfg['lm']['config'])
         assert lmconfig['decoder']['type'] == 'NGram', \
             f"You do not set field:trainer:decoder:kenlm and field:trainer:lm:config is not directed to a kenlm."
-        cfg['trainer']['decoder']['kenlm'] = lmconfig['decoder']['kwargs']['f_binlm']
+        trainer_cfg['decoder']['kenlm'] = lmconfig['decoder']['kwargs']['f_binlm']
+    trainer_cfg['lm'] = elm
 
-    ctc_kwargs['decoder'] = build_beamdecoder(
-        cfg['trainer']['decoder']
+    trainer_cfg['decoder'] = build_beamdecoder(
+        trainer_cfg['decoder']
     )
-    ctc_kwargs['am'] = ctc_builder(cfg, args, dist=False, wrapper=False)
+    trainer_cfg['am'] = ctc_builder(cfg, args, dist=False, wrapper=False)
 
-    model = SACRFTrainer(
-        lm=elm,
-        lm_weight=trainer_cfg['lm'].get('weight', 1.0),
-        ctc_weight=trainer_cfg.get('ctc_weight', 0.0),
-        n_samples=trainer_cfg.get('n_samples', 256),
-        **ctc_kwargs
-    )
+    model = SCRFTrainer(**trainer_cfg)
 
     # make batchnorm synced across all processes
     model = coreutils.convert_syncBatchNorm(model)

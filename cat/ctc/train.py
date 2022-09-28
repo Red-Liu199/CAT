@@ -107,12 +107,6 @@ class AMTrainer(nn.Module):
         self.attach = {
             'decoder': decoder
         }
-        # NOTE: For CTC beam search decoding, if there's no lm,
-        #       we don't need to do normalization over logits.
-        if decoder._is_token_based:
-            self.normalized_decoding = False
-        else:
-            self.normalized_decoding = True
 
     def register_crf_ctx(self, den_lm: Optional[str] = None):
         """Register the CRF context on model device."""
@@ -130,8 +124,6 @@ class AMTrainer(nn.Module):
 
         bs = xs.size(0)
         logits, lx = self.am(xs, lx)
-        if self.normalized_decoding:
-            logits = logits.log_softmax(dim=-1)
 
         # y_samples: (N, k, L), ly_samples: (N, k)
         y_samples, _, _, ly_samples = self.attach['decoder'].decode(
