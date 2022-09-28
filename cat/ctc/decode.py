@@ -95,19 +95,24 @@ def dataserver(args, q: mp.Queue):
 def datawriter(args, q: mp.Queue):
     cnt_done = 0
     nbest = {}
+    transcript = []
+
+    while True:
+        # type: Tuple[str, Dict[int, Tuple[float, str]]]
+        nbestlist = q.get(block=True)
+        if nbestlist is None:
+            cnt_done += 1
+            if cnt_done == args.world_size:
+                break
+            continue
+        key, content = nbestlist
+        nbest[key] = content
+        transcript.append(f"{key}\t{content[0][1]}\n")
+        del nbestlist
+
     with open(args.output_prefix, 'w') as fo:
-        while True:
-            # type: Tuple[str, Dict[int, Tuple[float, str]]]
-            nbestlist = q.get(block=True)
-            if nbestlist is None:
-                cnt_done += 1
-                if cnt_done == args.world_size:
-                    break
-                continue
-            key, content = nbestlist
-            nbest[key] = content
-            fo.write(f"{key}\t{content[0][1]}\n")
-            del nbestlist
+        for l in transcript:
+            fo.write(l)
 
     with open(args.output_prefix+'.nbest', 'wb') as fo:
         pickle.dump(nbest, fo)
@@ -117,14 +122,12 @@ def worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_out: mp.Queue
     torch.set_num_threads(args.thread_per_woker)
 
     tokenizer = tknz.load(args.tokenizer)
-    uselm = False
     if args.lm_path is None:
         # w/o LM, labels won't be used in decoding.
         labels = [''] * tokenizer.vocab_size
         searcher = CTCBeamDecoder(
             labels, beam_width=args.beam_size, log_probs_input=True, num_processes=args.thread_per_woker)
     else:
-        uselm = True
         assert os.path.isfile(
             args.lm_path), f"--lm-path={args.lm_path} is not a valid file."
 
@@ -147,7 +150,10 @@ def worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_out: mp.Queue
             key = key[0]
             # beam decoder conducts the softmax internally
             logits, olens = model(x, x_len)
-            if uselm:
+            # NOTE: log_softmax makes no difference in ctc beam search
+            #       however, if would like to do further work with the AM score,
+            #       you may need to do the normalization.
+            if args.do_normalize:
                 logits = torch.log_softmax(logits, dim=-1)
             beam_results, beam_scores, _, out_lens = searcher.decode(
                 logits, olens)
@@ -170,7 +176,12 @@ def build_model(args: argparse.Namespace):
     assert args.resume is not None, "Trying to decode with uninitialized parameters. Add --resume"
 
     model = ctc_builder(coreutils.readjson(args.config), dist=False)
-    model = coreutils.load_checkpoint(model, args.resume)
+    checkpoint = torch.load(args.resume, map_location='cpu')
+    # filter out the parameters related to specific trainer.
+    for k in list(checkpoint['model'].keys()):
+        if '.am' not in k:
+            del checkpoint['model'][k]
+    model = coreutils.load_checkpoint(model, checkpoint)
     model = model.am
     model.eval()
     return model
@@ -191,6 +202,8 @@ def _parser():
     parser.add_argument("--beta", type=float, default=0.0,
                         help="The 'beta' value for LM integration, a.k.a. the penalty of tokens.")
     parser.add_argument("--beam-size", type=int, default=3)
+    parser.add_argument("--do-normalize", action="store_true",
+                        default=False, help="Do the log-softmax normalization before beam search.")
     parser.add_argument("--tokenizer", type=str,
                         help="Tokenizer model file. See cat/shared/tokenizer.py for details.")
     parser.add_argument("--nj", type=int, default=-1)

@@ -9,8 +9,8 @@ set -e
 ("--start-stage", type=int, default=1, help="Start stage of the script.")
 ("--stop-stage", type=int, default=100, help="Stop stage of the script.")
 ("-o", "--order", type=int, default=5, help="Max order of n-gram. default: 5")
-("--output", type=str, default="$dir/${order}gram.klm",
-    help="Path of output N-gram file. default: [dir]/[order]gram.klm")
+("--output", type=str, default="$dir/${order}gram.bin",
+    help="Path of output N-gram file. default: [dir]/[order]gram.bin")
 ("--arpa", action="store_true", help="Store n-gram file as .arpa instead of binary.")
 ("--prune", type=str, default="", nargs='*',
     help="Prune options passed to KenLM lmplz executable. default: ")

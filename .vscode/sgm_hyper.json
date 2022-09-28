@@ -543,7 +543,7 @@
                                     },
                                     "init_model": {
                                         "type": "string",
-                                        "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself (w/o optimizer)"
+                                        "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself."
                                     }
                                 }
                             }
@@ -680,7 +680,7 @@
                                     },
                                     "init_model": {
                                         "type": "string",
-                                        "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself (w/o optimizer)"
+                                        "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself."
                                     }
                                 }
                             }
@@ -817,7 +817,7 @@
                                     },
                                     "init_model": {
                                         "type": "string",
-                                        "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself (w/o optimizer)"
+                                        "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself."
                                     }
                                 }
                             }
@@ -954,7 +954,7 @@
                                     },
                                     "init_model": {
                                         "type": "string",
-                                        "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself (w/o optimizer)"
+                                        "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself."
                                     }
                                 }
                             }
@@ -1091,7 +1091,7 @@
                                     },
                                     "init_model": {
                                         "type": "string",
-                                        "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself (w/o optimizer)"
+                                        "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself."
                                     }
                                 }
                             }
@@ -1228,7 +1228,7 @@
                                     },
                                     "init_model": {
                                         "type": "string",
-                                        "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself (w/o optimizer)"
+                                        "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself."
                                     }
                                 }
                             }
@@ -1365,7 +1365,7 @@
                                     },
                                     "init_model": {
                                         "type": "string",
-                                        "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself (w/o optimizer)"
+                                        "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself."
                                     }
                                 }
                             }
@@ -1502,7 +1502,7 @@
                                     },
                                     "init_model": {
                                         "type": "string",
-                                        "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself (w/o optimizer)"
+                                        "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself."
                                     }
                                 }
                             }
@@ -1610,7 +1610,7 @@
                                             },
                                             "init_model": {
                                                 "type": "string",
-                                                "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself (w/o optimizer)"
+                                                "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself."
                                             },
                                             "lm_config": {
                                                 "type": "string",
@@ -1742,7 +1742,7 @@
                                             },
                                             "init_model": {
                                                 "type": "string",
-                                                "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself (w/o optimizer)"
+                                                "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself."
                                             },
                                             "nbestlist": {
                                                 "type": "string",
@@ -1809,7 +1809,7 @@
                                             },
                                             "init_model": {
                                                 "type": "string",
-                                                "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself (w/o optimizer)"
+                                                "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself."
                                             },
                                             "input_scp": {
                                                 "type": "string"
@@ -1851,7 +1851,7 @@
                                             },
                                             "init_model": {
                                                 "type": "string",
-                                                "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself (w/o optimizer)"
+                                                "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself."
                                             },
                                             "input_scp": {
                                                 "type": "string"
@@ -1877,6 +1877,10 @@
                                             "beam_size": {
                                                 "type": "number",
                                                 "default": 3
+                                            },
+                                            "do_normalize": {
+                                                "description": "Do the log-softmax normalization before beam search.",
+                                                "default": false
                                             },
                                             "tokenizer": {
                                                 "type": "string",

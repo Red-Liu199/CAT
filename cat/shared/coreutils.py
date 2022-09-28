@@ -273,7 +273,7 @@ def basic_trainer_parser(prog: str = '', training: bool = True,  isddp: bool = T
     parser.add_argument("--resume", type=str, default=None,
                         help="Path to location of checkpoint.")
     parser.add_argument("--init-model", type=str, default=None,
-                        help="Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself (w/o optimizer)")
+                        help="Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself.")
 
     return parser
 
@@ -444,10 +444,13 @@ def setup_path(args: argparse.Namespace):
             )
 
 
-def load_checkpoint(model: Union[torch.nn.Module, torch.nn.parallel.DistributedDataParallel], path_ckpt: str) -> torch.nn.Module:
+def load_checkpoint(model: Union[torch.nn.Module, torch.nn.parallel.DistributedDataParallel], path_ckpt: Union[str, OrderedDict]) -> torch.nn.Module:
     """Load parameters across distributed model and its checkpoint, resolve the prefix 'module.'"""
-    checkpoint = torch.load(
-        path_ckpt, map_location=next(model.parameters()).device)
+    if isinstance(path_ckpt, str):
+        checkpoint = torch.load(
+            path_ckpt, map_location=next(model.parameters()).device)
+    else:
+        checkpoint = path_ckpt
     if isinstance(model, torch.nn.parallel.DistributedDataParallel):
         state_dict = checkpoint['model']
     else:

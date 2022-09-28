@@ -267,10 +267,7 @@ class Manager(object):
                 f"> initialize model from: {args.init_model}", args.gpu)
             checkpoint = torch.load(
                 args.init_model, map_location=f'cuda:{args.gpu}')  # type: OrderedDict
-            if 'scheduler' in checkpoint:
-                # load the optimizer params
-                self.scheduler.load_state_dict(
-                    checkpoint['scheduler'], optim_only=True)
+
             try:
                 self.model.load_state_dict(checkpoint['model'])
             except RuntimeError as re:

@@ -41,6 +41,7 @@ class SACRFTrainer(AMTrainer):
             ctc_weight: float = 0.,
             n_samples: int = 256,
             local_normalized: bool = True,
+            ctc_weight_decay: float = 1.0,
             # compute gradients via mapped y seqs by CTC loss, instead of computing probs of pi seqs.
             compute_gradient_via_y: bool = False,
             **kwargs):
@@ -53,9 +54,17 @@ class SACRFTrainer(AMTrainer):
         self._compute_y_grad = compute_gradient_via_y
         self.attach['lm'] = lm
         self.weights = {
-            'lm_weight': lm_weight,
-            'ctc_loss': 1+ctc_weight
+            'lm_weight': lm_weight
         }
+        # aux_ctc[t] = aux_ctc[t-1] * aux_ctc_decay
+        if not local_normalized and ctc_weight != 0.0:
+            print(
+                "warning: with a global normalized model, auxilliary numerator weight might not be proper.")
+
+        # register as a buffer, so we can restore it when resuming from a stop training.
+        self.register_buffer('_aux_ctc', torch.tensor(ctc_weight))
+        self._aux_decay_factor = ctc_weight_decay
+
         self.n_samples = n_samples
         self._is_local_normalized = local_normalized
         self.normalized_decoding &= local_normalized
@@ -71,6 +80,9 @@ class SACRFTrainer(AMTrainer):
         ly = ly.to(device=device, dtype=torch.int)
         labels = labels.to(torch.int)
 
+        if self.training:
+            self._aux_ctc *= self._aux_decay_factor
+
         # numerator: (N, )
         if self._is_local_normalized:
             score = log_probs
@@ -81,9 +93,6 @@ class SACRFTrainer(AMTrainer):
             labels.to(device='cpu'),
             lx, ly
         )
-        # for evaluation, use CTC loss only
-        if not self.training:
-            return num.mean(dim=0)
 
         N, T, V = logits.shape
         K = self.n_samples
@@ -147,7 +156,7 @@ class SACRFTrainer(AMTrainer):
         estimate = torch.sum(
             s * (p_y - torch.logsumexp(p_y, dim=1, keepdim=True)).exp(), dim=1)
 
-        return (self.weights['ctc_loss']*num + estimate).mean(dim=0)
+        return ((1+self._aux_ctc)*num + estimate).mean(dim=0)
 
 
 def build_model(cfg: dict, args: argparse.Namespace) -> Union[AbsEncoder, SACRFTrainer]:
