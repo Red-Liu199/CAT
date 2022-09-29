@@ -134,8 +134,6 @@ function exc_rm() {
 
     case $name in
     cat | all)
-        python -m pip uninstall -y cat
-        python setup.py clean --all
         # FIXME: maybe we should clean building dependencies ?
         ;;&
     ctcdecode | all)
