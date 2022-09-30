@@ -33,6 +33,14 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
     )
 
 
+def unique(x, dim=-1):
+    unique, inverse = torch.unique(x, return_inverse=True, dim=dim)
+    perm = torch.arange(inverse.size(
+        dim), dtype=inverse.dtype, device=inverse.device)
+    inverse, perm = inverse.flip([dim]), perm.flip([dim])
+    return unique, inverse, inverse.new_empty(unique.size(dim)).scatter_(dim, inverse, perm)
+
+
 class SCRFTrainer(AMTrainer):
     def __init__(
             self,
@@ -146,17 +154,19 @@ class SCRFTrainer(AMTrainer):
         else:
             score = logits
         if self._compute_y_grad:
-            # cal s := score(pi) from CTC: (N, K)
-            # fmt: off
+            unique_samples, inverse, ordered = unique(ysamples, dim=0)
+            # (UN, )
             s = -self.criterion(
-                # (N, T, V) -> (T, N, V) -> (T, N, 1, V) -> (T, N, K, V) -> (T, N*K, V)
-                score.transpose(0,1).unsqueeze(2).expand(-1, -1, K, -1).contiguous().view(T, N*K, -1),
-                gather.cat(ysamples, lsamples).to(device='cpu'),
-                # (N, ) -> (N, 1) -> (N, K) -> (N*K, )
-                lx.unsqueeze(1).repeat(1, K).contiguous().view(-1),
-                lsamples
-            ).view(N, K)
-            # fmt:on
+                # (N, T, V) -> (UN, T, V) -> (T, UN, V)
+                score[torch.div(ordered, K, rounding_mode='floor')
+                      ].transpose(0, 1),
+                gather.cat(unique_samples, lsamples[ordered]).to(device='cpu'),
+                # (N, ) -> (UN, )
+                lx[torch.div(ordered, K, rounding_mode='floor')],
+                lsamples[ordered]
+            )
+            # (UN, ) -> (N*K, )
+            s = torch.gather(s, dim=0, index=inverse).view(N, K)
         else:
             # score(pi|X): (N, T, K)
             s = torch.gather(score, dim=-1, index=pi_samples)
