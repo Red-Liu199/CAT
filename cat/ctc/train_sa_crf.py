@@ -14,6 +14,7 @@ from ..lm import lm_builder
 from ..shared import coreutils
 from ..shared.encoder import AbsEncoder
 from ..shared.decoder import AbsDecoder
+from ..shared.manager import train as default_train_func
 from ..rnnt.train_nce import custom_evaluate
 
 import ctc_align
@@ -29,7 +30,8 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
     basic_worker(
         gpu, ngpus_per_node, args,
         func_build_model=build_model,
-        func_eval=custom_evaluate
+        func_eval=custom_evaluate,
+        func_train=custom_train
     )
 
 
@@ -64,11 +66,8 @@ class SCRFTrainer(AMTrainer):
         self.weights = {
             'lm_weight': lm_weight
         }
-        # aux_ctc[t] = aux_ctc[t-1] * aux_ctc_decay
-        if not local_normalized and num_aux_weight != 0.0:
-            print(
-                "warning: with a global normalized model, auxilliary numerator weight might not be proper.")
 
+        # aux_ctc[t] = aux_ctc[t-1] * aux_ctc_decay
         # register as a buffer, so we can restore it when resuming from a stop training.
         self.register_buffer('_aux_ctc', torch.tensor(num_aux_weight))
         self._aux_decay_factor = num_aux_weight_decay
@@ -78,7 +77,7 @@ class SCRFTrainer(AMTrainer):
         self.criterion = nn.CTCLoss(reduction='none', zero_infinity=True)
         self._pad = nn.ConstantPad1d((1, 0), 0)
 
-    def _IS(self, log_probs: torch.Tensor, lx: torch.Tensor):
+    def _IS(self, logits: torch.Tensor, lx: torch.Tensor):
         """Importance Sampling
 
         Return:
@@ -98,22 +97,16 @@ class SCRFTrainer(AMTrainer):
             If you're confused what this means, you may need to take a look
             at the Monte Carlo Sampling (expecially Importance Sampling.)
         """
-        N, T, V = log_probs.shape
+        N, T, V = logits.shape
         K = self.n_samples
 
-        # (N, T, K)
-        pi_samples = torch.multinomial(
-            log_probs.exp().view(-1, V),
-            K, replacement=True
-        ).view(N, T, K)
+        # (K, N, T) -> (N, T, K)
+        m = torch.distributions.categorical.Categorical(logits=logits)
+        pi_samples = m.sample((K, )).permute(1, 2, 0)
 
-        # get alignment seqs
         # (N, T, K) -> (N, K, T) -> (N*K, T)
-        ysamples = pi_samples.transpose(1, 2).contiguous().view(-1, T)
-
-        # (N*K, T) -> (N*K, U)
         ysamples, lsamples = ctc_align.align_(
-            ysamples,
+            pi_samples.transpose(1, 2).contiguous().view(-1, T),
             # (N, ) -> (N, 1) -> (N, K) -> (N*K, )
             lx.unsqueeze(1).repeat(1, K).contiguous().view(-1)
         )
@@ -121,25 +114,29 @@ class SCRFTrainer(AMTrainer):
         ysamples *= torch.arange(ysamples.size(1), device=ysamples.device)[
             None, :] < lsamples[:, None]
 
-        padded_ys = self._pad(ysamples)
+        # (UN, )
+        unique_samples, inverse, ordered = unique(ysamples, dim=0)
+
+        padded_ys = self._pad(unique_samples)
         # <s> A B C -> A B C <s>
         dummy_targets = torch.roll(padded_ys, -1, dims=1)
 
-        # piror(y): (N*K, ) -> (N, K)
+        # piror(y): (UN, )
         # here indeed is the log prob.
         w_hat = self.attach['lm'].score(
             padded_ys,
             dummy_targets,
-            lsamples+1
-        ).view(N, K) * self.weights['lm_weight']
+            lsamples[ordered]+1
+        ) * self.weights['lm_weight']
+        # (UN, ) -> (N*K, ) -> (N, K)
+        w_hat = torch.gather(w_hat, dim=0, index=inverse).view(N, K)
         w_hat = w_hat - torch.logsumexp(w_hat, dim=1, keepdim=True)
-        return w_hat.exp(), pi_samples, ysamples, lsamples
+        return w_hat.exp(), pi_samples, ysamples, lsamples, unique_samples, inverse, ordered
 
     def forward(self, feats: torch.Tensor, labels: torch.Tensor, lx: torch.Tensor, ly: torch.Tensor):
 
         device = feats.device
         logits, lx = self.am(feats, lx)
-        log_probs = logits.log_softmax(dim=-1)
         lx = lx.to(device=device, dtype=torch.int)
         ly = ly.to(device=device, dtype=torch.int)
         labels = labels.to(torch.int)
@@ -147,14 +144,16 @@ class SCRFTrainer(AMTrainer):
         N, T, V = logits.shape
         K = self.n_samples
 
-        w_hat, pi_samples, ysamples, lsamples = self._IS(log_probs, lx)
+        w_hat, pi_samples, _, lsamples, unique_samples, inverse, ordered = self._IS(
+            logits, lx)
+        squeeze_ratio = 1 - ordered.size(0) / N / K
 
         if self._is_local_normalized:
-            score = log_probs
+            score = logits.log_softmax(dim=-1)
         else:
-            score = logits
+            score = logits.float()
+
         if self._compute_y_grad:
-            unique_samples, inverse, ordered = unique(ysamples, dim=0)
             # (UN, )
             s = -self.criterion(
                 # (N, T, V) -> (UN, T, V) -> (T, UN, V)
@@ -186,7 +185,25 @@ class SCRFTrainer(AMTrainer):
         )
         if self.training:
             self._aux_ctc *= self._aux_decay_factor
-        return ((1+self._aux_ctc)*num + estimate).mean(dim=0)
+
+        return ((1+self._aux_ctc)*num + estimate).mean(dim=0), squeeze_ratio, num
+
+
+def custom_hook(manager, model, args, n_step, nnforward_args):
+
+    loss, squeeze_ratio, ctc_loss = model(*nnforward_args)
+
+    if args.rank == 0:
+        manager.writer.add_scalar(
+            'sample/squeeze-ratio', squeeze_ratio, manager.step_by_last_epoch + n_step)
+        manager.writer.add_scalar(
+            'loss/numerator', ctc_loss.detach().mean(dim=0).item(), manager.step_by_last_epoch + n_step)
+
+    return loss
+
+
+def custom_train(*args):
+    return default_train_func(*args, hook_func=custom_hook)
 
 
 def build_model(cfg: dict, args: argparse.Namespace) -> Union[AbsEncoder, SCRFTrainer]:

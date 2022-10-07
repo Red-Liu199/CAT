@@ -65,25 +65,24 @@ def text2bin(arguments: Tuple[argparse.Namespace, str, int, int]):
                 yield bos + processor(line.strip())+eos
         return
 
-    dataset = []
-    # mode = 0
-    if args.truncate != -1:
-        # mode = 1
-        chunksize = args.truncate
-        for indices in file_reader():
-            for x, y in chunk(indices[:-1], chunksize, drop_res=False, Y=indices[1:]):
-                dataset.append((x, y))
-    elif args.concat != -1:
-        chunksize = args.concat
-        for indices in file_reader():
-            for x in chunk(indices, chunksize, drop_res=True):
-                dataset.append(x)
-    else:
-        for indices in file_reader():
-            dataset.append(indices)
-
     with open(binfile, 'wb') as fo:
-        pickle.dump(dataset, fo)
+        # mode = 0
+        if args.truncate != -1:
+            # mode = 1
+            chunksize = args.truncate
+            for indices in file_reader():
+                for x, y in chunk(indices[:-1], chunksize, drop_res=False, Y=indices[1:]):
+                    pickle.dump((x, y), fo)
+        elif args.concat != -1:
+            chunksize = args.concat
+            for indices in file_reader():
+                for x in chunk(indices, chunksize, drop_res=True):
+                    pickle.dump(x, fo)
+        else:
+            for indices in file_reader():
+                pickle.dump(indices, fo)
+        # terminated flag
+        pickle.dump(None, fo)
 
     return
 
@@ -130,11 +129,9 @@ def main(args: argparse.Namespace):
     with open(f_data, 'wb') as fo:
         for i in range(num_threads):
             with open(fmt.format(i), 'rb') as fi:
-                part_dataset = pickle.load(fi)
-
-            for _data in part_dataset:
-                _seeks.append(fo.tell())
-                pickle.dump(_data, fo)
+                while (data := pickle.load(fi)) != None:
+                    _seeks.append(fo.tell())
+                    pickle.dump(data, fo)
             os.remove(fmt.format(i))
 
     with open(args.output, 'wb') as fo:

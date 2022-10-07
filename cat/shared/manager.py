@@ -513,7 +513,10 @@ def train(trainloader: ReadBatchDataLoader, args: argparse.Namespace, manager: M
     t_last_step = time.time()
     t_last_batch = time.time()
     cnt_step_update = 0
-    is_quit = torch.tensor(0, dtype=torch.bool, device=args.gpu)
+    is_wds_dl = args.large_dataset
+    is_quit = None
+    if is_wds_dl:
+        is_quit = torch.tensor(0, dtype=torch.bool, device=args.gpu)
 
     def get_progress_bar():
         return tqdm(
@@ -541,9 +544,10 @@ def train(trainloader: ReadBatchDataLoader, args: argparse.Namespace, manager: M
                     sys.stderr.flush()
             continue
 
-        dist.all_reduce(is_quit, op=dist.ReduceOp.MAX)
-        if is_quit:
-            break
+        if is_wds_dl:
+            dist.all_reduce(is_quit, op=dist.ReduceOp.MAX)
+            if is_quit:
+                break
 
         # update every fold times and drop the last few batches (number of which <= fold)
         if fold == 1 or (i+1) % fold == 0:
@@ -611,7 +615,7 @@ def train(trainloader: ReadBatchDataLoader, args: argparse.Namespace, manager: M
         if args.verbose:
             t_last_batch = time.time()
 
-    if not is_quit:
+    if is_wds_dl and (not is_quit):
         # set quit flag to True
         is_quit = ~is_quit
         # wait until other processes quit
@@ -620,9 +624,9 @@ def train(trainloader: ReadBatchDataLoader, args: argparse.Namespace, manager: M
     manager.step_by_last_epoch += cnt_step_update
     # update n_steps, since we don't know how many steps there are with large dataset mode.
     args.n_steps = cnt_step_update
+    p_bar.close()
     if args.check_freq == -1:
         yield
-    p_bar.close()
     return
 
 
