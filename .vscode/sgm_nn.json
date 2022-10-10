@@ -466,6 +466,7 @@
                     "examples": [
                         "AbsDecoder",
                         "CausalTransformer",
+                        "EmbConv1D",
                         "Embedding",
                         "ILM",
                         "LSTM",
@@ -572,6 +573,44 @@
                                     "use_cache": {
                                         "type": "boolean",
                                         "default": false
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "type": {
+                                "const": "EmbConv1D"
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "kwargs": {
+                                "type": "object",
+                                "properties": {
+                                    "num_classes": {
+                                        "type": "number"
+                                    },
+                                    "edim": {
+                                        "type": "number"
+                                    },
+                                    "conv_dim": {
+                                        "type": "number"
+                                    },
+                                    "kernel_size": {
+                                        "type": "number",
+                                        "default": 3
+                                    },
+                                    "act": {
+                                        "default": "relu"
+                                    },
+                                    "with_head": {
+                                        "type": "boolean",
+                                        "default": true
                                     }
                                 }
                             }

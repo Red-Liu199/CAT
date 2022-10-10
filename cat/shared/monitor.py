@@ -18,20 +18,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 from typing import *
 
-try:
-    # import from relative modules
-    from ._constants import (
-        F_MONITOR_FIG,
-        F_MONITOR_SUMMARY
-    )
-except ImportError:
-    # call with `python cat/shared/monitor.py ...`
-    import sys
-    sys.path.append('.')
-    from cat.shared._constants import (
-        F_MONITOR_FIG,
-        F_MONITOR_SUMMARY
-    )
+from cat.shared._constants import (
+    F_MONITOR_FIG,
+    F_MONITOR_SUMMARY
+)
 
 # modify the values to any you want, but keep the keys as they're
 ANNOTATION = OrderedDict([

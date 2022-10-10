@@ -271,6 +271,56 @@ class Embedding(AbsDecoder):
         return AbsStates(None, Embedding)
 
 
+class EmbConv1D(AbsDecoder):
+    """Decoder layer with 1-layer conv1d (for limiting the context length."""
+
+    def __init__(
+            self,
+            num_classes: int,
+            edim: int,
+            conv_dim: int,
+            kernel_size: int = 3,
+            act: Literal['relu', 'tanh'] = 'relu',
+            with_head: bool = True) -> None:
+        super().__init__(num_classes, dim_emb=edim, dim_hidden=conv_dim, with_head=with_head)
+        if act == 'relu':
+            self.act = nn.ReLU()
+        elif act == 'tanh':
+            self.act = nn.Tanh()
+        else:
+            raise ValueError(
+                f"activation type: '{act}' is not support, expect one of ['relu', 'tanh']")
+
+        self.conv = nn.Sequential(
+            nn.ConstantPad1d((kernel_size-1, 0), 0),
+            nn.Conv1d(edim, conv_dim, kernel_size=kernel_size)
+        )
+
+    def forward(self, x: torch.Tensor, *args, **kwargs):
+        """
+        x: (N, T)
+        -> embedded (N, T, H1)
+        -> transpose (N, H1, T)
+        -> act & conv (N, H2, T)
+        -> transpose (N, T, H2)
+        -> linear (N, H3, T)
+        """
+        x = self.embedding(x)
+        x = self.conv(self.act(x).transpose(1, 2)).transpose(1, 2)
+        return self.classifier(x), None
+
+    @staticmethod
+    def batching_states(states: List[AbsStates]) -> AbsStates:
+        return AbsStates(None, EmbConv1D)
+
+    @staticmethod
+    def get_state_from_batch(raw_batched_states, index: int) -> AbsStates:
+        return AbsStates(None, EmbConv1D)
+
+    def init_states(self, N: int = 1) -> AbsStates:
+        return AbsStates(None, EmbConv1D)
+
+
 class CausalTransformer(AbsDecoder):
     def __init__(self,
                  num_classes: int,

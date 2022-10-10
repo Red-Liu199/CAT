@@ -94,7 +94,7 @@ function exc_install() {
         # change dir to a different one to test whether cat module has been installed.
         [[ $force == "False" && $(check_py_package cat) -eq 0 ]] || {
             python -m pip install -r requirements.txt || return 1
-
+            python -m pip install -e . || return 1
             # check installation
             $(cd egs && python -c "import cat") >/dev/null || return 1
         }
@@ -134,7 +134,9 @@ function exc_rm() {
 
     case $name in
     cat | all)
-        # FIXME: maybe we should clean building dependencies ?
+        # FIXME: maybe we should clean building dependencies?
+        python -m pip uninstall -y cat
+        python setup.py clean --all
         ;;&
     ctcdecode | all)
         python -m pip uninstall -y ctcdecode
