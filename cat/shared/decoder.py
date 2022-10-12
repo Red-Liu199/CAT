@@ -67,9 +67,12 @@ class AbsDecoder(nn.Module):
 
     def score(self, input_ids: torch.LongTensor, targets: torch.LongTensor, input_lengths: Optional[torch.LongTensor] = None, *args):
 
-        U = input_lengths.max()
         if input_lengths is None:
-            input_lengths = input_ids.new_full(input_ids.size(0), U)
+            input_lengths = input_ids.new_full(
+                input_ids.size(0), input_ids.size(1))
+            U = input_ids.size(1)
+        else:
+            U = input_lengths.max()
 
         if input_ids.size(1) > U:
             input_ids = input_ids[:, :U]

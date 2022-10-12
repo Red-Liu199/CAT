@@ -362,7 +362,7 @@ binlist = [
     'cat.rnnt.train',
     'cat.lm.train',
     'cat.ctc.train',
-    'cat.ctc.train_sa_crf'
+    'cat.ctc.train_scrf'
     # 'cat.ctc.train_smwer'
 ]
 

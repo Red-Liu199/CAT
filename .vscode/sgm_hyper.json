@@ -402,7 +402,7 @@
                         "cat.rnnt.train",
                         "cat.lm.train",
                         "cat.ctc.train",
-                        "cat.ctc.train_sa_crf"
+                        "cat.ctc.train_scrf"
                     ]
                 }
             },
@@ -1238,7 +1238,7 @@
                     "if": {
                         "properties": {
                             "bin": {
-                                "const": "cat.ctc.train_sa_crf"
+                                "const": "cat.ctc.train_scrf"
                             }
                         }
                     },
