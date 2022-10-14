@@ -43,6 +43,33 @@ def unique(x, dim=-1):
     return unique, inverse, inverse.new_empty(unique.size(dim)).scatter_(dim, inverse, perm)
 
 
+def score_prior(model: nn.Module, in_tokens: torch.Tensor, targets: torch.Tensor, input_lengths: torch.LongTensor, do_normalize: bool = True):
+    """Compute the prior score of the given model and input.
+
+    This is almost the same as cat.shared.decoder.AbsDecoder.score,
+    with the support to skipping log_softmax normalization.
+    """
+    U = input_lengths.max()
+    if in_tokens.size(1) > U:
+        in_tokens = in_tokens[:, :U]
+    if targets.size(1) > U:
+        targets = targets[:, :U]
+
+    # logits: (N, U, K)
+    logits, _ = model(in_tokens, input_lengths=input_lengths)
+    if do_normalize:
+        logits = logits.log_softmax(dim=-1)
+    # score: (N, U)
+    score = logits.gather(
+        index=targets.long().unsqueeze(2), dim=-1).squeeze(-1)
+    # True for not masked, False for masked, (N, U)
+    score *= torch.arange(in_tokens.size(1), device=in_tokens.device)[
+        None, :] < input_lengths[:, None].to(in_tokens.device)
+    # (N,)
+    score = score.sum(dim=-1)
+    return score
+
+
 class SCRFTrainer(AMTrainer):
     def __init__(
             self,
@@ -50,8 +77,9 @@ class SCRFTrainer(AMTrainer):
             lm_weight: float = 1.0,
             num_aux_weight: float = 0.,
             n_samples: int = 256,
-            local_normalized: bool = True,
-            num_aux_weight_decay: float = 1.0,
+            local_normalized_encoder: bool = True,
+            tuning_prior: bool = False,
+            local_normalized_prior: bool = True,
             # compute gradients via mapped y seqs by CTC loss, instead of computing probs of pi seqs.
             compute_gradient_via_y: bool = False,
             **kwargs):
@@ -63,17 +91,20 @@ class SCRFTrainer(AMTrainer):
 
         self._compute_y_grad = compute_gradient_via_y
         self.attach['lm'] = lm
+        if tuning_prior:
+            self._prior = lm
+            lm.requires_grad_(True)
+        else:
+            self._prior = None
+
         self.weights = {
-            'lm_weight': lm_weight
+            'lm_weight': lm_weight,
+            'num_weight': num_aux_weight
         }
 
-        # aux_ctc[t] = aux_ctc[t-1] * aux_ctc_decay
-        # register as a buffer, so we can restore it when resuming from a stop training.
-        self.register_buffer('_aux_ctc', torch.tensor(num_aux_weight))
-        self._aux_decay_factor = num_aux_weight_decay
-
         self.n_samples = n_samples
-        self._is_local_normalized = local_normalized
+        self.local_normalized_encoder = local_normalized_encoder
+        self.local_normalized_prior = local_normalized_prior
         self.criterion = nn.CTCLoss(reduction='none', zero_infinity=True)
         self._pad = nn.ConstantPad1d((1, 0), 0)
 
@@ -123,15 +154,17 @@ class SCRFTrainer(AMTrainer):
 
         # piror(y): (UN, )
         # here indeed is the log prob.
-        w_hat = self.attach['lm'].score(
+        prior_ys = score_prior(
+            self.attach['lm'],
             padded_ys,
             dummy_targets,
-            lsamples[ordered]+1
+            lsamples[ordered]+1,
+            self.local_normalized_prior
         ) * self.weights['lm_weight']
         # (UN, ) -> (N*K, ) -> (N, K)
-        w_hat = torch.gather(w_hat, dim=0, index=inverse).view(N, K)
-        w_hat = w_hat - torch.logsumexp(w_hat, dim=1, keepdim=True)
-        return w_hat.exp(), pi_samples, ysamples, lsamples, unique_samples, inverse, ordered
+        prior_ys = torch.gather(prior_ys, dim=0, index=inverse).view(N, K)
+        w_hat = torch.log_softmax(prior_ys.detach(), dim=1)
+        return w_hat.exp(), prior_ys, pi_samples, lsamples, unique_samples, inverse, ordered
 
     def forward(self, feats: torch.Tensor, labels: torch.Tensor, lx: torch.Tensor, ly: torch.Tensor):
 
@@ -144,11 +177,11 @@ class SCRFTrainer(AMTrainer):
         N, T, V = logits.shape
         K = self.n_samples
 
-        w_hat, pi_samples, _, lsamples, unique_samples, inverse, ordered = self._IS(
+        w_hat, prior_ys, pi_samples, lsamples, unique_samples, inverse, ordered = self._IS(
             logits, lx)
         squeeze_ratio = 1 - ordered.size(0) / N / K
 
-        if self._is_local_normalized:
+        if self.local_normalized_encoder:
             score = logits.log_softmax(dim=-1)
         else:
             score = logits.float()
@@ -174,8 +207,9 @@ class SCRFTrainer(AMTrainer):
             # (N, T, K) -> (N, K)
             s = s.sum(dim=1)
 
-        # (N, ), a more numerical stable ver.
-        estimate = torch.sum(s * w_hat, dim=1)
+        s += prior_ys
+        # (N, ), i.e. the mu_hat = \sum (w_hat_i * s_i)
+        den = torch.sum(s * w_hat, dim=1)
 
         # numerator: (N, )
         num = self.criterion(
@@ -183,21 +217,43 @@ class SCRFTrainer(AMTrainer):
             labels.to(device='cpu'),
             lx, ly
         )
-        if self.training:
-            self._aux_ctc *= self._aux_decay_factor
+        if self._prior:
+            # tunable prior network
+            padded_ys = self._pad(coreutils.pad_list(
+                torch.split(labels, ly.cpu().tolist())))
+            # <s> A B C -> A B C <s>
+            dummy_targets = torch.roll(padded_ys, -1, dims=1)
 
-        return ((1+self._aux_ctc)*num + estimate).mean(dim=0), squeeze_ratio, num
+            # here indeed is the log prob.
+            gtscore = score_prior(
+                self.attach['lm'],
+                padded_ys,
+                dummy_targets,
+                ly+1,
+                self.local_normalized_prior
+            ) * self.weights['lm_weight']
+            num -= gtscore
+            
+            ########## DEBUG CODE ###########
+            # print(torch.sum(w_hat*prior_ys, dim=1))
+            # print(gtscore)
+            # raise StopIteration
+            #################################
+            
+
+        return ((1+self.weights['num_weight'])*num + den).mean(dim=0), squeeze_ratio, num
 
 
 def custom_hook(manager, model, args, n_step, nnforward_args):
 
     loss, squeeze_ratio, ctc_loss = model(*nnforward_args)
 
-    if args.rank == 0:
+    fold = args.grad_accum_fold
+    if args.rank == 0 and n_step % fold == 0:
         manager.writer.add_scalar(
-            'sample/squeeze-ratio', squeeze_ratio, manager.step_by_last_epoch + n_step)
+            'sample/squeeze-ratio', squeeze_ratio, manager.step)
         manager.writer.add_scalar(
-            'loss/numerator', ctc_loss.detach().mean(dim=0).item(), manager.step_by_last_epoch + n_step)
+            'loss/numerator', ctc_loss.detach().mean(dim=0).item(), manager.step)
 
     return loss
 

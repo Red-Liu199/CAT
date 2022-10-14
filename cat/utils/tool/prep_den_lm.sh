@@ -42,7 +42,8 @@ vocab_size=$(python -c "import cat; print(cat.shared.tokenizer.load('$tokenizer'
 python utils/tool/build_ctc_topo.py $vocab_size |
     fstcompile | fstarcsort --sort_type=olabel >T.fst.tmp || exit 1
 
-fstcompose T.fst.tmp token_lm.fst.tmp >$w_specifier
+fstcompose T.fst.tmp token_lm.fst.tmp |
+    fstdeterminizestar --use-log=true >$w_specifier
 
 rm {T,token_lm}.fst.tmp
 echo "$0 done."

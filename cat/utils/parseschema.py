@@ -210,10 +210,6 @@ for m in dir(tn_zoo):
         modules.append(_m)
 
 module_processing(processing, modules)
-add_property(processing, {
-    'freeze': gen_object(bool, default=False),
-    'pretrained': gen_object(str, default=False)
-})
 add_property(schema, {'encoder': processing})
 
 
@@ -227,10 +223,6 @@ for m in dir(pn_zoo):
         modules.append(_m)
 
 module_processing(processing, modules)
-add_property(processing, {
-    'freeze': gen_object(bool, default=False),
-    'pretrained': gen_object(str, default=False)
-})
 add_property(schema, {'decoder': processing})
 
 

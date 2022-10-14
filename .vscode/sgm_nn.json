@@ -23,14 +23,6 @@
                         "VGGLSTM",
                         "Wav2Vec2Encoder"
                     ]
-                },
-                "freeze": {
-                    "type": "boolean",
-                    "default": false
-                },
-                "pretrained": {
-                    "type": "string",
-                    "default": false
                 }
             },
             "description": "Configuration of Transducer transcription network / encoder.",
@@ -475,14 +467,6 @@
                         "SyllableEnhancedLSTM",
                         "ZeroDecoder"
                     ]
-                },
-                "freeze": {
-                    "type": "boolean",
-                    "default": false
-                },
-                "pretrained": {
-                    "type": "string",
-                    "default": false
                 }
             },
             "description": "Configuration of Transducer prediction network / LM.",

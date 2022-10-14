@@ -3,6 +3,10 @@ Author: Huahuan Zheng (maxwellzh@outlook.com)
 
 Build CTC topo FST for denominator or decoding graph.
 assume <blk> = 0 in tokenizer.
+
+Note that the built topo is kind of special, where
+... the input token is indeed real token + 1. e.g. 
+... <blk> is 1 in input token, but 0 in output token.
 """
 import sys
 import argparse
