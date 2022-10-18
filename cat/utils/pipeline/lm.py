@@ -94,6 +94,9 @@ if __name__ == "__main__":
         os.makedirs(pkldir, exist_ok=True)
         # 'train' and 'dev' datasets would be merged into ones,
         # 'test' datasets would be processed individually in stage 4
+        sys.stderr.write(sfmt.warn(
+            "text is normalized with single thread. This might take a while.\n"
+        ))
         for part in ['train', 'dev']:
             if part not in data_settings:
                 sys.stderr.write(sfmt.missing(
@@ -101,16 +104,16 @@ if __name__ == "__main__":
                     ", skip.\n"
                 )
                 continue
-            part_text = list(get_corpus(f_hyper, part, merge=True))[0]
             f_pkl = os.path.join(pkldir, part+'.pkl')
             if os.path.isfile(f_pkl):
                 sys.stderr.write(sfmt.warn(
                     f"{sfmt.udl(f_pkl)} exists, skip.\n"
                 ))
             else:
+                part_text = list(get_corpus(f_hyper, part, merge=True))[0]
                 spawn(t2b.main, parse_args_from_var(
                     t2b._parser(), cfg_packing,  [part_text, f_pkl]))
-            os.remove(part_text)
+                os.remove(part_text)
 
     ############ Stage 3  NN training ############
     if s_beg <= 3 and s_end >= 3:
@@ -309,11 +312,12 @@ if __name__ == "__main__":
                     sys.stderr.write(sfmt.warn(
                         f"{sfmt.udl(infr_option['output'])} exists, skip.\n"
                     ))
-                interface.main(parse_args_from_var(
-                    interface._parser(),
-                    infr_option,
-                    [infr_option['nbestlist'], infr_option['output']]
-                ))
+                else:
+                    interface.main(parse_args_from_var(
+                        interface._parser(),
+                        infr_option,
+                        [infr_option['nbestlist'], infr_option['output']]
+                    ))
         else:
             sys.stderr.write(sfmt.warn(
                 f"'{intfname}' only support handcrafted execution.\n"

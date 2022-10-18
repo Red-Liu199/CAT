@@ -178,10 +178,6 @@ def build_model(args: argparse.Namespace):
 
     model = ctc_builder(coreutils.readjson(args.config), dist=False)
     checkpoint = torch.load(args.resume, map_location='cpu')
-    # filter out the parameters related to specific trainer.
-    for k in list(checkpoint['model'].keys()):
-        if '.am' not in k:
-            del checkpoint['model'][k]
     model = coreutils.load_checkpoint(model, checkpoint)
     model = model.am
     model.eval()

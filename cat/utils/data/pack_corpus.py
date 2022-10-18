@@ -26,6 +26,7 @@ import argparse
 import pickle
 import os
 import uuid
+import numpy as np
 from multiprocessing import Pool
 from typing import Union, Tuple, List
 
@@ -138,7 +139,7 @@ def main(args: argparse.Namespace):
         # save the file name of binary file
         pickle.dump(os.path.basename(f_data), fo)
         # save the location information
-        pickle.dump(_seeks, fo)
+        pickle.dump(np.asarray(_seeks, dtype=np.int64), fo)
 
     if not args.quiet:
         print("> Merged: Index {} --> binary {}".format(args.output, f_data))
