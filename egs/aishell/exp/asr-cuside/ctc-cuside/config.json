@@ -1,0 +1,50 @@
+{
+    "specaug": {
+        "freq_mask_width_range": 0.34,
+        "num_freq_mask": 2,
+        "num_time_mask": 10,
+        "time_mask_width_range": 0.05,
+        "apply_time_warp": false
+    },
+    "ctc-trainer": {
+        "simu": true,
+        "use_crf": false,
+        "lamb": 0.01,
+        "den-lm": "exp/asr-crf-cuside/den_lm.fst"
+    },
+    "encoder": {
+        "type": "ConformerNet",
+        "kwargs": {
+            "conv": "conv2d",
+            "dropout": 0.1,
+            "hdim": 512,
+            "idim": 80,
+            "kernel_size": 32,
+            "num_cells": 17,
+            "num_classes": 217,
+            "num_heads": 8,
+            "with_head": true
+        }
+    },
+    "scheduler": {
+        "type": "SchedulerNoam",
+        "kwargs": {
+            "peak_factor": 1.0,
+            "dim_model": 512,
+            "warmup_step": 25000,
+            "stop_step": 55000
+        },
+        "optimizer": {
+            "type": "Adam",
+            "use_zero": true,
+            "kwargs": {
+                "lr": 0.0003,
+                "betas": [
+                    0.9,
+                    0.98
+                ],
+                "weight_decay": 1e-06
+            }
+        }
+    }
+}

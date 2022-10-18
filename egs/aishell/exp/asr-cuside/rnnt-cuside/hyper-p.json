@@ -1,0 +1,61 @@
+{
+    "data": {
+        "train": [
+            "train"
+        ],
+        "dev": [
+            "dev"
+        ],
+        "test": [
+            "test"
+        ],
+        "filter": ":2000",
+        "lang": "zh-cn"
+    },
+    "tokenizer": {
+        "type": "SentencePieceTokenizer",
+        "option-train": {
+            "model_type": "char",
+            "vocab_size": 4232,
+            "add_dummy_prefix": false,
+            "use_all_vocab": true,
+            "model_prefix": "sentencepiece/aishell_char/spm"
+        },
+        "|V|": 4232,
+        "file": "exp/rnnt/tokenizer.tknz"
+    },
+    "train": {
+        "bin": "cat.rnnt.train_unified",
+        "option": {
+            "amp": true,
+            "dynamic_batch_mode": 1,
+            "dynamic_bucket_size": 200000,
+            "batch_size": 128,
+            "check-freq": 1000,
+            "grad-norm": 5.0,
+            "grad-accum-fold": 2,
+            "verbose": true
+        }
+    },
+    "inference": {
+        "avgmodel": {
+            "mode": "best",
+            "num": 10
+        },
+        "infer": {
+            "bin": "cat.rnnt.decode",
+            "option": {
+                "unified": true,
+                "streaming": false,
+                "beam_size": 16,
+                "cpu": true,
+                "nj": 40,
+                "resume": "exp/rnnt/check/best-10.pt"
+            }
+        },
+        "er": {
+            "cer": true
+        }
+    },
+    "commit": "125e30011cf2fef472e58005eea70e7e5490028f"
+}
