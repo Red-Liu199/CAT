@@ -37,7 +37,7 @@ function exc_install() {
         # install ctcdecode is annoying...
         [[ $force == "False" && $(check_py_package ctcdecode) -eq 0 ]] || {
             if [ ! -d src/ctcdecode ]; then
-                git clone --recursive git@github.com:maxwellzh/ctcdecode.git src/ctcdecode
+                git clone --recursive https://github.com/maxwellzh/ctcdecode.git src/ctcdecode
             else
                 cd src/ctcdecode
                 git pull --recurse-submodules
@@ -53,7 +53,7 @@ function exc_install() {
         # install kenlm
         # kenlm is a denpendency of cat, so we first check the python package installation
         [[ $force == "False" && $(check_py_package kenlm) -eq 0 && -x src/bin/lmplz && -x src/bin/build_binary ]] || {
-            python -m pip install -e git+ssh://git@github.com/kpu/kenlm.git#egg=kenlm
+            python -m pip install -e git+https://github.com/kpu/kenlm.git#egg=kenlm
 
             cd src/kenlm
             mkdir -p build && cd build
