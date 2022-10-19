@@ -7,7 +7,6 @@ Derived from
 https://github.com/parlance/ctcdecode
 """
 
-from . import ctc_builder
 from ..shared import tokenizer as tknz
 from ..shared import coreutils
 from ..shared.encoder import AbsEncoder
@@ -175,8 +174,9 @@ def worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_out: mp.Queue
 
 def build_model(args: argparse.Namespace):
     assert args.resume is not None, "Trying to decode with uninitialized parameters. Add --resume"
-
-    model = ctc_builder(coreutils.readjson(args.config), dist=False)
+    import importlib
+    interface = importlib.import_module(args.built_model_by)
+    model = interface.build_model(coreutils.readjson(args.config), dist=False)
     checkpoint = torch.load(args.resume, map_location='cpu')
     model = coreutils.load_checkpoint(model, checkpoint)
     model = model.am
@@ -205,6 +205,8 @@ def _parser():
                         help="Tokenizer model file. See cat/shared/tokenizer.py for details.")
     parser.add_argument("--nj", type=int, default=-1)
     parser.add_argument("--thread-per-woker", type=int, default=1)
+    parser.add_argument("--built-model-by", type=str, default="cat.ctc.train",
+                        help="Tell where to import build_model() function. defautl: cat.ctc.train")
     return parser
 
 

@@ -471,9 +471,8 @@ if __name__ == "__main__":
                     "inference:er:hy is not set and cannot be resolved from inference:infer."
 
                 err_option['hy'] = infr_option['output_prefix']
-
-            if err_option.get('oracle', False):
-                err_option['hy'] = err_option['hy'] + '.nbest'
+                if err_option.get('oracle', False):
+                    err_option['hy'] = err_option['hy'] + '.nbest'
 
             if '{}' in err_option['hy']:
                 # input in format string

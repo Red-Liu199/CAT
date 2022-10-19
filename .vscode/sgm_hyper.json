@@ -1758,6 +1758,11 @@
                                             "thread_per_woker": {
                                                 "type": "number",
                                                 "default": 1
+                                            },
+                                            "built_model_by": {
+                                                "type": "string",
+                                                "description": "Tell where to import build_model() function. defautl: cat.ctc.train",
+                                                "default": "cat.ctc.train"
                                             }
                                         }
                                     }

@@ -233,13 +233,6 @@ class SCRFTrainer(AMTrainer):
                 self.local_normalized_prior
             ) * self.weights['lm_weight']
             num -= gtscore
-            
-            ########## DEBUG CODE ###########
-            # print(torch.sum(w_hat*prior_ys, dim=1))
-            # print(gtscore)
-            # raise StopIteration
-            #################################
-            
 
         return ((1+self.weights['num_weight'])*num + den).mean(dim=0), squeeze_ratio, num
 
@@ -262,7 +255,7 @@ def custom_train(*args):
     return default_train_func(*args, hook_func=custom_hook)
 
 
-def build_model(cfg: dict, args: argparse.Namespace) -> Union[AbsEncoder, SCRFTrainer]:
+def build_model(cfg: dict, args: Optional[argparse.Namespace] = None, dist: bool = True) -> Union[AbsEncoder, SCRFTrainer]:
     """
     cfg:
         trainer:
@@ -306,6 +299,8 @@ def build_model(cfg: dict, args: argparse.Namespace) -> Union[AbsEncoder, SCRFTr
     trainer_cfg['am'] = ctc_builder(cfg, args, dist=False, wrapper=False)
 
     model = SCRFTrainer(**trainer_cfg)
+    if not dist:
+        return model
 
     # make batchnorm synced across all processes
     model = coreutils.convert_syncBatchNorm(model)
