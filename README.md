@@ -15,7 +15,7 @@
 2. Clone and install Transducer packages
 
    ```bash
-   git clone https//github.com:maxwellzh/Transducer-dev.git speech && cd speech
+   git clone https://github.com/maxwellzh/Transducer-dev.git speech && cd speech
    # Get help message
    ./install.sh -h
    # Install with default configurations
