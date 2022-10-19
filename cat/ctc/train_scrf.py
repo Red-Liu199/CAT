@@ -141,19 +141,18 @@ class SCRFTrainer(AMTrainer):
             # (N, ) -> (N, 1) -> (N, K) -> (N*K, )
             lx.unsqueeze(1).repeat(1, K).contiguous().view(-1)
         )
+        # (N*K, T) -> (N*K, U)
         ysamples = ysamples[:, :lsamples.max()]
         ysamples *= torch.arange(ysamples.size(1), device=ysamples.device)[
             None, :] < lsamples[:, None]
 
-        # (UN, )
+        # (N*K, U) -> (N', U)
         unique_samples, inverse, ordered = unique(ysamples, dim=0)
-
         padded_ys = self._pad(unique_samples)
         # <s> A B C -> A B C <s>
         dummy_targets = torch.roll(padded_ys, -1, dims=1)
 
-        # piror(y): (UN, )
-        # here indeed is the log prob.
+        # piror(y): (N', )
         prior_ys = score_prior(
             self.attach['lm'],
             padded_ys,
@@ -161,7 +160,7 @@ class SCRFTrainer(AMTrainer):
             lsamples[ordered]+1,
             self.local_normalized_prior
         ) * self.weights['lm_weight']
-        # (UN, ) -> (N*K, ) -> (N, K)
+        # (N', ) -> (N*K, ) -> (N, K)
         prior_ys = torch.gather(prior_ys, dim=0, index=inverse).view(N, K)
         w_hat = torch.log_softmax(prior_ys.detach(), dim=1)
         return w_hat.exp(), prior_ys, pi_samples, lsamples, unique_samples, inverse, ordered
