@@ -8,6 +8,7 @@ import sys
 import pickle
 import sentencepiece as sp
 import jieba
+jieba.default_logger.setLevel(jieba.logging.ERROR)
 
 from collections import OrderedDict
 from typing import *

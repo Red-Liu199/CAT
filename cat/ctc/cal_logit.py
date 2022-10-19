@@ -5,7 +5,7 @@ Author: Hongyu Xiang, Keyu An, Huahuan Zheng
 """
 
 
-#from . import ctc_builder
+from .decode import build_model
 from ..shared import coreutils
 from ..shared.encoder import AbsEncoder
 from ..shared.data import (
@@ -100,19 +100,6 @@ def worker(pid: int, args: argparse.Namespace, q: mp.Queue, model: AbsEncoder):
         args.output_dir, f"decode.{pid+1}.ark"), results)
 
 
-def build_model(args: argparse.Namespace):
-    assert args.resume is not None, "Trying to decode with uninitialized parameters. Add --resume"
-
-    if args.unified:
-        from .train_unified import build_model as ctc_builder
-    else :
-        from . import ctc_builder
-    model = ctc_builder(coreutils.readjson(args.config), dist=False)
-    model = coreutils.load_checkpoint(model, args.resume)
-    model = model.am
-    model.eval()
-    return model
-
 
 def _parser():
     parser = coreutils.basic_trainer_parser(
@@ -124,7 +111,8 @@ def _parser():
     parser.add_argument("--input_scp", type=str, default=None)
     parser.add_argument("--output-dir", type=str, help="Ouput directory.")
     parser.add_argument("--nj", type=int, default=-1)
-    parser.add_argument("--unified", action='store_true', default=False)
+    parser.add_argument("--built-model-by", type=str, default="cat.ctc.train",
+                        help="Tell where to import build_model() function. defautl: cat.ctc.train")
     return parser
 
 
