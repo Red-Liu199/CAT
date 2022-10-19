@@ -312,7 +312,7 @@ def build_model(cfg: dict, args: Optional[argparse.Namespace] = None, dist: bool
 
 
 def _parser():
-    return coreutils.basic_trainer_parser("SA-CRF CTC Trainer")
+    return coreutils.basic_trainer_parser("Sampling-base CTC-CRF Trainer")
 
 
 def main(args: argparse.Namespace = None):

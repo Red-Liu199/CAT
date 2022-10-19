@@ -1,17 +1,16 @@
 # Copyright 2022 Tsinghua University
 # Apache 2.0.
-# Author: Keyu An
+# Author: Keyu An, Huahuan Zheng
 
-__all__ = ["AMTrainer", "build_model", "_parser", "main"]
+__all__ = ["UnifiedAMTrainer", "build_model", "_parser", "main"]
 
-from ..shared import Manager
-from ..shared import coreutils
-from ..shared import encoder as model_zoo
-from ..shared.simu_net import SimuNet
-from ..shared.data import (
-    KaldiSpeechDataset,
-    sortedPadCollateASR
+from .train import (
+    AMTrainer,
+    build_model as am_builder,
+    main_worker as basic_worker
 )
+from ..shared import coreutils
+from ..shared.simu_net import SimuNet
 
 import os
 import argparse
@@ -19,53 +18,22 @@ from typing import *
 
 import torch
 import torch.nn as nn
-import torch.distributed as dist
 import random
 import math
 import numpy as np
 from torch.cuda.amp import autocast
 
 
-def check_label_len_for_ctc(tupled_mat_label: Tuple[torch.FloatTensor, torch.LongTensor]):
-    """filter the short seqs for CTC/CRF"""
-    # NOTE:
-    #   1/4 subsampling is used for Conformer model defaultly
-    #   for other sampling ratios, you may need to modify the values
-    return (tupled_mat_label[0].shape[0] // 4 > tupled_mat_label[1].shape[0])
-
-
-def filter_hook(dataset):
-    return dataset.select(check_label_len_for_ctc)
-
-
 def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
-    coreutils.set_random_seed(args.seed)
-    args.gpu = gpu
-    args.rank = args.rank * ngpus_per_node + gpu
-    torch.cuda.set_device(args.gpu)
-
-    dist.init_process_group(
-        backend=args.dist_backend, init_method=args.dist_url,
-        world_size=args.world_size, rank=args.rank)
-
-    manager = Manager(
-        KaldiSpeechDataset,
-        sortedPadCollateASR(flatten_target=True),
-        args,
-        func_build_model=build_model,
-        _wds_hook=filter_hook
+    basic_worker(
+        gpu, ngpus_per_node, args,
+        func_build_model=build_model
     )
 
-    # training
-    manager.run(args)
 
-
-class UnifiedAMTrainer(nn.Module):
+class UnifiedAMTrainer(AMTrainer):
     def __init__(
         self,
-        am: model_zoo.AbsEncoder,
-        use_crf: bool = False,
-        lamb: Optional[float] = 0.01,
         # chunk related parameters
         # configure according to the encoder
         downsampling_ratio: int = 4,
@@ -78,17 +46,7 @@ class UnifiedAMTrainer(nn.Module):
         simu: bool = False,
         simu_loss_weight: float = 1.,
             **kwargs):
-        super().__init__()
-
-        self.am = am
-        self.is_crf = use_crf
-        if use_crf:
-            from ctc_crf import CTC_CRF_LOSS as CRFLoss
-
-            self._crf_ctx = None
-            self.criterion = CRFLoss(lamb=lamb)
-        else:
-            self.criterion = nn.CTCLoss()
+        super().__init__(**kwargs)
 
         self.simu = simu
         if self.simu:
@@ -102,15 +60,6 @@ class UnifiedAMTrainer(nn.Module):
         self.context_size_right = context_size_right
         self.jitter_range = jitter_range
         self.downsampling_ratio = downsampling_ratio
-
-
-    def register_crf_ctx(self, den_lm: Optional[str] = None):
-        """Register the CRF context on model device."""
-        assert self.is_crf
-
-        from ctc_crf import CRFContext
-        self._crf_ctx = CRFContext(den_lm, next(
-            iter(self.am.parameters())).device.index)
 
     def chunk_infer(self, inputs: torch.FloatTensor, in_lens: torch.LongTensor) -> torch.FloatTensor:
         chunk_size = self.chunk_size
@@ -269,7 +218,9 @@ class UnifiedAMTrainer(nn.Module):
         lx = lx.cpu()
         ly = ly.cpu()
         if self.is_crf:
-            assert self._crf_ctx is not None
+            if self._crf_ctx is None:
+                # lazy init
+                self.register_crf_ctx(self.den_lm)
             with autocast(enabled=False):
                 loss = self.criterion(
                     logits.float(), labels.to(torch.int),
@@ -285,7 +236,6 @@ class UnifiedAMTrainer(nn.Module):
         chunk_logits = torch.log_softmax(chunk_enc_out, dim=-1)
 
         if self.is_crf:
-            assert self._crf_ctx is not None
             with autocast(enabled=False):
                 chunk_loss = self.criterion(
                     chunk_logits.float(), labels.to(torch.int),
@@ -301,55 +251,6 @@ class UnifiedAMTrainer(nn.Module):
         return loss + chunk_loss + loss_simu
 
 
-def build_model(
-        cfg: dict,
-        args: Optional[Union[argparse.Namespace, dict]] = None,
-        dist: bool = True,
-        wrapper: bool = True) -> Union[nn.parallel.DistributedDataParallel, UnifiedAMTrainer, model_zoo.AbsEncoder]:
-
-    if 'ctc-trainer' not in cfg:
-        cfg['ctc-trainer'] = {}
-
-    assert 'encoder' in cfg
-    netconfigs = cfg['encoder']
-    net_kwargs = netconfigs['kwargs']   # type:dict
-
-    # when immigrate configure from RNN-T to CTC,
-    # one usually forget to set the `with_head=True` and 'num_classes'
-    if not net_kwargs.get('with_head', False):
-        print("warning: 'with_head' in field:encoder:kwargs is False/not set. "
-              "If you don't know what this means, set it to True.")
-
-    if 'num_classes' not in net_kwargs:
-        raise Exception("error: 'num_classes' in field:encoder:kwargs is not set. "
-                        "You should specify it according to your vocab size.")
-
-    am_model = getattr(model_zoo, netconfigs['type'])(
-        **net_kwargs)  # type: model_zoo.AbsEncoder
-    if not wrapper:
-        return am_model
-
-    model = UnifiedAMTrainer(am_model, **cfg['ctc-trainer'])
-    if not dist:
-        return model
-
-    assert args is not None, f"You must tell the GPU id to build a DDP model."
-    if isinstance(args, argparse.Namespace):
-        args = vars(args)
-    elif not isinstance(args, dict):
-        raise ValueError(f"unsupport type of args: {type(args)}")
-
-    # make batchnorm synced across all processes
-    model = coreutils.convert_syncBatchNorm(model)
-
-    model.cuda(args['gpu'])
-    if 'use_crf' in cfg['ctc-trainer'] and cfg['ctc-trainer']['use_crf']:
-        assert 'den-lm' in cfg['ctc-trainer']
-        model.register_crf_ctx(cfg['ctc-trainer']['den-lm'])
-    model = torch.nn.parallel.DistributedDataParallel(
-        model, device_ids=[args['gpu']])
-    return model
-
 def pad_to_len(t: torch.Tensor, pad_len: int, dim: int):
     """Pad the tensor `t` at `dim` to the length `pad_len` with right padding zeros."""
     if t.size(dim) == pad_len:
@@ -359,9 +260,28 @@ def pad_to_len(t: torch.Tensor, pad_len: int, dim: int):
         pad_size[dim] = pad_len - t.size(dim)
         return torch.cat([t, torch.zeros(*pad_size, dtype=t.dtype, device=t.device)], dim=dim)
 
+
+def build_model(cfg: dict, args: Optional[argparse.Namespace] = None, dist: bool = True):
+    """
+    cfg: refer to UnifiedAMTrainer.__init__()
+    """
+    assert 'trainer' in cfg, f"missing 'trainer' in field:"
+    cfg['trainer']['am'] = am_builder(cfg, args, dist=False, wrapper=False)
+    model = UnifiedAMTrainer(**cfg['trainer'])
+    if not dist:
+        return model
+
+    # make batchnorm synced across all processes
+    model = coreutils.convert_syncBatchNorm(model)
+    model.cuda(args.gpu)
+    model = torch.nn.parallel.DistributedDataParallel(
+        model, device_ids=[args.gpu])
+
+    return model
+
+
 def _parser():
-    parser = coreutils.basic_trainer_parser("CTC trainer.")
-    return parser
+    return coreutils.basic_trainer_parser("Unified streaming/offline CTC/CRF Trainer")
 
 
 def main(args: argparse.Namespace = None):
@@ -374,9 +294,4 @@ def main(args: argparse.Namespace = None):
 
 
 if __name__ == "__main__":
-    print(
-        "NOTE:\n"
-        "    since we import the build_model() function in cat.ctc,\n"
-        "    we should avoid calling `python -m cat.ctc.train`, instead\n"
-        "    running `python -m cat.ctc`"
-    )
+    main()

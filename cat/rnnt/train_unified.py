@@ -11,10 +11,7 @@ __all__ = ["UnifiedTTrainer", "build_model", "_parser", "main"]
 
 from . import rnnt_builder
 from .train import TransducerTrainer
-from .joiner import AbsJointNet
 from ..shared import coreutils
-from ..shared.encoder import AbsEncoder
-from ..shared.decoder import AbsDecoder
 from ..shared.simu_net import SimuNet
 from ..shared.manager import (
     Manager,
@@ -36,7 +33,6 @@ from warp_rnnt import rnnt_loss as RNNTLoss
 import torch
 import torch.nn as nn
 import torch.distributed as dist
-from torch.cuda.amp import autocast
 
 
 def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):

@@ -89,6 +89,7 @@ class AMTrainer(nn.Module):
             self,
             am: model_zoo.AbsEncoder,
             use_crf: bool = False,
+            den_lm: Optional[str] = None,
             lamb: Optional[float] = 0.01,
             decoder: CTCBeamDecoder = None,
             **kwargs):
@@ -97,11 +98,14 @@ class AMTrainer(nn.Module):
         self.am = am
         self.is_crf = use_crf
         if use_crf:
-            from ctc_crf import CTC_CRF_LOSS as CRFLoss
+            self.den_lm = den_lm
+            assert den_lm is not None and os.path.isfile(den_lm)
 
-            self._crf_ctx = None
+            from ctc_crf import CTC_CRF_LOSS as CRFLoss
             self.criterion = CRFLoss(lamb=lamb)
+            self._crf_ctx = None
         else:
+            self.den_lm = None
             self.criterion = nn.CTCLoss()
 
         self.attach = {
@@ -148,7 +152,10 @@ class AMTrainer(nn.Module):
         lx = lx.cpu()
         ly = ly.cpu()
         if self.is_crf:
-            assert self._crf_ctx is not None
+            if self._crf_ctx is None:
+                # lazy init
+                self.register_crf_ctx(self.den_lm)
+
             with autocast(enabled=False):
                 loss = self.criterion(
                     logits.float(), labels.to(torch.int),
@@ -203,7 +210,7 @@ def build_model(
         trainer:
             use_crf: true/false,
             lamb: 0.01,
-            den-lm: xxx
+            den_lm: xxx
 
             decoder:
                 beam_size: 
@@ -256,9 +263,6 @@ def build_model(
     model = coreutils.convert_syncBatchNorm(model)
 
     model.cuda(args['gpu'])
-    if 'use_crf' in cfg['trainer'] and cfg['trainer']['use_crf']:
-        assert 'den-lm' in cfg['trainer']
-        model.register_crf_ctx(cfg['trainer']['den-lm'])
     model = torch.nn.parallel.DistributedDataParallel(
         model, device_ids=[args['gpu']])
     return model
