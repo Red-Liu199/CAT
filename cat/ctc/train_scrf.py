@@ -254,7 +254,54 @@ def custom_train(*args):
     return default_train_func(*args, hook_func=custom_hook)
 
 
-def build_model(cfg: dict, args: Optional[argparse.Namespace] = None, dist: bool = True) -> Union[AbsEncoder, SCRFTrainer]:
+def mc_builder(Trainer: AMTrainer):
+    def _build_model(cfg: dict, args: Optional[argparse.Namespace] = None, dist: bool = True) -> Union[AbsEncoder, AMTrainer]:
+        assert 'trainer' in cfg, f"missing 'trainer' in field:"
+
+        trainer_cfg = cfg['trainer']
+        # initialize external lm
+        dummy_lm = lm_builder(coreutils.readjson(
+            trainer_cfg['lm']['config']), dist=False)
+        if trainer_cfg['lm'].get('check', None) is not None:
+            coreutils.load_checkpoint(dummy_lm, trainer_cfg['lm']['check'])
+        elm = dummy_lm.lm
+        elm.eval()
+        elm.requires_grad_(False)
+        del dummy_lm
+
+        # initialize beam searcher
+        assert 'decoder' in trainer_cfg, f"missing 'decoder' in field:trainer"
+        trainer_cfg['decoder']['alpha'] = trainer_cfg['decoder'].get(
+            'alpha', trainer_cfg['lm'].get('weight', 1.0))
+        if 'kenlm' not in trainer_cfg['decoder']:
+            lmconfig = coreutils.readjson(trainer_cfg['lm']['config'])
+            assert lmconfig['decoder']['type'] == 'NGram', \
+                f"You do not set field:trainer:decoder:kenlm and field:trainer:lm:config is not directed to a kenlm."
+            trainer_cfg['decoder']['kenlm'] = lmconfig['decoder']['kwargs']['f_binlm']
+        trainer_cfg['lm'] = elm
+
+        trainer_cfg['decoder'] = build_beamdecoder(
+            trainer_cfg['decoder']
+        )
+        trainer_cfg['am'] = ctc_builder(cfg, args, dist=False, wrapper=False)
+
+        model = Trainer(**trainer_cfg)
+        if not dist:
+            return model
+
+        # make batchnorm synced across all processes
+        model = coreutils.convert_syncBatchNorm(model)
+        elm.cuda(args.gpu)
+        model.cuda(args.gpu)
+        model = torch.nn.parallel.DistributedDataParallel(
+            model, device_ids=[args.gpu])
+
+        return model
+
+    return _build_model
+
+
+def build_model(*args, **kwargs):
     """
     cfg:
         trainer:
@@ -268,47 +315,7 @@ def build_model(cfg: dict, args: Optional[argparse.Namespace] = None, dist: bool
         # basic ctc config
         ...
     """
-    assert 'trainer' in cfg, f"missing 'trainer' in field:"
-
-    trainer_cfg = cfg['trainer']
-    # initialize external lm
-    dummy_lm = lm_builder(coreutils.readjson(
-        trainer_cfg['lm']['config']), dist=False)
-    if trainer_cfg['lm'].get('check', None) is not None:
-        coreutils.load_checkpoint(dummy_lm, trainer_cfg['lm']['check'])
-    elm = dummy_lm.lm
-    elm.eval()
-    elm.requires_grad_(False)
-    del dummy_lm
-
-    # initialize beam searcher
-    assert 'decoder' in trainer_cfg, f"missing 'decoder' in field:trainer"
-    trainer_cfg['decoder']['alpha'] = trainer_cfg['decoder'].get(
-        'alpha', trainer_cfg['lm'].get('weight', 1.0))
-    if 'kenlm' not in trainer_cfg['decoder']:
-        lmconfig = coreutils.readjson(trainer_cfg['lm']['config'])
-        assert lmconfig['decoder']['type'] == 'NGram', \
-            f"You do not set field:trainer:decoder:kenlm and field:trainer:lm:config is not directed to a kenlm."
-        trainer_cfg['decoder']['kenlm'] = lmconfig['decoder']['kwargs']['f_binlm']
-    trainer_cfg['lm'] = elm
-
-    trainer_cfg['decoder'] = build_beamdecoder(
-        trainer_cfg['decoder']
-    )
-    trainer_cfg['am'] = ctc_builder(cfg, args, dist=False, wrapper=False)
-
-    model = SCRFTrainer(**trainer_cfg)
-    if not dist:
-        return model
-
-    # make batchnorm synced across all processes
-    model = coreutils.convert_syncBatchNorm(model)
-    elm.cuda(args.gpu)
-    model.cuda(args.gpu)
-    model = torch.nn.parallel.DistributedDataParallel(
-        model, device_ids=[args.gpu])
-
-    return model
+    return mc_builder(SCRFTrainer)(*args, **kwargs)
 
 
 def _parser():

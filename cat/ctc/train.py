@@ -6,7 +6,6 @@ __all__ = ["AMTrainer", "build_model", "_parser", "main"]
 
 from ..shared import Manager
 from ..shared import coreutils
-from ..shared import tokenizer as tknz
 from ..shared import encoder as model_zoo
 from ..shared.data import (
     KaldiSpeechDataset,
@@ -50,6 +49,12 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace, **mkwar
         backend=args.dist_backend, init_method=args.dist_url,
         world_size=args.world_size, rank=args.rank)
 
+    if 'Dataset' not in mkwargs:
+        mkwargs['Dataset'] = KaldiSpeechDataset
+
+    if 'collate_fn' not in mkwargs:
+        mkwargs['collate_fn'] = sortedPadCollateASR(flatten_target=True)
+
     if 'func_build_model' not in mkwargs:
         mkwargs['func_build_model'] = build_model
     if '_wds_hook' not in mkwargs:
@@ -59,12 +64,8 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace, **mkwar
     # if 'func_eval' not in mkwargs:
     #     mkwargs['func_eval'] = custom_evaluate
 
-    manager = Manager(
-        KaldiSpeechDataset,
-        sortedPadCollateASR(flatten_target=True),
-        args,
-        **mkwargs
-    )
+    mkwargs['args'] = args
+    manager = Manager(**mkwargs)
 
     # NOTE: for CTC training, the input feat len must be longer than the label len
     #       ... when using webdataset (--largedataset) to load the data, we deal with
@@ -91,8 +92,7 @@ class AMTrainer(nn.Module):
             use_crf: bool = False,
             den_lm: Optional[str] = None,
             lamb: Optional[float] = 0.01,
-            decoder: CTCBeamDecoder = None,
-            **kwargs):
+            decoder: CTCBeamDecoder = None):
         super().__init__()
 
         self.am = am
