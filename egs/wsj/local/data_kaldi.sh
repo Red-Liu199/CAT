@@ -48,8 +48,7 @@ fi
     zcat $wsj1/13-32.1/wsj1/doc/lng_modl/lm_train/np_data/{87,88,89}/*.z |
     grep -v "<" |
         tr "[:lower:]" "[:upper:]" |
-        awk '{ printf("wsj1_lng_%07d %s\n",NR,$0) } ' \
-            >data/extra.corpus
+        >data/extra.corpus
 
 # compute fbank feat
 # by default, we use 80-dim raw fbank and do not apply
@@ -65,7 +64,8 @@ bash utils/data/data_prep_kaldi.sh \
 for dset in $(ls data/src); do
     dir="data/src/$dset"
     [[ $dset != "test_*" ]] && [[ -f $dir/text ]] && {
-        sed <$dir/text \
+        cut <$dir/text -d ' ' -f 1 >$dir/text.filt.id.tmp
+        cut <$dir/text -d ' ' -f 2- | sed \
             -e 's/[(]BRACE//g; s/[(]PAREN//g; s/[(]IN-PARENTHESIS//g; s/[(]BEGIN-PARENS//g' \
             -e 's/[(]PARENTHESES//g; s/[(]LEFT-PAREN//g; s/[(]PARENTHETICALLY//g' \
             -e 's/[)]PAREN//g; s/[)]RIGHT-PAREN//g; s/[)]END-OF-PAREN//g; s/[)]END-PARENS//g;' \
@@ -79,7 +79,12 @@ for dset in $(ls data/src); do
             -e "s/'SINGLE-QUOTE//g; " \
             -e 's/[(]//g; s/[)]//g; s/-//g; s/;//g; s/[.]//g; s/!//g; ' \
             -e 's/://g; s/`//g; s/[.]//g; s/,COMMA//g; s/?//g' \
-            >$dir/text.filt
+            >$dir/text.filt.ct.tmp
+        paste $dir/text.filt.{id,ct}.tmp >$dir/text.filt
+        rm -f $dir/text.filt.{id,ct}.tmp
+        [ ! -f $dir/text.orin ] &&
+            mv $dir/text{,.orin}
+        mv $dir/text{.filt,}
     }
 done
 

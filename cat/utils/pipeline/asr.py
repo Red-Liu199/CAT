@@ -93,13 +93,14 @@ def pack_data(
             ark, fd_dict=f_opened)   # type:np.ndarray
         if mat.shape[0] < l_min or mat.shape[0] > l_max:
             continue
-
-        labels.append(
-            np.asarray(
-                tokenizer.encode(lb),
-                dtype=np.int64
-            )
+        lb = np.asarray(
+            tokenizer.encode(lb),
+            dtype=np.int64
         )
+        if lb.shape[0] == 0:
+            continue
+
+        labels.append(lb)
         linfo[cnt] = mat.shape[0]
         uids.append(uid)
         arks.append(ark)
@@ -266,7 +267,7 @@ if __name__ == "__main__":
         else:
             fmt = ''
 
-        train_nn(working_dir,fmt)
+        train_nn(working_dir, fmt)
 
     ############ Stage 4  Decode ############
     if s_beg <= 4 and s_end >= 4:

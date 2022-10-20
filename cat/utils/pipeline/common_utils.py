@@ -421,7 +421,14 @@ def get_corpus(
         sfmt.error("std_data='none' and adding_data is empty", get_corpus)
 
     def rm_id(s: str) -> str:
-        return s if skipid else s.split(maxsplit=1)[1]
+        if skipid:
+            return s
+        else:
+            s = s.split(maxsplit=1)
+            if len(s) < 2:
+                return ''
+            else:
+                return s[1]
 
     def lower(s: str) -> str:
         return s.lower()

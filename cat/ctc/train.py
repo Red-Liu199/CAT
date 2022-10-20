@@ -137,7 +137,11 @@ class AMTrainer(nn.Module):
             for CTC training, we flatten the label seqs to 1-dim,
             so here we need to deal with that
         """
-        ground_truth = [t.cpu().tolist() for t in torch.split(ys, ly.tolist())]
+        if ys.dim() == 1:
+            ground_truth = [t.cpu().tolist()
+                            for t in torch.split(ys, ly.tolist())]
+        else:
+            ground_truth = [ys[i, :ly[i]] for i in range(ys.size(0))]
         hypos = [y_samples[n, 0, :ly_samples[n, 0]].tolist()
                  for n in range(bs)]
 
