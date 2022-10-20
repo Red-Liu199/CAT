@@ -91,14 +91,16 @@ def worker(pid: int, args: argparse.Namespace, q: mp.Queue, model: AbsEncoder):
                 break
             key, x, x_lens = batch
             assert len(key) == 1, "Batch size > 1 is not currently support."
-            logits = model(x, x_lens)[0].data.numpy()
+            if args.streaming:
+                logits = model.chunk_infer(x, x_lens)[0].data.numpy()
+            else:
+                logits = model.am(x, x_lens)[0].data.numpy()
             logits[logits == -np.inf] = -1e16
             results[key[0]] = logits[0]
             del batch
 
     kaldiio.save_ark(os.path.join(
         args.output_dir, f"decode.{pid+1}.ark"), results)
-
 
 
 def _parser():
@@ -113,6 +115,7 @@ def _parser():
     parser.add_argument("--nj", type=int, default=-1)
     parser.add_argument("--built-model-by", type=str, default="cat.ctc.train",
                         help="Tell where to import build_model() function. defautl: cat.ctc.train")
+    parser.add_argument("--streaming", action='store_true', default=False)
     return parser
 
 

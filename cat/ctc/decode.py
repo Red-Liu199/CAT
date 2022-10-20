@@ -147,8 +147,11 @@ def worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_out: mp.Queue
                 break
             key, x, x_len = batch
             key = key[0]
-            # beam decoder conducts the softmax internally
-            logits, olens = model(x, x_len)
+            if args.streaming:
+                logits, olens = model.chunk_infer(x, x_len)
+            else:
+                logits, olens = model.am(x, x_len)
+
             # NOTE: log_softmax makes no difference in ctc beam search
             #       however, if you would like to do further work with the AM score,
             #       you may need to do the normalization.
@@ -179,7 +182,6 @@ def build_model(args: argparse.Namespace):
     model = interface.build_model(coreutils.readjson(args.config), dist=False)
     checkpoint = torch.load(args.resume, map_location='cpu')
     model = coreutils.load_checkpoint(model, checkpoint)
-    model = model.am
     model.eval()
     return model
 
@@ -207,6 +209,7 @@ def _parser():
     parser.add_argument("--thread-per-woker", type=int, default=1)
     parser.add_argument("--built-model-by", type=str, default="cat.ctc.train",
                         help="Tell where to import build_model() function. defautl: cat.ctc.train")
+    parser.add_argument("--streaming", action='store_true', default=False)
     return parser
 
 
