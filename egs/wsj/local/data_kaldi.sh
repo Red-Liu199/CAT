@@ -56,40 +56,19 @@ fi
 bash utils/data/data_prep_kaldi.sh \
     data/src/{train_si284,test_dev93,test_eval92} \
     --feat-dir=data/fbank \
-    --nj=48 \
+    --nj=$(nproc) \
     --not-apply-cmvn \
     $opt_3way_sp
 
-# do some text normalize
-for dset in $(ls data/src); do
-    dir="data/src/$dset"
-    [[ $dset != "test_*" ]] && [[ -f $dir/text ]] && {
-        cut <$dir/text -d ' ' -f 1 >$dir/text.filt.id.tmp
-        cut <$dir/text -d ' ' -f 2- | sed \
-            -e 's/[(]BRACE//g; s/[(]PAREN//g; s/[(]IN-PARENTHESIS//g; s/[(]BEGIN-PARENS//g' \
-            -e 's/[(]PARENTHESES//g; s/[(]LEFT-PAREN//g; s/[(]PARENTHETICALLY//g' \
-            -e 's/[)]PAREN//g; s/[)]RIGHT-PAREN//g; s/[)]END-OF-PAREN//g; s/[)]END-PARENS//g;' \
-            -e 's/[)]END-THE-PAREN//g; s/[)]CLOSE-BRACE//g; s/[)]CLOSE_PAREN//g; s/[)]CLOSE-PAREN//g; s/[)]UN-PARENTHESES//g' \
-            -e 's/"CLOSE-QUOTE//g; s/"DOUBLE-QUOTE//g; s/"END-OF-QUOTE//g; s/"END-QUOTE//g; s/"IN-QUOTES//g; s/"QUOTE//g; s/"UNQUOTE//g' \
-            -e 's/{LEFT-BRACE//g; s/}RIGHT-BRACE//g; s/\~//g' \
-            -e 's/;SEMI-COLON//g; s/\/SLASH//g; s/&AMPERSAND/AND/g' \
-            -e 's/<\*IN\*>//g; s/<\*MR\.\*>//g; s/<NOISE>//g' \
-            -e 's/[.]PERIOD//g; s/[.]DOT//g; s/\.\.\.ELLIPSIS//g;' \
-            -e 's/[*]//g; s/:COLON/:/g; s/?QUESTION-MARK//g' \
-            -e "s/'SINGLE-QUOTE//g; " \
-            -e 's/[(]//g; s/[)]//g; s/-//g; s/;//g; s/[.]//g; s/!//g; ' \
-            -e 's/://g; s/`//g; s/[.]//g; s/,COMMA//g; s/?//g' \
-            >$dir/text.filt.ct.tmp
-        paste $dir/text.filt.{id,ct}.tmp >$dir/text.filt
-        rm -f $dir/text.filt.{id,ct}.tmp
-        [ ! -f $dir/text.orin ] &&
-            mv $dir/text{,.orin}
-        mv $dir/text{.filt,}
-    }
-done
+# prepare cmu dict in case of usage
+[ ! -f data/cmudict.txt ] &&
+    wget http://svn.code.sf.net/p/cmusphinx/code/trunk/cmudict/sphinxdict/cmudict.0.7a_SPHINX_40 \
+        -O data/cmudict.txt
 
 # refresh the data/metainfo.json file
 python utils/data/resolvedata.py
 
 echo "$0 done."
+echo "go and check data/metainfo.json for dataset info."
+echo "CMU dict: data/cmudict.txt"
 exit 0

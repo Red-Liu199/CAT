@@ -1,6 +1,10 @@
 """
 Implementation of tokenizer
 """
+from ..shared.coreutils import randstr
+from typing import *
+from collections import OrderedDict
+
 import os
 import io
 import re
@@ -9,10 +13,6 @@ import pickle
 import sentencepiece as sp
 import jieba
 jieba.default_logger.setLevel(jieba.logging.ERROR)
-
-from collections import OrderedDict
-from typing import *
-from ..shared.coreutils import randstr
 
 
 def gen_cache_path() -> str:
@@ -557,7 +557,7 @@ class SentencePieceTokenizer(AbsTokenizer):
         """
         assert os.path.isfile(f_text), f"Given text file '{f_text}' not found."
         if user_defined_symbols != "":
-            if os.path.isfile(user_defined_symbols):
+            if isinstance(user_defined_symbols, str) and os.path.isfile(user_defined_symbols):
                 user_defined_symbols = [x.strip() for x in open(
                     user_defined_symbols, 'r').readlines()]
 
