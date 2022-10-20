@@ -1246,7 +1246,7 @@
                         "properties": {
                             "option": {
                                 "type": "object",
-                                "description": "SA-CRF CTC Trainer options",
+                                "description": "Sampling-base CTC-CRF Trainer options",
                                 "properties": {
                                     "workers": {
                                         "type": "number",
@@ -1684,7 +1684,12 @@
                                                 "type": "number",
                                                 "default": -1
                                             },
-                                            "unified": {
+                                            "built_model_by": {
+                                                "type": "string",
+                                                "description": "Tell where to import build_model() function. defautl: cat.ctc.train",
+                                                "default": "cat.ctc.train"
+                                            },
+                                            "streaming": {
                                                 "default": false
                                             }
                                         }
@@ -1763,6 +1768,9 @@
                                                 "type": "string",
                                                 "description": "Tell where to import build_model() function. defautl: cat.ctc.train",
                                                 "default": "cat.ctc.train"
+                                            },
+                                            "streaming": {
+                                                "default": false
                                             }
                                         }
                                     }
