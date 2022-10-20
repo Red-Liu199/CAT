@@ -309,12 +309,18 @@ class ConformerLSTM(ConformerNet):
                  hdim_lstm: int,
                  num_lstm_layers: int,
                  dropout_lstm: float,
-                 *args, **kwargs):
+                 bidirectional: bool = True,
+                 **kwargs):
 
-        super().__init__(*args, **kwargs)
+        super().__init__(**kwargs)
 
-        self.lstm = c_layers._LSTM(idim=self.linear_drop.linear.out_channels,
-                                   hdim=hdim_lstm, n_layers=num_lstm_layers, dropout=dropout_lstm)
+        self.lstm = c_layers._LSTM(
+            idim=kwargs['hdim'],
+            hdim=hdim_lstm, n_layers=num_lstm_layers,
+            dropout=dropout_lstm, bidirectional=bidirectional
+        )
+        if bidirectional and isinstance(self.classifier, nn.Linear):
+            self.classifier = nn.Linear(hdim_lstm*2, kwargs['num_classes'])
 
     def impl_forward(self, x: torch.Tensor, lens: torch.Tensor):
         conv_x, conv_ls = super().impl_forward(x, lens)

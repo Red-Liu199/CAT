@@ -62,8 +62,8 @@ bash utils/data/data_prep_kaldi.sh \
 
 # prepare cmu dict in case of usage
 [ ! -f data/cmudict.txt ] &&
-    wget http://svn.code.sf.net/p/cmusphinx/code/trunk/cmudict/sphinxdict/cmudict.0.7a_SPHINX_40 \
-        -O data/cmudict.txt
+    wget http://svn.code.sf.net/p/cmusphinx/code/trunk/cmudict/cmudict.0.7a \
+        -O - | grep -v ";;;" >data/cmudict.txt
 
 # refresh the data/metainfo.json file
 python utils/data/resolvedata.py
