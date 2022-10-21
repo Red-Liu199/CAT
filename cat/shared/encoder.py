@@ -121,22 +121,20 @@ class TDNN_NAS(AbsEncoder):
         self.dropout = nn.Dropout(dropout)
         self.tdnns = nn.ModuleDict(OrderedDict([
             ('tdnn0', c_layers.TDNN(idim, hdim, half_context=2, dilation=1)),
-            ('tdnn1', c_layers.TDNN(idim, hdim, half_context=2, dilation=2)),
-            ('tdnn2', c_layers.TDNN(idim, hdim, half_context=2, dilation=1)),
-            ('tdnn3', c_layers.TDNN(idim, hdim, stride=3)),
-            ('tdnn4', c_layers.TDNN(idim, hdim, half_context=2, dilation=2)),
-            ('tdnn5', c_layers.TDNN(idim, hdim, half_context=2, dilation=1)),
-            ('tdnn6', c_layers.TDNN(idim, hdim, half_context=2, dilation=2))
+            ('tdnn1', c_layers.TDNN(hdim, hdim, half_context=2, dilation=2)),
+            ('tdnn2', c_layers.TDNN(hdim, hdim, half_context=2, dilation=1)),
+            ('tdnn3', c_layers.TDNN(hdim, hdim, stride=3)),
+            ('tdnn4', c_layers.TDNN(hdim, hdim, half_context=2, dilation=2)),
+            ('tdnn5', c_layers.TDNN(hdim, hdim, half_context=2, dilation=1)),
+            ('tdnn6', c_layers.TDNN(hdim, hdim, half_context=2, dilation=2))
         ]))
 
     def impl_forward(self, x: torch.Tensor, ilens: torch.Tensor):
-        tmp_x, tmp_lens = x, ilens
-        for i, tdnn in enumerate(self.tdnns.values):
-            if i < len(self.tdnns)-1:
-                tmp_x = self.dropout(x)
-            tmp_x, tmp_lens = tdnn(tmp_x, tmp_lens)
+        for i in range(6):
+            x = self.dropout(x)
+            x, ilens = self.tdnns[f"tdnn{i}"](x, ilens)
 
-        return tmp_x, tmp_lens
+        return self.tdnns['tdnn6'](x, ilens)
 
 
 class TDNN_LSTM(AbsEncoder):
@@ -309,18 +307,12 @@ class ConformerLSTM(ConformerNet):
                  hdim_lstm: int,
                  num_lstm_layers: int,
                  dropout_lstm: float,
-                 bidirectional: bool = True,
-                 **kwargs):
+                 *args, **kwargs):
 
-        super().__init__(**kwargs)
+        super().__init__(*args, **kwargs)
 
-        self.lstm = c_layers._LSTM(
-            idim=kwargs['hdim'],
-            hdim=hdim_lstm, n_layers=num_lstm_layers,
-            dropout=dropout_lstm, bidirectional=bidirectional
-        )
-        if bidirectional and isinstance(self.classifier, nn.Linear):
-            self.classifier = nn.Linear(hdim_lstm*2, kwargs['num_classes'])
+        self.lstm = c_layers._LSTM(idim=self.linear_drop.linear.out_channels,
+                                   hdim=hdim_lstm, n_layers=num_lstm_layers, dropout=dropout_lstm)
 
     def impl_forward(self, x: torch.Tensor, lens: torch.Tensor):
         conv_x, conv_ls = super().impl_forward(x, lens)
