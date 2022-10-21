@@ -112,6 +112,11 @@ class AMTrainer(nn.Module):
             'decoder': decoder
         }
 
+    def clean_unpickable_objs(self):
+        # CTCBeamDecoder is unpickable,
+        # So, this is required for inference.
+        self.attach['decoder'] = None
+
     def register_crf_ctx(self, den_lm: Optional[str] = None):
         """Register the CRF context on model device."""
         assert self.is_crf

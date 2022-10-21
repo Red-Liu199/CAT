@@ -180,6 +180,7 @@ def build_model(args: argparse.Namespace):
     import importlib
     interface = importlib.import_module(args.built_model_by)
     model = interface.build_model(coreutils.readjson(args.config), dist=False)
+    model.clean_unpickable_objs()
     checkpoint = torch.load(args.resume, map_location='cpu')
     model = coreutils.load_checkpoint(model, checkpoint)
     model.eval()
