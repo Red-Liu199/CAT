@@ -82,6 +82,7 @@ class SCRFTrainer(AMTrainer):
             local_normalized_prior: bool = True,
             # compute gradients via mapped y seqs by CTC loss, instead of computing probs of pi seqs.
             compute_gradient_via_y: bool = False,
+            numerator_warmup: int = -1,
             **kwargs):
         super().__init__(**kwargs)
         assert isinstance(n_samples, int) and n_samples > 0
@@ -101,6 +102,9 @@ class SCRFTrainer(AMTrainer):
             'lm_weight': lm_weight,
             'num_weight': num_aux_weight
         }
+        self.step_warmup = numerator_warmup
+        # TODO: how to resume from stop training
+        self.cur_step = 0
 
         self.n_samples = n_samples
         self.local_normalized_encoder = local_normalized_encoder
@@ -173,17 +177,44 @@ class SCRFTrainer(AMTrainer):
         ly = ly.to(device=device, dtype=torch.int)
         labels = labels.to(torch.int)
 
-        N, T, V = logits.shape
-        K = self.n_samples
-
-        w_hat, prior_ys, pi_samples, lsamples, unique_samples, inverse, ordered = self._IS(
-            logits, lx)
-        squeeze_ratio = 1 - ordered.size(0) / N / K
-
         if self.local_normalized_encoder:
             score = logits.log_softmax(dim=-1)
         else:
             score = logits.float()
+
+        N, T, V = logits.shape
+        K = self.n_samples
+
+        # numerator: (N, )
+        num = self.criterion(
+            score.transpose(0, 1),
+            labels.to(device='cpu'),
+            lx, ly
+        )
+        if self._prior:
+            # tunable prior network
+            padded_ys = self._pad(coreutils.pad_list(
+                torch.split(labels, ly.cpu().tolist())))
+            # <s> A B C -> A B C <s>
+            dummy_targets = torch.roll(padded_ys, -1, dims=1)
+
+            # here indeed is the log prob.
+            gtscore = score_prior(
+                self.attach['lm'],
+                padded_ys,
+                dummy_targets,
+                ly+1,
+                self.local_normalized_prior
+            ) * self.weights['lm_weight']
+            num -= gtscore
+
+        if self.training and self.step_warmup > 0 and self.cur_step < self.step_warmup:
+            self.cur_step += 1
+            return num.mean(dim=0), 0., num
+
+        w_hat, prior_ys, pi_samples, lsamples, unique_samples, inverse, ordered = self._IS(
+            logits, lx)
+        squeeze_ratio = 1 - ordered.size(0) / N / K
 
         if self._compute_y_grad:
             # (UN, )
@@ -209,29 +240,6 @@ class SCRFTrainer(AMTrainer):
         s += prior_ys
         # (N, ), i.e. the mu_hat = \sum (w_hat_i * s_i)
         den = torch.sum(s * w_hat, dim=1)
-
-        # numerator: (N, )
-        num = self.criterion(
-            score.transpose(0, 1),
-            labels.to(device='cpu'),
-            lx, ly
-        )
-        if self._prior:
-            # tunable prior network
-            padded_ys = self._pad(coreutils.pad_list(
-                torch.split(labels, ly.cpu().tolist())))
-            # <s> A B C -> A B C <s>
-            dummy_targets = torch.roll(padded_ys, -1, dims=1)
-
-            # here indeed is the log prob.
-            gtscore = score_prior(
-                self.attach['lm'],
-                padded_ys,
-                dummy_targets,
-                ly+1,
-                self.local_normalized_prior
-            ) * self.weights['lm_weight']
-            num -= gtscore
 
         return ((1+self.weights['num_weight'])*num + den).mean(dim=0), squeeze_ratio, num
 
