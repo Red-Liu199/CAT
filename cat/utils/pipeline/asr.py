@@ -337,10 +337,6 @@ if __name__ == "__main__":
                 else:
                     # there's no way the output of model_average() is an invalid path
                     # ... so here we could skip the checkExist()
-                    # update config to file
-                    _hyper = readjson(f_hyper)
-                    _hyper['inference']['infer']['option']['resume'] = checkpoint
-                    dumpjson(_hyper, f_hyper)
                     infr_option['resume'] = checkpoint
                     sys.stdout.write(fmt.format(sfmt.set(
                         'inference:infer:option:resume',
