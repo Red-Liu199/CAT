@@ -1,0 +1,49 @@
+{
+    "data": {
+        "train": "train",
+        "dev": "dev",
+        "test": [
+            "eval92",
+            "dev93"
+        ],
+        "filter": ":2000"
+    },
+    "tokenizer": {
+        "type": "LexiconTokenizer",
+        "option-init": {
+            "lexicon": "/exp/asr-ctc-crf-phone/lexicon.txt"
+        },
+        "|V|": 73,
+        "file": "exp/asr-ctc-crf-phone/tokenizer.tknz"
+    },
+    "env": {
+        "CUDA_VISIBLE_DEVICES": "5,6,7,8,9"
+    },
+    "train": {
+        "bin": "cat.ctc.train",
+        "option": {
+            "amp": true,
+            "batch_size": 256,
+            "verbose": true,
+            "check-freq": -1
+        }
+    },
+    "inference": {
+        "avgmodel": {
+            "mode": "last",
+            "num": 2
+        },
+        "infer": {
+            "bin": "cat.ctc.cal_logit",
+            "option": {
+                "beam_size": 16,
+                "nj": 1,
+                "resume": "exp/asr-ctc-crf-phone/check/last-2.pt"
+            }
+        },
+        "er": {
+            "oracle": true
+        }
+    },
+    "commit": "sunny"
+}
