@@ -243,7 +243,7 @@ def draw_time(ax: plt.Axes, smr: BaseSummary, prop_box=True):
     return ax
 
 
-def draw_loss(ax: plt.Axes, smr: BaseSummary, smooth_value: float = 0.9, ylabel: str = 'loss', prop_box=False):
+def draw_loss(ax: plt.Axes, smr: BaseSummary, smooth_value: float = 0.9, ylabel: str = 'loss', prop_box=False, ax_yformatter=None):
     x = smr.data['step']
     scalars = np.asarray(smr.data['val'])
 
@@ -265,7 +265,8 @@ def draw_loss(ax: plt.Axes, smr: BaseSummary, smooth_value: float = 0.9, ylabel:
         ax.plot(x, scalars, alpha=alpha)
         if smooth_value > 0.:
             ax.plot(x, running_mean, color=ax.get_lines()[-1].get_color())
-        ax.ticklabel_format(axis="y", style="sci", scilimits=(0, 0))
+        if ax_yformatter is None:
+            ax.ticklabel_format(axis="y", style="sci", scilimits=(0, 0))
     else:
         ax.semilogy(x, scalars, alpha=alpha)
         if smooth_value > 0.:
@@ -298,7 +299,7 @@ def draw_lr(ax: plt.Axes, smr: BaseSummary):
 
 
 def draw_any(ax: plt.Axes, smr: BaseSummary, _name: str = ''):
-    return draw_loss(ax, smr, smooth_value=0.9, ylabel=_name, prop_box=False)
+    return draw_loss(ax, smr, smooth_value=0.9, ylabel=_name, prop_box=False, ax_yformatter=ax.yaxis.get_major_formatter())
 
 
 def plot_monitor(mwriter: Union[str, MonitorWriter], o_path: str = None, title: str = None, interactive_show=False) -> str:
@@ -396,14 +397,29 @@ def cmp(checks: List[str], legends: Union[List[str], None] = None, title: str = 
     if legends is None:
         legends = [str(i+1) for i in range(len(checks))]
 
-    for clog in checks:
+    yaxis_formatter = [None, None]
+    for i, clog in enumerate(checks):
         log_writer = MonitorWriter(clog)
         draw_lr(axes[0][0], log_writer[ANNOTATION['tr-lr']])
-        draw_time(axes[0][1], log_writer[ANNOTATION['tr-metric']])
-        draw_loss(axes[1][0], log_writer[ANNOTATION['tr-metric']],
-                  ylabel=ANNOTATION['tr-metric'])
-        draw_loss(axes[1][1], log_writer[ANNOTATION['dev-metric']],
-                  smooth_value=0., ylabel=ANNOTATION['dev-metric'])
+        draw_time(
+            axes[0][1], log_writer[ANNOTATION['tr-metric']], prop_box=False)
+        draw_loss(
+            axes[1][0],
+            log_writer[ANNOTATION['tr-metric']],
+            ylabel=ANNOTATION['tr-metric'],
+            ax_yformatter=yaxis_formatter[0]
+        )
+        draw_loss(
+            axes[1][1],
+            log_writer[ANNOTATION['dev-metric']],
+            smooth_value=0., ylabel=ANNOTATION['dev-metric'],
+            ax_yformatter=yaxis_formatter[1]
+        )
+        if i == 0:
+            yaxis_formatter = [
+                axes[1][0].yaxis.get_major_formatter(),
+                axes[1][1].yaxis.get_major_formatter()
+            ]
 
         # custom metric
         for i, k in enumerate(user_custom_tracks):
@@ -418,12 +434,12 @@ def cmp(checks: List[str], legends: Union[List[str], None] = None, title: str = 
     plt.suptitle(title)
 
     legends = [x.replace(' ', '_') for x in legends]
+    f_anno = f"compare_{'_'.join(legends)}"
     if o_path is None:
-        outpath = os.path.join('.', 'compare-{}-{}.png'.format(*legends))
+        outpath = os.path.join('.', f_anno)
     else:
         if os.path.isdir(o_path):
-            outpath = os.path.join(
-                o_path, 'compare-{}-{}.png'.format(*legends))
+            outpath = os.path.join(o_path, f_anno)
         else:
             outpath = o_path
     plt.savefig(outpath, dpi=200, facecolor="w")
@@ -438,7 +454,7 @@ if __name__ == "__main__":
     parser.add_argument("--title", type=str, default=None,
                         help="Configure the plotting title.")
     parser.add_argument("--legend", type=str,
-                        help="Legend for two comparing figures, split by '-'. Default: 1-2")
+                        help="Legend for two comparing figures, split by '+'. Default: 1+2")
     parser.add_argument("-o", type=str, default=None, dest="o_path",
                         help="Path of the output figure path. If not specified, saved at the directory of input log file.")
     args = parser.parse_args()
@@ -450,5 +466,9 @@ if __name__ == "__main__":
     else:
         legends = args.legend
         if legends is not None:
-            legends = legends.split('-')
+            legends = legends.split('+')
+            assert len(legends) == len(args.log), \
+                "the legends you gave is not equal to the number of log tracks\n" \
+                f"# legends = {len(legends)}, # tracks = {len(args.log)}"
+
         cmp(args.log, legends=legends, title=args.title, o_path=args.o_path)
