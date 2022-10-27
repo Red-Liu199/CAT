@@ -14,6 +14,6 @@ property:
 perplexity:
 
 ```
-Test file: /tmp/dev.tmp -> ppl: 59.06
-Test file: /tmp/test.tmp -> ppl: 58.44
+data:  dev       test
+ppl:   59.06  |  58.44  |
 ```

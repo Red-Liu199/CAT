@@ -63,19 +63,19 @@ CTC model: [LINK](exp/ctc-v1)
 
 The acoustic model is based on Chinese characters. The char-based lm is integrated with shallow fusion, while the word-based one with rescoring.
 
-| Setting                                     | dev  | test |
-| ------------------------------------------- |:----:|:----:|
-| no lm                                       | 5.13 | 5.78 |
-| 5-gram char lm [LINK](exp/lm/lm-v5-updated) | 4.89 | 5.39 |
-| 3-gram word lm [LINK](exp/lm/lm-v6)         | 4.63 | 5.08 |
+| Setting                             | dev  | test |
+| ----------------------------------- |:----:|:----:|
+| no lm                               | 5.13 | 5.78 |
+| 5-gram char lm [LINK](exp/lm/lm-v5) | 4.89 | 5.39 |
+| 3-gram word lm [LINK](exp/lm/lm-v6) | 4.63 | 5.08 |
 
 RNN-T model: [LINK](exp/rnnt/rnnt-v19-torchaudio)
 
-| Setting                                     | dev  | test |
-| ------------------------------------------- |:----:|:----:|
-| no lm                                       | 4.43 | 4.76 |
-| 5-gram char lm [LINK](exp/lm/lm-v5-updated) | 4.25 | 4.69 |
-| 3-gram word lm [LINK](exp/lm/lm-v6)         | 4.25 | 4.47 | 
+| Setting                             | dev  | test |
+| ----------------------------------- |:----:|:----:|
+| no lm                               | 4.43 | 4.76 |
+| 5-gram char lm [LINK](exp/lm/lm-v5) | 4.35 | 4.69 |
+| 3-gram word lm [LINK](exp/lm/lm-v6) | 4.25 | 4.47 | 
 
 
 **Feature extraction backends and CMVN**
