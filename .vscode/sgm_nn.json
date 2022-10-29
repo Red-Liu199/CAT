@@ -880,7 +880,8 @@
                     "examples": [
                         "AbsJointNet",
                         "HAT",
-                        "JointNet"
+                        "JointNet",
+                        "LogAdd"
                     ]
                 }
             },
@@ -976,6 +977,28 @@
                                     "act": {
                                         "default": "tanh"
                                     },
+                                    "compact": {
+                                        "type": "boolean",
+                                        "default": false
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "type": {
+                                "const": "LogAdd"
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "kwargs": {
+                                "type": "object",
+                                "properties": {
                                     "compact": {
                                         "type": "boolean",
                                         "default": false

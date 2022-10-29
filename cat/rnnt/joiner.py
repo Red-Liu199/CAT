@@ -195,3 +195,28 @@ class HAT(JointNet):
         log_prob_label = logits[..., 1:].log_softmax(
             dim=-1) + self._dist_blank(-logit_blank)
         return torch.cat([log_prob_blank, log_prob_label], dim=-1)
+
+
+class LogAdd(AbsJointNet):
+    def __init__(self, compact: bool = False) -> None:
+        super().__init__()
+        self.iscompact = compact
+
+    def impl_forward(self, f: torch.Tensor, g: torch.Tensor, lf: torch.Tensor = None, lg: torch.Tensor = None):
+
+        assert f.dim() == g.dim()
+        dim_f = f.dim()
+        assert dim_f == 1 or dim_f == 3, f"only support input dimension is 1 or 3, instead {dim_f}"
+
+        if dim_f == 3 and self.iscompact and lf is not None and lg is not None:
+            return torch.cat([
+                (f[i:i+1, :lf[i]].unsqueeze(2) +
+                 g[i:i+1, :lg[i]].unsqueeze(1)).view(-1, f.size(-1))
+                for i in range(f.size(0))
+            ], dim=0)
+        if dim_f == 1:
+            # streaming inference mode
+            return f + g
+        else:
+            # normal padding mode
+            return f.unsqueeze(2) + g.unsqueeze(1)
