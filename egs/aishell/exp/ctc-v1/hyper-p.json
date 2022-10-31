@@ -3,51 +3,46 @@
         "train": [
             "train-3sp"
         ],
-        "dev": [
-            "dev"
-        ],
+        "dev": "dev",
         "test": [
             "dev",
             "test"
         ],
-        "filter": ":2000",
-        "lang": "zh-cn"
+        "filter": "10:2000"
     },
     "tokenizer": {
         "type": "SentencePieceTokenizer",
-        "file": "exp/rnnt/rnnt-v15/tokenizer.tknz"
+        "|V|": 4232,
+        "file": "exp/archive/test-ctc-base/tokenizer.tknz"
     },
     "env": {
-        "CUDA_VISIBLE_DEVICES": "2,3,4,5,6,7,8,9"
+        "CUDA_VISIBLE_DEVICES": "4,5,6,7,8,9"
     },
     "train": {
         "bin": "cat.ctc.train",
         "option": {
             "amp": true,
-            "batch_size": 512,
-            "check-freq": 1000,
-            "dynamic_batch_mode": 0,
-            "dynamic_bucket_size": 245760,
-            "grad-norm": 2.0
+            "batch_size": 128,
+            "grad_norm": 2.0,
+            "dynamic_batch_mode": 1,
+            "check_freq": 1000
         }
     },
     "inference": {
         "avgmodel": {
             "mode": "best",
-            "num": 10
+            "num": 20
         },
         "infer": {
             "bin": "cat.ctc.decode",
             "option": {
-                "beam_size": 16,
-                "cpu": true,
-                "nj": 48,
-                "resume": "exp/ctc-v1/check/best-10.pt"
+                "beam_size": 32,
+                "nj": 48
             }
         },
         "er": {
             "cer": true
         }
     },
-    "commit": "8714fb5a462f2a20b29d08926fd4e769796f6349"
+    "commit": "fbce69aa90bed4c3b04de4eaafccbd35a2916368"
 }

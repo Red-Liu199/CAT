@@ -2,12 +2,14 @@
     "specaug": {
         "freq_mask_width_range": 0.34,
         "num_freq_mask": 2,
-        "num_time_mask": 5,
-        "time_mask_width_range": 0.1,
+        "num_time_mask": 10,
+        "time_mask_width_range": 0.05,
         "apply_time_warp": false
     },
     "trainer": {
         "decoder": {
+            "alpha": 0.2,
+            "kenlm": "exp/lm/lm-v5/5gram.bin",
             "beam_size": 16,
             "num_classes": 4232
         }
@@ -19,6 +21,7 @@
             "idim": 80,
             "hdim": 512,
             "conv": "vgg2l",
+            "num_heads": 4,
             "dropout": 0.3,
             "dropout_attn": 0.3,
             "kernel_size": 15,
@@ -28,9 +31,14 @@
     },
     "scheduler": {
         "type": "SchedulerNoam",
+        "kwargs": {
+            "stop_step": 500000,
+            "dim_model": 512,
+            "warmup_step": 25000,
+            "peak_factor": 1.0
+        },
         "optimizer": {
             "type": "Adam",
-            "use_zero": true,
             "kwargs": {
                 "lr": 0.0003,
                 "betas": [
@@ -39,12 +47,6 @@
                 ],
                 "weight_decay": 1e-06
             }
-        },
-        "kwargs": {
-            "dim_model": 512,
-            "warmup_step": 25000,
-            "stop_step": 80000,
-            "peak_factor": 1.0
         }
     }
 }
