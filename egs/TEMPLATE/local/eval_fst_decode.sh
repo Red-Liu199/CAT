@@ -9,7 +9,7 @@ set -e -u
     help="Dataset(s) to be evaluated. e.g. dev test")
 ("--acwt", type=float, default=1.0, 
     help="AC score weight.")
-("--lmwt", type=float, default=0.2, 
+("--lmwt", type=float, default=1.0, 
     help="LM score weight.")
 ("--wip", type=float, default=0.0, 
     help="Word insertion penalty.")

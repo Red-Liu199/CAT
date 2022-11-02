@@ -9,7 +9,7 @@ set -e
 ("--start-stage", type=int, default=1, help="Start stage of the script.")
 ("--stop-stage", type=int, default=100, help="Stop stage of the script.")
 ("-o", "--order", type=int, default=5, help="Max order of n-gram. default: 5")
-("--output", type=str, default="$dir/${order}gram.bin",
+("--output", type=str, default=None,
     help="Path of output N-gram file. default: [dir]/[order]gram.bin")
 ("--arpa", action="store_true", help="Store n-gram file as .arpa instead of binary.")
 ("--prune", type=str, default="", nargs='*',
@@ -24,6 +24,14 @@ export PATH=$PATH:../../src/bin/
 [ ! $(command -v build_binary) ] && echo "command not found: build_binary" && exit 1
 [ ! -d $dir ] && echo "No such directory: $dir" && exit 1
 
+[ $output == "None" ] && {
+    if [ $arpa == "True" ]; then
+        export output="$dir/${order}gram.arpa"
+    else
+        export output="$dir/${order}gram.bin"
+    fi
+}
+
 # train tokenizer & prepare data
 [[ $start_stage -le 1 && $stop_stage -ge 1 ]] &&
     python utils/pipeline/lm.py $dir --sto 1
@@ -34,7 +42,7 @@ export PATH=$PATH:../../src/bin/
 # n-gram training
 [[ $start_stage -le 3 && $stop_stage -ge 3 ]] && {
     echo "==================== Stage 3 N-gram training ===================="
-    read -r f_nn_config f_hyper_config f_readme<<<$(python -c "
+    read -r f_nn_config f_hyper_config f_readme <<<$(python -c "
 import sys;
 sys.path.append('$(dirname $0)');
 from _constants import *;
