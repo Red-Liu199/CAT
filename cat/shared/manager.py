@@ -183,7 +183,8 @@ class Manager(object):
         val_sampler = DistributedSampler(val_set, shuffle=False)
         valloader = DataLoader(
             val_set, batch_size=args.batch_size//world_size, shuffle=False,
-            num_workers=args.workers, sampler=val_sampler, collate_fn=collate_fn
+            num_workers=args.workers, sampler=val_sampler, 
+            collate_fn=collate_fn, persistent_workers=True
         )
 
         self.train_sampler = train_sampler

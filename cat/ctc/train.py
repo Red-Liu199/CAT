@@ -7,16 +7,18 @@ __all__ = ["AMTrainer", "build_model", "_parser", "main"]
 from ..shared import Manager
 from ..shared import coreutils
 from ..shared import encoder as model_zoo
+from ..shared.monitor import ANNOTATION
 from ..shared.data import (
     KaldiSpeechDataset,
     sortedPadCollateASR
 )
-from ..rnnt.train_nce import cal_wer, custom_evaluate
 
 import os
 import argparse
+import Levenshtein
 from typing import *
 from ctcdecode import CTCBeamDecoder
+from tqdm import tqdm
 
 import torch
 import torch.nn as nn
@@ -175,6 +177,60 @@ class AMTrainer(nn.Module):
             loss = self.criterion(logits, labels.to(torch.int), lx.to(
                 torch.int), ly.to(torch.int))
         return loss
+
+
+def cal_wer(gt: List[List[int]], hy: List[List[int]]) -> Tuple[int, int]:
+    """compute error count for list of tokens"""
+    assert len(gt) == len(hy)
+    err = 0
+    cnt = 0
+    for i in range(len(gt)):
+        err += Levenshtein.distance(
+            ''.join(chr(n) for n in hy[i]),
+            ''.join(chr(n) for n in gt[i])
+        )
+        cnt += len(gt[i])
+    return (err, cnt)
+
+
+@torch.no_grad()
+def custom_evaluate(testloader, args: argparse.Namespace, manager: Manager) -> float:
+
+    model = manager.model
+    cnt_tokens = 0
+    cnt_err = 0
+    n_proc = dist.get_world_size()
+
+    for i, minibatch in tqdm(enumerate(testloader), desc=f'Epoch: {manager.epoch} | eval',
+                             unit='batch', total=len(testloader), disable=(args.gpu != 0), leave=False):
+
+        feats, ilens, labels, olens = minibatch
+        feats = feats.cuda(args.gpu, non_blocking=True)
+
+        part_cnt_err, part_cnt_sum = model.module.get_wer(
+            feats, labels, ilens, olens)
+        cnt_err += part_cnt_err
+        cnt_tokens += part_cnt_sum
+
+    gather_obj = [None for _ in range(n_proc)]
+    dist.gather_object(
+        (cnt_err, cnt_tokens),
+        gather_obj if args.rank == 0 else None,
+        dst=0
+    )
+    if args.rank == 0:
+        l_err, l_sum = list(zip(*gather_obj))
+        wer = sum(l_err) / sum(l_sum)
+        manager.writer.add_scalar(
+            'loss/dev-token-error-rate', wer, manager.step)
+        manager.monitor.update(ANNOTATION['dev-metric'], (wer, manager.step))
+
+        scatter_list = [wer]
+    else:
+        scatter_list = [None]
+
+    dist.broadcast_object_list(scatter_list, src=0)
+    return scatter_list[0]
 
 
 def build_beamdecoder(cfg: dict) -> CTCBeamDecoder:

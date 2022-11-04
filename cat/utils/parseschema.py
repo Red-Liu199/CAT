@@ -349,12 +349,12 @@ add_property(hyper_schema, {'tokenizer': processing})
 # if you want to add a new training script, add it here.
 binlist = [
     'cat.rnnt.train_unified',
-    'cat.rnnt.train_mwer',
-    'cat.rnnt.train_nce',
+    # 'cat.rnnt.train_mwer',
+    # 'cat.rnnt.train_nce',
     'cat.rnnt.train',
     'cat.lm.train',
     'cat.ctc.train',
-    'cat.ctc.train_scrf'
+    # 'cat.ctc.train_scrf'
     # 'cat.ctc.train_smwer'
 ]
 
