@@ -63,8 +63,8 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace, **mkwar
         mkwargs['_wds_hook'] = filter_hook
 
     # NOTE: uncomment following lines to enable wer evaluation.
-    # if 'func_eval' not in mkwargs:
-    #     mkwargs['func_eval'] = custom_evaluate
+    if 'func_eval' not in mkwargs:
+        mkwargs['func_eval'] = custom_evaluate
 
     mkwargs['args'] = args
     manager = Manager(**mkwargs)

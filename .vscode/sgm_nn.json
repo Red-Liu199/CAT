@@ -879,6 +879,7 @@
                     "type": "string",
                     "examples": [
                         "AbsJointNet",
+                        "ConvJoiner",
                         "HAT",
                         "JointNet",
                         "LogAdd"
@@ -904,6 +905,36 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {}
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "type": {
+                                "const": "ConvJoiner"
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "kwargs": {
+                                "type": "object",
+                                "properties": {
+                                    "odim_enc": {
+                                        "type": "number"
+                                    },
+                                    "odim_pred": {
+                                        "type": "number"
+                                    },
+                                    "num_classes": {
+                                        "type": "number"
+                                    },
+                                    "hdim": {
+                                        "type": "number"
+                                    }
+                                }
                             }
                         }
                     }

@@ -15,11 +15,11 @@ set -e
     help="Force to do the decoding whatever the result exists or not.")
 ("--nj", type=int, default=-1, help="Number of jobs. This should match the nj of cal_logit.py")
 ("--acwt", type=float, default=1.0, help="AC score weight. default: 1.0")
-("--lmwt", type=float, default=0.2, help="LM score weight. default: 0.2")
+("--lmwt", type=float, default=1.0, help="LM score weight. default: 1.0")
 ("--wip", type=float, default=0.0, help="Word insertion penalty factor. default: 0.0")
 
 ("--beam", type=float, default=17.0, help="latgen-faster args: --beam")
-("--lattice-beam", type=float, default=6.0, help="latgen-faster args: --lattice-beam")
+("--lattice-beam", type=float, default=8.0, help="latgen-faster args: --lattice-beam")
 PARSER
 eval $(python utils/parseopt.py $0 $*)
 

@@ -220,3 +220,29 @@ class LogAdd(AbsJointNet):
         else:
             # normal padding mode
             return f.unsqueeze(2) + g.unsqueeze(1)
+
+
+class ConvJoiner(AbsJointNet):
+    def __init__(self,
+                 odim_enc: int,
+                 odim_pred: int,
+                 num_classes: int,
+                 hdim: int) -> None:
+        super().__init__()
+        self.linear_f = nn.Linear(odim_enc, hdim)
+        self.linear_g = nn.Linear(odim_pred, hdim)
+
+        self.conv = nn.Sequential([
+            ('relu', nn.ReLU()),
+            ('pad', nn.ConstantPad2d((2, 0, 0, 2), 0.)),
+            # seperate convlution
+            ('depth_conv', nn.Conv2d(hdim, hdim, kernel_size=3, groups=hdim)),
+            ('point_conv', nn.Conv2d(hdim, num_classes, kernel_size=1))
+            # ('conv', nn.Conv2D(hdim, num_classes, 3, 1))
+        ])
+
+    def impl_forward(self, f: torch.Tensor, g: torch.Tensor):
+        emb_f = self.linear_f(f)
+        emb_g = self.linear_g(g)
+
+        return self.conv(emb_f.unsqueeze(2)+emb_g.unsqueeze(1))
