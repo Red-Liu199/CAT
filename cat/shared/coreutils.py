@@ -420,7 +420,7 @@ def setup_path(args: argparse.Namespace):
         os.makedirs(checkdir, exist_ok=True)
         os.makedirs(logdir, exist_ok=True)
     else:
-        highlight_msg("Debugging")
+        highlight_msg("debugging")
         # This is a hack, we won't read/write anything in debug mode.
         logdir = os.path.join(args.dir, D_TMP)
         checkdir = logdir

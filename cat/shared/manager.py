@@ -215,12 +215,6 @@ class Manager(object):
         self.evaluate = evaluate if func_eval is None else func_eval
 
         # Initial specaug module
-        # FIXME: deprecate the error once it's stable
-        if 'specaug_config' in cfg:
-            raise ValueError(
-                "'specaug_config' has been deprecated, use 'specaug' instead. "
-                f"check that in {args.config}"
-            )
         if 'specaug' not in cfg:
             specaug = None
             coreutils.distprint("> disable SpecAug", args.gpu)
@@ -231,14 +225,7 @@ class Manager(object):
 
         # Initial scheduler and optimizer
         assert 'scheduler' in cfg
-        if hasattr(self.model, "requires_slice") and self.model.requires_slice:
-            self.scheduler = build_scheduler(
-                cfg['scheduler'],
-                filter(lambda x: x.requires_grad, self.model.parameters())
-            )
-        else:
-            self.scheduler = build_scheduler(
-                cfg['scheduler'], self.model.parameters())
+        self.scheduler = build_scheduler(cfg['scheduler'], self.model.parameters())
 
         # Initialize the grad scaler
         self.scaler = GradScaler(enabled=args.amp)
@@ -283,10 +270,15 @@ class Manager(object):
         # Initialize the checkpoint manager
         self.cm = CheckManager(
             os.path.join(args._checkdir, F_CHECKPOINT_LIST),
-            header=f"created at {datetime.today().strftime('%Y-%m-%d %H:%M:%S')}"
+            header=f"created by {os.getlogin()} at {datetime.today().strftime('%Y-%m-%d %H:%M:%S')}"
         )
 
-        # Initialize the monitor
+        # Initialize the monitor and tensorboard
+        # NOTE (huahuan): 
+        #     Both of the customized monitor module and tensorboard serving as 
+        #     ... monitor tracker, there're sort of duplicated in functions.
+        #     ... I'm trying to figure a (simple) way to export tensorboard plotting as images,
+        #     ... so that we can deprecate the annoying monitor.py script
         self.monitor = MonitorWriter(args._logdir)
         self.monitor.addWriter(tuple(monitor_anno.values()))
         if extra_tracks is not None:
@@ -429,12 +421,13 @@ class Manager(object):
             return None
 
 
-'''
+"""
 NOTE (Huahuan):
     with --dynamic_batch_mode, batch size on each device might be different,
-    however, torch DDP automatically makes the allreduce on gradients
+    however, torch DDP automatically makes the allreduce on gradients,
     then averages them by world size during backward.
-    which assumes the batch sizes across devices are the same.
+
+    That assumes the batch sizes across devices are the same.
     To address this, we re-calculate the loss in a hack way:
         local_loss_new = sum_over_local_batches(local_loss) / global_batch_size * world_size
 
@@ -449,9 +442,9 @@ NOTE (Huahuan):
         loss_normalized_new' = sum_over_devices(sum_over_local_batches(local_loss) / global_batch_size)
                              = loss_normalized
 
-    such that the gradient is properly computed. Be aware that this
+    In this way, the gradient is properly computed. Also, be aware that this
     might cause numerical difference given the fact that probably: (f * N) / N != f
-'''
+"""
 
 
 def train(trainloader: ReadBatchDataLoader, args: argparse.Namespace, manager: Manager, hook_func: Callable = None):
