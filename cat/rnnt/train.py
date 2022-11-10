@@ -101,11 +101,12 @@ class TransducerTrainer(nn.Module):
         self.predictor = predictor
         self.joiner = joiner
 
-        if not hasattr(self.joiner, 'iscompact') and compact:
-            print(
-                "warning: it seems the joiner network might not be compatible with 'compact=Ture'.")
-        else:
-            assert self.joiner.iscompact == compact
+        if compact:
+            if not hasattr(self.joiner, 'iscompact'):
+                print(
+                    "warning: it seems the joiner network might not be compatible with 'compact=Ture'.")
+            else:
+                assert self.joiner.iscompact == compact
 
         if num_predictor_mask != -1:
             self._pn_mask = SpecAug(

@@ -203,11 +203,12 @@ class LogAdd(AbsJointNet):
         self.iscompact = compact
 
     def impl_forward(self, f: torch.Tensor, g: torch.Tensor, lf: torch.Tensor = None, lg: torch.Tensor = None):
-
         assert f.dim() == g.dim()
         dim_f = f.dim()
         assert dim_f == 1 or dim_f == 3, f"only support input dimension is 1 or 3, instead {dim_f}"
 
+        # the preditor doesn't straightly involve in blank prob computation.
+        g[..., 0] = 0.
         if dim_f == 3 and self.iscompact and lf is not None and lg is not None:
             return torch.cat([
                 (f[i:i+1, :lf[i]].unsqueeze(2) +
@@ -232,17 +233,22 @@ class ConvJoiner(AbsJointNet):
         self.linear_f = nn.Linear(odim_enc, hdim)
         self.linear_g = nn.Linear(odim_pred, hdim)
 
-        self.conv = nn.Sequential([
-            ('relu', nn.ReLU()),
-            ('pad', nn.ConstantPad2d((2, 0, 0, 2), 0.)),
+        self.conv = nn.Sequential(
+            nn.ReLU(),
+            nn.ConstantPad2d((2, 0, 0, 2), 0.),
             # seperate convlution
-            ('depth_conv', nn.Conv2d(hdim, hdim, kernel_size=3, groups=hdim)),
-            ('point_conv', nn.Conv2d(hdim, num_classes, kernel_size=1))
-            # ('conv', nn.Conv2D(hdim, num_classes, 3, 1))
-        ])
+            nn.Conv2d(hdim, hdim, kernel_size=3, groups=hdim),
+            nn.Conv2d(hdim, num_classes, kernel_size=1)
+            # nn.Conv2D(hdim, num_classes, 3, 1)
+        )
 
-    def impl_forward(self, f: torch.Tensor, g: torch.Tensor):
+    def impl_forward(self, f: torch.Tensor, g: torch.Tensor, lf=None, lg=None):
+        # f: (N, T, H)
+        # g: (N, U, H)
         emb_f = self.linear_f(f)
         emb_g = self.linear_g(g)
 
-        return self.conv(emb_f.unsqueeze(2)+emb_g.unsqueeze(1))
+        # (N, V, T, U)
+        logits = self.conv(emb_f.transpose(1, 2).unsqueeze(
+            3)+emb_g.transpose(1, 2).unsqueeze(2))
+        return logits.permute(0, 2, 3, 1)
