@@ -22,10 +22,6 @@ from .scheduler import (
     State,
     build_scheduler
 )
-from .monitor import (
-    MonitorWriter,
-    ANNOTATION as monitor_anno
-)
 
 import os
 import sys
@@ -183,7 +179,7 @@ class Manager(object):
         val_sampler = DistributedSampler(val_set, shuffle=False)
         valloader = DataLoader(
             val_set, batch_size=args.batch_size//world_size, shuffle=False,
-            num_workers=args.workers, sampler=val_sampler, 
+            num_workers=args.workers, sampler=val_sampler,
             collate_fn=collate_fn, persistent_workers=True
         )
 
@@ -226,7 +222,8 @@ class Manager(object):
 
         # Initial scheduler and optimizer
         assert 'scheduler' in cfg
-        self.scheduler = build_scheduler(cfg['scheduler'], self.model.parameters())
+        self.scheduler = build_scheduler(
+            cfg['scheduler'], self.model.parameters())
 
         # Initialize the grad scaler
         self.scaler = GradScaler(enabled=args.amp)
@@ -269,22 +266,17 @@ class Manager(object):
             del checkpoint
 
         # Initialize the checkpoint manager
+        try:
+            user = os.getlogin()
+        except OSError:
+            user = "defaultUser"
+
         self.cm = CheckManager(
             os.path.join(args._checkdir, F_CHECKPOINT_LIST),
-            header=f"created by {os.getlogin()} at {datetime.today().strftime('%Y-%m-%d %H:%M:%S')}"
+            header=f"created by {user} at {datetime.today().strftime('%Y-%m-%d %H:%M:%S')}"
         )
 
-        # Initialize the monitor and tensorboard
-        # NOTE (huahuan): 
-        #     Both of the customized monitor module and tensorboard serving as 
-        #     ... monitor tracker, there're sort of duplicated in functions.
-        #     ... I'm trying to figure a (simple) way to export tensorboard plotting as images,
-        #     ... so that we can deprecate the annoying monitor.py script
-        self.monitor = MonitorWriter(args._logdir)
-        self.monitor.addWriter(tuple(monitor_anno.values()))
-        if extra_tracks is not None:
-            self.monitor.addWriter(extra_tracks)
-
+        # Initialize the tensorboard
         if args.rank == 0:
             self.writer = SummaryWriter(os.path.join(
                 args._logdir, "{0:%Y%m%d-%H%M%S/}".format(datetime.now())))
@@ -325,15 +317,11 @@ class Manager(object):
                     f"checkpoint.{self.epoch}e{self.step}s.pt"
                 )
                 # inside self.save(), there is an all_reduce OP, don't put it in rank==0 block.
-                # we should save the checkpoint before monitor.export(), otherwise the monitor is dumped
-                # ... into file and empty.
                 self.save(checkpoint)
                 if self.rank == 0 and not self.DEBUG:
                     self.cm.appendinfo(
                         self.epoch, self.step,
                         metrics, self.scheduler.lr_cur, checkpoint)
-                    self.monitor.visualize(args.dir)
-                    self.monitor.export()
 
                 coreutils.distprint(
                     f"Epoch: {self.epoch:<3} | Step: {self.step} | Eval metric: {metrics:.3e} | LR: {self.scheduler.lr_cur:.3e}",
@@ -378,8 +366,6 @@ class Manager(object):
         states = OrderedDict({
             'model': self.model.state_dict(),
             'scheduler': self.scheduler.state_dict(),
-            # monitor is only for backup, never load it in manager.load()
-            'monitor': self.monitor.state_dict(),
             'epoch': self.epoch,
             'scaler': self.scaler.state_dict(),
             'step': self.step,
@@ -410,7 +396,6 @@ class Manager(object):
         if 'scaler' in checkpoint:
             self.scaler.load_state_dict(checkpoint['scaler'])
 
-        # monitor is not required to load
         self.epoch = checkpoint['epoch']
         self.step = checkpoint['step']
         self.step_by_last_epoch = checkpoint.get(
@@ -577,12 +562,6 @@ def train(trainloader: ReadBatchDataLoader, args: argparse.Namespace, manager: M
                 manager.writer.add_scalar(
                     'lr', tolog['lr'], manager.step)
 
-                # update monitor
-                manager.monitor.update({
-                    monitor_anno['tr-metric']: (tolog['loss'], manager.step),
-                    monitor_anno['tr-lr']: (tolog['lr'], manager.step)
-                })
-
             if args.verbose:
                 coreutils.distprint(
                     f"[{manager.epoch} - {cnt_step_update}/{args.n_steps}] | data {t_data:6.3f} | time {time.time()-t_last_step:6.3f} | "
@@ -657,8 +636,6 @@ def evaluate(testloader: DataLoader, args: argparse.Namespace, manager: Manager)
 
     if args.rank == 0:
         manager.writer.add_scalar('loss/dev', avg_loss, manager.step)
-        manager.monitor.update(
-            monitor_anno['dev-metric'], (avg_loss, manager.step))
     return avg_loss
 
 

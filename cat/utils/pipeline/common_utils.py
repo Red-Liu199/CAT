@@ -10,6 +10,8 @@ import argparse
 import json
 import os
 import sys
+import glob
+import subprocess
 
 # fmt:off
 try:
@@ -377,6 +379,17 @@ def train_nn(working_dir: str, prompt: str = '{}\n'):
     spawn(interface.main, parse_args_from_var(
         interface._parser(), train_options))
 
+    # after the training is done. plot tb to image.
+    tfevents = glob.glob(os.path.join(
+        f"{working_dir}/{D_LOG}/**/", "events.out.tfevents.*"))
+
+    subprocess.run(
+        f"{sys.executable} utils/plot_tb.py "
+        f"{' '.join(tfevents)} "
+        f"-o {os.path.join(working_dir, F_MONITOR_FIG)}",
+        shell=True, check=True, stdout=subprocess.PIPE
+    )
+
 
 def get_corpus(
         f_hyper: str = None,
@@ -666,7 +679,6 @@ def model_average(
 
 
 def log_commit(f_hyper: str):
-    import subprocess
     if subprocess.run('command -v git', shell=True, capture_output=True).returncode != 0:
         sys.stderr.write(
             sfmt.warn(

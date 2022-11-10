@@ -315,13 +315,6 @@ def custom_hook(
         l_full_utt = loss_utt.item()
         l_simu = loss_simu.item()
         step_cur = manager.step_by_last_epoch + n_step
-        manager.monitor.update(
-            {
-                'loss/streaming': (l_streaming, step_cur),
-                'loss/full_utt': (l_full_utt, step_cur),
-                'loss/simulate': (l_simu, step_cur)
-            }
-        )
         manager.writer.add_scalar(
             'loss/streaming', l_streaming, step_cur)
         manager.writer.add_scalar(

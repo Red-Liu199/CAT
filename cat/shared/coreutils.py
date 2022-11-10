@@ -154,7 +154,7 @@ def gen_readme(path: str, model: nn.Module, gpu_info: list = []) -> str:
         "",
         "|     training process    |",
         "|:-----------------------:|",
-        f"|![monitor](./{F_MONITOR_FIG})|",
+        f"|![tb-plot](./{F_MONITOR_FIG})|",
         ""
     ]
     with open(path, 'w') as fo:
@@ -405,8 +405,7 @@ def setup_path(args: argparse.Namespace):
         D_TMP,
         D_CHECKPOINT,
         D_LOG,
-        F_NN_CONFIG,
-        F_MONITOR_SUMMARY
+        F_NN_CONFIG
     )
     # set checkpoint path and log files path
     if not args.debug:
@@ -435,12 +434,6 @@ def setup_path(args: argparse.Namespace):
         if glob.glob(os.path.join(args._checkdir, "*.pt")) != []:
             raise FileExistsError(
                 f"{args._checkdir} is not empty!"
-            )
-
-        logfile = os.path.join(logdir, F_MONITOR_SUMMARY)
-        if os.path.isfile(logfile):
-            raise FileExistsError(
-                f"{logfile} exists!"
             )
 
 

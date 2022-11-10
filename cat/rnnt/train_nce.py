@@ -11,7 +11,6 @@ from .beam_search import BeamSearcher as RNNTDecoder
 from ..ctc.train import cal_wer, custom_evaluate
 from ..lm import lm_builder
 from ..shared import coreutils
-from ..shared.monitor import ANNOTATION
 from ..shared.encoder import AbsEncoder
 from ..shared.decoder import AbsDecoder, ILM
 from ..shared.manager import (
@@ -79,7 +78,7 @@ class NCETransducerTrainer(TransducerTrainer):
             mle_weight: Optional[float] = 0.,
             trainable_weight: bool = False,
             **kwargs) -> None:
-        super().__init__(*args, **kwargs)
+        super().__init__(**kwargs)
 
         assert isinstance(ext_lm, AbsDecoder)
         assert isinstance(beamdecoder, RNNTDecoder)
@@ -316,18 +315,6 @@ def custom_hook(
         pos_acc = ((p_c_0.exp() > 0.5).sum() / p_c_0.size(0)).item()
         noise_acc = ((p_c_1.exp() > 0.5).sum() / p_c_1.size(0)).item()
         step_cur = manager.step_by_last_epoch + n_step
-        manager.monitor.update(
-            {
-                'loss/ml': (l_ml, step_cur),
-                'loss/nce': ((l_data+l_noise), step_cur),
-                'loss/nce-data': (l_data, step_cur),
-                'loss/nce-noise': (l_noise, step_cur),
-                'acc/data': (pos_acc, step_cur),
-                'acc/noise': (noise_acc, step_cur),
-                'weight/ilm': (float(ilm_w), step_cur),
-                'weight/elm': (float(elm_w), step_cur)
-            }
-        )
         manager.writer.add_scalar(
             'loss/ml', l_ml, step_cur)
         manager.writer.add_scalar(

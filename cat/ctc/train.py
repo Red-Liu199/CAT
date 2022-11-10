@@ -7,7 +7,6 @@ __all__ = ["AMTrainer", "build_model", "_parser", "main"]
 from ..shared import Manager
 from ..shared import coreutils
 from ..shared import encoder as model_zoo
-from ..shared.monitor import ANNOTATION
 from ..shared.data import (
     KaldiSpeechDataset,
     sortedPadCollateASR
@@ -223,8 +222,6 @@ def custom_evaluate(testloader, args: argparse.Namespace, manager: Manager) -> f
         wer = sum(l_err) / sum(l_sum)
         manager.writer.add_scalar(
             'loss/dev-token-error-rate', wer, manager.step)
-        manager.monitor.update(ANNOTATION['dev-metric'], (wer, manager.step))
-
         scatter_list = [wer]
     else:
         scatter_list = [None]

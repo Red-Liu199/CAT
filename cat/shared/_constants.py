@@ -13,8 +13,7 @@ F_NN_CONFIG = "config.json"
 F_HYPER_CONFIG = "hyper-p.json"
 
 ## monitor/log related
-F_MONITOR_SUMMARY = "training.smr"
-F_MONITOR_FIG = "monitor.png"
+F_MONITOR_FIG = "monitor.jpg"
 
 ## checkpoint
 F_CHECKPOINT_LIST = "checkpoint.list"
