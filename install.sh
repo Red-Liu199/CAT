@@ -10,8 +10,6 @@ set -e
     help="Remove modules instead of installing.")
 ('-f', "--force", action='store_true', default=False,
     help="Force to install modules whatever they exist or not.")
-("--log-stdout", action='store_true', default=False,
-    help="Logging to stdout instead of files.")
 PARSER
 eval $(python cat/utils/parseopt.py $0 $*)
 
@@ -197,33 +195,19 @@ done
     exit 1
 }
 
-log_dir="logs"
-mkdir -p $log_dir
 if [ $remove == "False" ]; then
     # install packages
     for p in $package; do
-        f_log="$log_dir/$p.log"
-        [ $log_stdout == "True" ] &&
-            f_log="/dev/stdout"
-
-        touch $f_log
-        echo "logging at $f_log" 1>&2
-        exc_install $p >$f_log 2>&1 || {
-            echo "failed to install $p, check the log at $f_log" 1>&2
+        exc_install $p || {
+            echo "failed to install $p." 1>&2
             exit 1
         }
     done
 elif [ $remove == "True" ]; then
     # remove packages
     for p in $package; do
-        f_log="$log_dir/remove.$p.log"
-        [ $log_stdout == "True" ] &&
-            f_log="/dev/stdout"
-
-        touch $f_log
-        echo "logging at $f_log" 1>&2
-        exc_rm $p >$f_log 2>&1 || {
-            echo "failed to remove $p, check the log at $f_log" 1>&2
+        exc_rm $p || {
+            echo "failed to remove $p." 1>&2
             exit 1
         }
     done
