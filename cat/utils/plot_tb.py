@@ -178,9 +178,6 @@ def plot_tb(tbevent: str, o_path: str = None, title: str = None, interactive_sho
 
 def cmp(tbevents: List[str], legends: Union[List[str], None] = None, title: str = ' ', o_path=None):
 
-    for c in tbevents:
-        assert os.path.isfile(c), f"{c} is not a file."
-
     accumulator = EventAccumulator(tbevents[0]).Reload()
 
     anno_scalars = accumulator.Tags()['scalars']

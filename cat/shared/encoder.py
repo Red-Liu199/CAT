@@ -303,16 +303,26 @@ class ConformerNet(AbsEncoder):
 
 
 class ConformerLSTM(ConformerNet):
+    """Stack LSTM after conformer blocks."""
+
     def __init__(self,
                  hdim_lstm: int,
                  num_lstm_layers: int,
                  dropout_lstm: float,
-                 *args, **kwargs):
+                 bidirectional: bool = False,
+                 **kwargs):
+        super().__init__(**kwargs)
 
-        super().__init__(*args, **kwargs)
-
-        self.lstm = c_layers._LSTM(idim=self.linear_drop.linear.out_channels,
-                                   hdim=hdim_lstm, n_layers=num_lstm_layers, dropout=dropout_lstm)
+        self.lstm = c_layers._LSTM(
+            idim=self.linear_drop.linear.out_features,
+            hdim=hdim_lstm,
+            n_layers=num_lstm_layers,
+            dropout=dropout_lstm,
+            bidirectional=bidirectional
+        )
+        if bidirectional:
+            hdim_lstm *= 2
+        self.classifier = nn.Linear(hdim_lstm, kwargs['num_classes'])
 
     def impl_forward(self, x: torch.Tensor, lens: torch.Tensor):
         conv_x, conv_ls = super().impl_forward(x, lens)
