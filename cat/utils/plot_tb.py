@@ -130,7 +130,6 @@ def plot_tb(tbevent: str, o_path: str = None, title: str = None, interactive_sho
         title (str, optional): title name (title of ploting)
         interactive_show (bool, optional): specify whether plot in interactive mode. Default False.
     """
-    assert os.path.isfile(tbevent), tbevent
     accumulator = EventAccumulator(tbevent).Reload()
 
     anno_scalars = accumulator.Tags()['scalars']
@@ -243,7 +242,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if len(args.log) == 1:
-        assert os.path.isfile(args.log[0]), args.log[0]
         plot_tb(args.log[0], title=args.title, o_path=args.o_path)
     else:
         legends = args.legend
