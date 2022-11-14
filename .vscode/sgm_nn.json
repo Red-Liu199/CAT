@@ -120,6 +120,10 @@
                                     },
                                     "dropout_lstm": {
                                         "type": "number"
+                                    },
+                                    "bidirectional": {
+                                        "type": "boolean",
+                                        "default": false
                                     }
                                 }
                             }
