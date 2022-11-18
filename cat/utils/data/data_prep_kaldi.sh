@@ -70,21 +70,39 @@ for dir in $data_dir; do
     fi
 
     utils/fix_data_dir.sh $dir
-    [ $not_apply_cmvn == "False" ] && {
-        steps/compute_cmvn_stats.sh \
-            $dir \
-            $feat_dir/log-cmvn \
-            $feat_dir/cmvn ||
-            exit 1
 
-        copy-feats --compress=true \
-            "ark,s,cs:apply-cmvn --norm-vars=true --utt2spk=ark:$dir/utt2spk \
-                scp:$dir/cmvn.scp scp:$dir/feats.scp ark:- |" \
-            "ark,scp:$dir/applied_cmvn.ark,$dir/feats_cmvn.scp"
+    if [ $not_apply_cmvn == "False" ]; then
+        if [ -f $dir/feats_cmvn.scp ]; then
+            [ -f $dir/feats.scp ] && {
+                if [ -f $dir/feats_orin.scp ]; then
+                    rm -f $dir/feats.scp
+                else
+                    mv $dir/feats.scp $dir/feats_orin.scp
+                fi
+            }
+            ln -snf $dir/feats_cmvn.scp $dir/feats.scp
+        else
+            steps/compute_cmvn_stats.sh \
+                $dir \
+                $feat_dir/log-cmvn \
+                $feat_dir/cmvn ||
+                exit 1
 
-        mv $dir/feats.scp $dir/feats_orin.scp
-        mv $dir/feats_cmvn.scp $dir/feats.scp
-    }
+            [ ! -f $dir/feats_orin.scp ] &&
+                mv $dir/feats.scp $dir/feats_orin.scp
+
+            copy-feats --compress=true \
+                "ark,s,cs:apply-cmvn --norm-vars=true --utt2spk=ark:$dir/utt2spk \
+                scp:$dir/cmvn.scp scp:$dir/feats_orin.scp ark:- |" \
+                "ark,scp:$dir/applied_cmvn.ark,$dir/feats_cmvn.scp"
+
+            ln -snf $dir/feats_cmvn.scp $dir/feats.scp
+        fi
+    else
+        [ ! -f $dir/feats_orin.scp ] &&
+            mv $dir/feats.scp $dir/feats_orin.scp
+        ln -snf $dir/feats_orin.scp $dir/feats.scp
+    fi
 
 done
 rm -rf $fbank_conf
