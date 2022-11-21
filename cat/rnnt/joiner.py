@@ -208,7 +208,7 @@ class LogAdd(AbsJointNet):
         assert dim_f == 1 or dim_f == 3, f"only support input dimension is 1 or 3, instead {dim_f}"
 
         # the preditor doesn't straightly involve in blank prob computation.
-        g[..., 0] = 0.
+        # g[..., 0] = 0.
         if dim_f == 3 and self.iscompact and lf is not None and lg is not None:
             return torch.cat([
                 (f[i:i+1, :lf[i]].unsqueeze(2) +
