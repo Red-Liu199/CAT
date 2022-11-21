@@ -9,8 +9,6 @@ TRF LM is not causal.
 
 __all__ = ["TRFLMTrainer", "build_model", "_parser", "main"]
 
-from codecs import ignore_errors
-from zmq import has
 from ...shared import coreutils
 from ...shared.decoder import AbsDecoder
 from ...shared.manager import (
@@ -25,12 +23,6 @@ from ...shared.data import (
     CorpusDataset,
     sortedPadCollateLM
 )
-from ...shared.tokenizer import (
-    gen_cache_path,
-    file2bin,
-    bin2file
-)
-from ...shared.scheduler import build_scheduler
 from . import model as model_zoo
 
 import os
@@ -41,9 +33,6 @@ from typing import *
 import torch
 import torch.nn as nn
 import torch.distributed as dist
-from torch.cuda.amp import GradScaler
-from torch.distributed.optim import ZeroRedundancyOptimizer
-import webdataset as wds
 
 
 def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):

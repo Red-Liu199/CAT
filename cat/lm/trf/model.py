@@ -586,8 +586,10 @@ class REBM(AbsDecoder):
 
     
     def get_batch_noise(self, inputs, in_lens):
+        if inputs.size(0)==0:
+            return inputs, in_lens
         with torch.no_grad():
-            max_len = max(in_lens)
+            max_len = inputs.size(1)
             probs = self.noise_mask_ratio*torch.ones([max_len], device=inputs.device)
             probs[0] = 0
             masked_indices = torch.bernoulli(probs).bool()
@@ -599,9 +601,9 @@ class REBM(AbsDecoder):
                 noise_input = inputs[:, :i]
                 noise_out, _ = self.noise_module[0](src_ids=noise_input) # (B,T,V)
                 noise_next = noise_out[:, -1, :].argmax(-1) # (B,)
-                noise[i] = noise_next
-            padding_mask = (torch.arange(inputs.size(1), device=inputs.device)[
-                None, :] < in_lens[:, None].to(inputs.device)).unsqueeze(2)
+                noise[:, i] = noise_next
+            padding_mask = (torch.arange(max_len, device=inputs.device)[
+                None, :] < in_lens[:, None].to(inputs.device))
             noise *= padding_mask
         return noise, noiselens
 
@@ -613,7 +615,7 @@ class REBM(AbsDecoder):
             noise_k, noiselens_k = self.get_batch_noise(inputs, in_lens)
             noise = torch.cat((noise, noise_k), dim=0)
             noiselens = torch.cat((noiselens, noiselens_k), dim=0)
-        targets = torch.cat((noise[:, 1:], torch.zeros(inputs.size(0), 1)), dim=1)
+        targets = torch.cat((noise[:, 1:], torch.zeros(inputs.size(0), 1, device=noise.device, dtype=torch.long)), dim=1)
         return noise, noiselens, targets
 
     def cal_loss(self, inputs: torch.Tensor, energy_values, in_lens, targets):
