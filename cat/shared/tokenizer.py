@@ -8,6 +8,7 @@ import sys
 import pickle
 import sentencepiece as sp
 import jieba
+import transformers
 
 from collections import OrderedDict
 from typing import *
@@ -34,13 +35,54 @@ def bin2file(bindata: bytes, f_dest: Optional[str] = None) -> str:
 
 
 class AbsTokenizer:
+
     def encode(self, strings: Union[str, Iterable[str]]) -> Union[List[int], List[List[int]]]:
-        """Encode string into index."""
+        """Encode string to indices
+        """
+        if isinstance(strings, str):
+            return self._enc(strings)
+        try:
+            iterator = iter(strings)
+        except TypeError:
+            raise RuntimeError(
+                f"{self.__class__.__name__}.encode: input is neither str nor iterable.")
+
+        cut_words = []
+        for s in strings:
+            cut_words.append(self._enc(s))
+        return cut_words
+
+    def decode(self, indices: Union[Iterable[int], Iterable[Iterable[int]]]) -> Union[str, Iterable[str]]:
+        """Decode index to string."""
+        try:
+            iterator = iter(indices)
+        except TypeError:
+            raise RuntimeError(
+                f"{self.__class__.__name__}.decode(): input is not iterable.")
+
+        if isinstance(next(iterator), int):
+            return self._dec(indices)
+
+        try:
+            iter(next(iter(indices)))
+        except TypeError:
+            raise RuntimeError(
+                f"{self.__class__.__name__}.decode(): element of input is neither int nor iterable.")
+
+        return [self._dec(x) for x in indices]
+
+    def _enc(self, s: str) -> List[int]:
+        """Implementation of encoding, will be invoked by self.encode()"""
         raise NotImplementedError
 
-    def decode(self, idx_tokens: Union[List[int], List[List[int]]]) -> Union[str, Iterable[str]]:
-        """Decode index to string."""
-        raise NotImplementedError
+    def _dec(self, indices: Iterable[int]) -> str:
+        """Implementation of decoding, will be invoked by self.decode()"""
+        raise ImportError
+
+    @staticmethod
+    def train(*args, **kwargs):
+        """Implementation of tokenizer training (if needed)"""
+        return
 
     @property
     def vocab_size(self) -> int:
@@ -82,14 +124,9 @@ class AbsTokenizer:
         self.load_state_dict(state)
 
 
-# FIXME (huahuan): I'm not quite familiar with jieba, so there might be inappropriate processing
-
-
 class JiebaTokenizer(AbsTokenizer):
-    def __init__(self, userdict: Optional[Union[str, bytes]] = None, bos_id: int = 0, lazy_init: bool = False) -> None:
+    def __init__(self, userdict: Optional[Union[str, bytes]] = None, bos_id: int = 0) -> None:
         super().__init__()
-        if lazy_init:
-            return
         self._tokenizer = jieba.Tokenizer()
         if userdict is None:
             self._tokenizer.initialize()
@@ -128,56 +165,25 @@ class JiebaTokenizer(AbsTokenizer):
         for idx, w in enumerate(self._vocabulary):
             self._vocabulary[w] = idx
 
+    def cut(self, s: str) -> Generator[str, None, None]:
+        """Do segmentation"""
+        for w in self._tokenizer.cut(s.strip(), HMM=False):
+            if w == ' ':
+                continue
+            yield w
+        return
+
     def _enc(self, s: str) -> List[int]:
-        cut_words = self._tokenizer.cut(s.strip().replace(' ', ''), HMM=False)
         rt_indices = []     # type: List[int]
-        for w in cut_words:
+        for w in self.cut(s):
             if w not in self._vocabulary:
-                w = "<unk>"
-            rt_indices.append(self._vocabulary[w])
+                rt_indices.append(self._vocabulary["<unk>"])
+            else:
+                rt_indices.append(self._vocabulary[w])
         return rt_indices
 
-    def encode(self, strings: Union[str, Iterable[str]]) -> Union[List[int], List[List[int]]]:
-        """Encode string to indices
-
-        NOTE: since chinese language requires segmentation, so 
-            tokenizer.decode(tokenizer.encode(string)) == string may not be satisfied.
-        """
-        if isinstance(strings, str):
-            return self._enc(strings)
-        try:
-            iterator = iter(strings)
-        except TypeError:
-            raise RuntimeError(
-                f"{self.__class__.__name__}.encode: input is neither str nor iterable.")
-
-        cut_words = []
-        for s in strings:
-            cut_words.append(self._enc(s))
-        return cut_words
-
-    def decode(self, idx_tokens: Union[Iterable[int], Iterable[Iterable[int]]], seperator: str = '') -> Union[str, Iterable[str]]:
-        try:
-            iterator = iter(idx_tokens)
-        except TypeError:
-            raise RuntimeError(
-                f"{self.__class__.__name__}.decode: input is not iterable.")
-
-        if isinstance(next(iterator), int):
-            iterator = iter(idx_tokens)
-            return seperator.join([self._reverse_vocab[i] for i in iterator])
-
-        iterator = iter(idx_tokens)
-        try:
-            sub_iterator = iter(next(iterator))
-        except TypeError:
-            raise RuntimeError(
-                f"{self.__class__.__name__}.decode: element of input is neither int nor iterable.")
-
-        out = []
-        for item in idx_tokens:
-            out.append(seperator.join([self._reverse_vocab[i] for i in item]))
-        return out
+    def _dec(self, indices: Iterable[int]) -> str:
+        return ''.join([self._reverse_vocab[i] for i in indices])
 
     @property
     def vocab_size(self) -> int:
@@ -211,20 +217,226 @@ class JiebaTokenizer(AbsTokenizer):
             self._tokenizer.initialize()
 
 
+class JiebaComposeLexiconTokenizer(JiebaTokenizer):
+    """Tokenizer composing jieba segmentation and word2phone mapping for Chinese."""
+
+    def __init__(
+            self,
+            lexicon: str,
+            add_special_token: bool = True,
+            bos_interface: str = '<s>',
+            unk_interface: str = '<unk>',
+            userdict: Optional[Union[str, bytes]] = None) -> None:
+        """
+        Args:
+            lexicon (str) : file contains the mapping of word to phone. Usually annotated as 'lexicon.txt'
+            add_special_token (bool) : add <s>, <unk> to the lexicon, otherwise they're assumed to be in the lexicon.
+            bos_interface (str) : start of an utterance, usually '<s>' or '<bos>'
+            unk_interface (str) : unknown word representation in the mapping. usually '<unk>' or '<UNK>'
+            userdict (str, optional) : custom dictionary file, if not set, use Jieba default one.
+        """
+        super().__init__(userdict, bos_id=0)
+
+        self._w2p_tokenizer = LexiconTokenizer(
+            lexicon=lexicon,
+            add_special_token=add_special_token,
+            bos_interface=bos_interface,
+            unk_interface=unk_interface
+        )
+        self._check_vocab_cover()
+
+        # now the vocabulary is useless
+        self._vocabulary.clear()
+        self._reverse_vocab = tuple()
+
+    def _check_vocab_cover(self):
+        absense = list(set(self._vocabulary)-set(self._w2p_tokenizer._w2pid))
+        promt = ' '.join(f"'{x}'" for x in absense[:5])
+        if len(absense) > 5:
+            promt += "..."
+        if len(absense) > 0:
+            sys.stderr.write(
+                f"WARNING: {len(absense)} word(s) defined in vocabulary but missing in lexicon:\n"
+                f"    {promt}\n"
+            )
+
+    @property
+    def vocab_size(self) -> int:
+        return self._w2p_tokenizer.vocab_size
+
+    def state_dict(self) -> OrderedDict:
+        parent_state = super().state_dict()
+        parent_state.update({
+            'w2p': pickle.dumps(self._w2p_tokenizer)
+        })
+        return parent_state
+
+    def load_state_dict(self, state_dict: OrderedDict):
+        super().load_state_dict(state_dict)
+        self._w2p_tokenizer = pickle.loads(state_dict['w2p'])
+
+    def _vocab_to_dict(self) -> Dict[int, str]:
+        raise NotImplementedError
+
+    def _enc(self, s: str) -> List[int]:
+        # do segmentation
+        cut_words = self.cut(s)
+        # encoder text to ids
+        return sum(self._w2p_tokenizer.encode(cut_words), [])
+
+    def decode(self, *args, **kwargs):
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support decode() method.")
+
+
+class LexiconTokenizer(AbsTokenizer):
+    """Lexicon-based tokenizer. A light wrapper."""
+
+    def __init__(
+            self,
+            lexicon: str,
+            add_special_token: bool = True,
+            bos_interface: str = '<s>',
+            unk_interface: str = '<unk>') -> None:
+        """
+        Args:
+            lexicon (str) : file contains the mapping of word to units. Usually annotated as 'lexicon.txt'
+                            Each line should be as 
+                            <word> <unit0> <unit1> ...
+            add_special_token (bool) : add <s>, <unk> to the lexicon, otherwise they're assumed to be in the lexicon.
+            bos_interface (str) : start of an utterance, usually '<s>' or '<bos>'
+            unk_interface (str) : unknown word representation in the mapping. usually '<unk>' or '<UNK>'
+        """
+        super().__init__()
+        assert os.path.isfile(lexicon), f"given w2p_map='{lexicon}' not exist."
+        self._bos_token = bos_interface
+        self._unk_token = unk_interface
+        self.init_lexicon(lexicon, add_special_token)
+
+    def init_lexicon(self, f_mapping: str, add_special_token: bool):
+        p_rm_consecutive_space = re.compile(r"\s+")
+        lexicon = []
+        with open(f_mapping, 'r') as fi:
+            for line in fi:
+                if line == '':
+                    continue
+                utt = re.sub(p_rm_consecutive_space, ' ', line).strip().split()
+                lexicon.append(
+                    (utt[0], utt[1:])
+                )
+
+        units = {}
+        word2phn = OrderedDict()
+        if add_special_token:
+            units[self._bos_token] = 0
+            units[self._unk_token] = 1
+            word2phn[self._bos_token] = (0,)
+            word2phn[self._unk_token] = (1,)
+
+        raw_units = set().union(*(utt for _, utt in lexicon))
+        lu = len(units)
+        units.update({
+            _unit: id+lu
+            for id, _unit in enumerate(raw_units)
+        })
+        for word, utt in lexicon:
+            word2phn[word] = tuple(units[x] for x in utt)
+
+        self._w2pid = word2phn
+        if not add_special_token and (self._bos_token not in self._w2pid or self._unk_token not in self._w2pid):
+            raise RuntimeError(
+                f"{self._bos_token} and(or) {self._unk_token} are not found in '{f_mapping}', "
+                "it's your duty to add these special tokens."
+            )
+
+        self._units = units
+        if self._w2pid[self._bos_token] != (0,):
+            sys.stderr.write(
+                f"warning: {self.__class__.__name__} bos token is set to {self._w2pid[self._bos_token]},\n"
+                "... but for most of the cases, we assume <s>=<blk>=0, so it might cause some underminted error.\n")
+
+    @property
+    def vocab_size(self) -> int:
+        return len(self._units)
+
+    def state_dict(self) -> OrderedDict:
+        return {
+            'w2pid': self._w2pid,
+            'units': self._units,
+            'bos': self._bos_token,
+            'unk': self._unk_token
+        }
+
+    def load_state_dict(self, state_dict: OrderedDict):
+        self._w2pid = state_dict['w2pid']
+        self._units = state_dict['units']
+        self._bos_token = state_dict['bos']
+        self._unk_token = state_dict['unk']
+
+    def _vocab_to_dict(self) -> Dict[int, str]:
+        raise NotImplementedError
+
+    def _enc(self, s: str) -> List[int]:
+        cut_words = s.split()
+        unkid = self._w2pid[self._unk_token]
+        rt_indices = [
+            list(self._w2pid.get(w, unkid))
+            for w in cut_words
+        ]     # type: List[List[int]]
+        return sum(rt_indices, [])
+
+    def decode(self, *args, **kwargs):
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support decode() method.")
+
+
+class RawTokenizer(AbsTokenizer):
+    """A wrapper tokenizer that do nothing. encode('1 2 3') -> [1, 2, 3]"""
+
+    def __init__(self, num_units: int) -> None:
+        super().__init__()
+        assert isinstance(num_units, (float, int))
+        num_units = int(num_units)
+        assert num_units > 0
+        self.n_vocab = num_units
+
+    def _enc(self, s: str) -> List[int]:
+        return [int(x) for x in s.split()]
+
+    def _dec(self, indices: Iterable[int]) -> str:
+        return ' '.join(str(x) for x in indices)
+
+    @property
+    def vocab_size(self) -> int:
+        return self.n_vocab
+
+    def _vocab_to_dict(self) -> Dict[int, str]:
+        return {i: str(i) for i in range(self.n_vocab)}
+
+    def state_dict(self) -> OrderedDict:
+        return OrderedDict([('n_vocab', self.n_vocab)])
+
+    def load_state_dict(self, state_dict: OrderedDict):
+        self.n_vocab = state_dict['n_vocab']
+        return
+
+
 class SentencePieceTokenizer(AbsTokenizer):
     """SentencePiece tokenizer wrapper."""
 
-    def __init__(self, spmodel: Optional[Union[str, bytes]] = None, lazy_init: bool = False) -> None:
+    def __init__(self, model_file: str = None) -> None:
         super().__init__()
-        if lazy_init:
-            # lazy initialize
+        if model_file is None:
             return
-        assert spmodel is not None
-        if not os.path.isfile(spmodel):
+
+        assert model_file is not None
+        if not os.path.isfile(model_file):
             raise RuntimeError(
-                f"{self.__class__.__name__}: sentencepiece model path \'{spmodel}\' is invalid.")
-        self._tokenzier = sp.SentencePieceProcessor(model_file=spmodel)
-        self.byte_model = file2bin(spmodel)
+                f"{self.__class__.__name__}: sentencepiece model path \'{model_file}\' is invalid.")
+        self._tokenzier = sp.SentencePieceProcessor(model_file=model_file)
+        # FIXME: I cannot find a method to export SentencePieceProcessor object to a file
+        #        so here I make a redundant copy of the source file.
+        self.byte_model = file2bin(model_file)
 
     def encode(self, strings: Union[str, Iterable[str]]) -> Union[List[int], List[List[int]]]:
         return self._tokenzier.Encode(strings)
@@ -237,10 +449,7 @@ class SentencePieceTokenizer(AbsTokenizer):
         return self._tokenzier.vocab_size()
 
     def _vocab_to_dict(self) -> Dict[int, str]:
-        out = {}
-        for idx in range(self.vocab_size):
-            out[idx] = self._tokenzier.IdToPiece(idx)
-        return out
+        return {idx: self._tokenzier.IdToPiece(idx) for idx in range(self.vocab_size)}
 
     def state_dict(self) -> OrderedDict:
         return OrderedDict([
@@ -250,124 +459,126 @@ class SentencePieceTokenizer(AbsTokenizer):
     def load_state_dict(self, state_dict: OrderedDict):
         assert 'model-data' in state_dict
         self.byte_model = state_dict['model-data']
-        if self.byte_model is not None:
-            cachefile = bin2file(self.byte_model)
-            self._tokenzier = sp.SentencePieceProcessor(model_file=cachefile)
-            os.remove(cachefile)
+        cachefile = bin2file(self.byte_model)
+        self._tokenzier = sp.SentencePieceProcessor(model_file=cachefile)
+        os.remove(cachefile)
 
-
-class JiebaComposePhoneTokenizer(JiebaTokenizer):
-    """Tokenizer composing jieba segmentation and word2phone mapping for Chinese."""
-
-    def __init__(
-            self,
-            w2p_map: str,
-            bos_interface: str,
-            unk_interface: str,
-            userdict: Optional[Union[str, bytes]] = None) -> None:
+    @staticmethod
+    def train(
+            f_text: str,
+            model_prefix: str,
+            vocab_size: int,
+            add_dummy_prefix: bool = True,
+            character_coverage: float = 0.9995,
+            model_type: Literal['unigram', 'bpe', 'word', 'char'] = 'unigram',
+            use_all_vocab: bool = False,
+            bos_id: int = 0,
+            unk_id: int = 1,
+            eos_id: int = -1,
+            unk_surface: str = "<unk>",
+            minloglevel: int = 1,
+            user_defined_symbols: str = "",
+            train_extremely_large_corpus: bool = False,
+            **options):
+        """Train the sentencepiece tokenizer.
+        
+        For full options, take a hook at
+        https://github.com/google/sentencepiece/blob/master/doc/options.md
         """
-        Args:
-            w2p_map (str) : file contains the mapping of word to phone. Usually annotated as 'lexicon_number.txt'
-                            Each line should be as 
-                            <word> <id0> <id1> ...
-            bos_interface (str) : start of an utterance, usually '<s>' or '<bos>'
-            unk_interface (str) : unknown word representation in the mapping. usually '<unk>' or '<UNK>'
-            userdict (str, optional) : custom dictionary file
-        """
-        super().__init__(userdict, bos_id=0)
-        assert os.path.isfile(w2p_map), f"given w2p_map='{w2p_map}' not exist."
-        self._bos_token = bos_interface
-        self._unk_token = unk_interface
-        self.init_w2p(w2p_map)
+        assert os.path.isfile(f_text), f"Given text file '{f_text}' not found."
+        if user_defined_symbols != "":
+            if os.path.isfile(user_defined_symbols):
+                user_defined_symbols = [x.strip() for x in open(
+                    user_defined_symbols, 'r').readlines()]
 
-    def init_w2p(self, f_mapping: Union[str, bytes]):
-        p_rm_consecutive_space = re.compile(r"\s+")
-        self._w2pid = []
+        os.makedirs(os.path.dirname(model_prefix), exist_ok=True)
+        sp.SentencePieceTrainer.Train(
+            input=f_text,
+            model_prefix=model_prefix,
+            vocab_size=vocab_size,
+            add_dummy_prefix=add_dummy_prefix,
+            character_coverage=character_coverage,
+            model_type=model_type,
+            use_all_vocab=use_all_vocab,
+            bos_id=bos_id,
+            unk_id=unk_id,
+            eos_id=eos_id,
+            unk_surface=unk_surface,
+            minloglevel=minloglevel,
+            user_defined_symbols=user_defined_symbols,
+            train_extremely_large_corpus=train_extremely_large_corpus,
+            **options
+        )
 
-        str_mapping = ''
-        if isinstance(f_mapping, str):
-            with open(f_mapping, 'r') as fit:
-                str_mapping = fit.read()
-        elif isinstance(f_mapping, bytes):
-            str_mapping = f_mapping.decode('utf-8')
-        else:
-            raise ValueError(
-                f"{self.__class__.__name__}: unknown type of f_mapping: {type(f_mapping)}")
 
-        max_phnid = -1
-        cnt_no_occur = 0
-        for line in str_mapping.split('\n'):
-            if line == '':
-                continue
-            indices = re.sub(p_rm_consecutive_space, ' ', line).split()
-            word = indices[0]
-            if word not in self._vocabulary:
-                if cnt_no_occur < 5:
-                    sys.stderr.write(
-                        f"warning: {self.__class__.__name__} '{word}' not in existing dict, skip.\n")
-                cnt_no_occur += 1
-                continue
-            self._w2pid.append((word, tuple(int(x) for x in indices[1:])))
-            max_phnid = max(max_phnid, max(self._w2pid[-1][1]))
-
-        if cnt_no_occur >= 5:
-            sys.stderr.write(
-                f"warning: {self.__class__.__name__} {cnt_no_occur} words "
-                "in the w2p map do not occur in dict.\n")
-
-        self._w2pid = OrderedDict(self._w2pid)
-        # check whether all word in self.vocab in w2pid
-        if self._bos_token not in self._w2pid or self._unk_token not in self._w2pid:
-            raise RuntimeError(
-                f"{self._bos_token} and(or) {self._unk_token} are not found in '{f_mapping}', "
-                "it's your duty to add these special tokens."
-            )
-        del self._vocabulary['<s>']
-        del self._vocabulary['<unk>']
-        _res_word = list(set(self._vocabulary.keys())-set(self._w2pid.keys()))
-        if _res_word != []:
-            raise RuntimeError(
-                "The given w2p mapping cannot cover the full vocab: missing:\n"
-                f"{_res_word}")
-        del _res_word
-        self._vocabulary.clear()
-        self._reverse_vocab = tuple()
-        self.num_phns = max_phnid + 1
+class PretrainedTokenizer(AbsTokenizer):
+    def __init__(self, name: str, path: str) -> None:
+        super().__init__()
+        self._stats = OrderedDict({'name': name, 'path': path})
+        self.load_state_dict(self._stats)
 
     @property
     def vocab_size(self) -> int:
-        return self.num_phns
+        return len(self.tokenizer)
 
     def state_dict(self) -> OrderedDict:
-        parent_state = super().state_dict()
-        parent_state.update({
-            '_w2pid': self._w2pid,
-            'num_phns': self.num_phns,
-            'bos': self._bos_token,
-            'unk': self._unk_token
-        })
-        return parent_state
+        return self._stats
 
-    def load_state_dict(self, state_dict: OrderedDict):
-        super().load_state_dict(state_dict)
-        self._w2pid = state_dict['_w2pid']
-        self.num_phns = state_dict['num_phns']
-        self._bos_token = state_dict['bos']
-        self._unk_token = state_dict['unk']
+    def load_state_dict(self, state: OrderedDict):
+        tokenizer_cls = getattr(transformers, state['name'])
+        self.tokenizer = tokenizer_cls.from_pretrained(state['path'])
+        self._stats = state
 
-    def _vocab_to_dict(self) -> Dict[int, str]:
-        raise NotImplementedError
+    def encode(self, strings: Union[str, Iterable[str]]) -> Union[List[int], List[List[int]]]:
+        return self.tokenizer.encode(strings)
 
-    def _enc(self, s: str) -> List[int]:
-        cut_words = self._tokenizer.cut(s.strip().replace(' ', ''), HMM=False)
-        unkid = self._w2pid[self._unk_token]
-        rt_indices = [list(self._w2pid.get(w, unkid))
-                      for w in cut_words]     # type: List[List[int]]
-        return sum(rt_indices, [])
+    def decode(self, indices: Union[Iterable[int], Iterable[Iterable[int]]]) -> Union[str, Iterable[str]]:
+        return self.tokenizer.decode(indices)
 
-    def decode(self, *args, **kwargs):
-        raise NotImplementedError(
-            f"{self.__class__.__name__} does not support decode() method.")
+
+def initialize(cfg: Dict) -> AbsTokenizer:
+    """ Initialize tokenizer according to the configurations, 
+        which should be in following format:
+        {
+            'type': <Class name of tokenizer>,
+            'option-init': {
+                <options passed to ABCTokenizer.__init__()>
+                ...
+            },
+            'option-train': {
+                <options passed to ABCTokenizer.train()>
+                ...
+            }
+        }
+    """
+    assert 'type' in cfg, "'type' is missing in tokenizer initialization."
+    assert isinstance(cfg['type'], str), f"invalid type: '{cfg['type']}'"
+    assert cfg['type'].isidentifier(), f"invalid type str: '{cfg['type']}'"
+
+    try:
+        eval(cfg['type'])
+    except NameError:
+        raise NameError(f"'{cfg['type']}' is not defined.")
+
+    abctknz = eval(cfg['type'])     # type: AbsTokenizer
+    if 'option-train' in cfg:
+        abctknz.train(**cfg['option-train'])
+
+    init_opts = cfg.get('option-init', {})
+    if abctknz == SentencePieceTokenizer:
+        if 'model_file' not in init_opts:
+            # if path to the sp model is not configured, use the trained one.
+            model_prefix = cfg.get(
+                'option-train', {}).get('model_prefix', None)
+            if model_prefix is None:
+                raise ValueError(
+                    f"For {SentencePieceTokenizer.__name__}, one of the settings is required:\n"
+                    "1. If you already have sp model, set 'model_file' in 'option-init';\n"
+                    "2. If you want to train a new one, set 'option-train' up to your request."
+                )
+            init_opts['model_file'] = model_prefix+'.model'
+
+    return abctknz(**init_opts)
 
 
 def save(obj: AbsTokenizer, target: str):
@@ -382,7 +593,6 @@ def load(src: str) -> AbsTokenizer:
     assert os.path.isfile(src)
     with open(src, 'rb') as fi:
         tokenizer = pickle.load(fi)
-
     assert isinstance(
         tokenizer, AbsTokenizer), "tokenizer.load: loaded object is not AbsTokenizer instance."
     return tokenizer

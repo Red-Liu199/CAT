@@ -15,13 +15,12 @@ if __name__ == "__main__":
     args = parser.parse_args()
     from cat.shared import tokenizer as tknz
 
-    if args.rawtext == '':
+    if args.rawtext in ('', '/dev/stdin'):
         usestd = True
         r_specifier = sys.stdin
     else:
-        assert os.path.isfile(args.rawtext), f"{args.rawtext}"
-        usestd = False
         r_specifier = open(args.rawtext, 'r')
+        usestd = False
 
     try:
         tokenizer = tknz.load(args.tokenizer)

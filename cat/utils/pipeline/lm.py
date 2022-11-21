@@ -1,8 +1,24 @@
 """Process of LM training
 """
 
-from cat.utils.pipeline import asr as pipeutil
-from cat.utils.pipeline.asr import (
+try:
+    from _constants import (
+        F_NN_CONFIG,
+        F_HYPER_CONFIG
+    )
+except ModuleNotFoundError:
+    from cat.shared._constants import (
+        F_NN_CONFIG,
+        F_HYPER_CONFIG
+    )
+
+from _constants import (
+    F_NN_CONFIG,
+    F_HYPER_CONFIG
+)
+
+import asr as pipeutil
+from asr import (
     readjson,
     checkExist,
     tcolors,
@@ -41,10 +57,6 @@ if __name__ == "__main__":
 
     assert s_end >= 1, f"Invalid stop stage: {s_end}"
     assert s_beg >= 1 and s_beg <= s_end, f"Invalid start stage: {s_beg}"
-    from cat.shared._constants import (
-        F_NN_CONFIG,
-        F_HYPER_CONFIG
-    )
 
     cwd = os.getcwd()
     working_dir = args.expdir
@@ -61,6 +73,7 @@ if __name__ == "__main__":
 
     if args.ngpu > -1:
         pipeutil.set_visible_gpus(args.ngpu)
+
     pipeutil.initial_datainfo()
 
     ############ Stage 1 Tokenizer training ############
@@ -105,22 +118,15 @@ if __name__ == "__main__":
                 'nj', cfg_text_process['nj'], False
             )))
 
-        if 'raw-tokenizer' in cfg_text_process and cfg_text_process['raw-tokenizer']:
-            pass
-        elif 'tokenizer' not in cfg_text_process:
-            assert 'tokenizer' in hyper_cfg, (
-                "\n"
-                "At least one of these options is required:\n"
-                "1. set 'raw-tokenizer' if the text corpus is tokenized;\n"
-                "2. specify 'tokenizer' in ['data']['text_processing'];\n"
-                f"3. setup 'tokenizer' and ['tokenizer']['location'] in {f_hyper}\n")
-            cfg_text_process['tokenizer'] = hyper_cfg['tokenizer']['location']
+        assert 'tokenizer' in hyper_cfg, fmtstr_missing(
+            'tokenizer', udl(f_hyper))
+        cfg_text_process['tokenizer'] = hyper_cfg['tokenizer']['file']
 
         pkldir = os.path.join(working_dir, 'lmbin')
         os.makedirs(pkldir, exist_ok=True)
         # 'train' and 'dev' datasets would be merged into ones,
         # 'test' datasets would be processed individually in stage 4s
-        for part in ['train', 'dev']:
+        for part in ['train', 'dev', 'test']:
             if part not in data_settings:
                 sys.stderr.write(fmtstr_missing(
                     part, (udl(f_hyper), 'data'), False) +
@@ -182,8 +188,8 @@ if __name__ == "__main__":
             D_CHECKPOINT
         )
         if not args.silent:
-            print(fmtstr_header("Stage 4 Decode"))
-            fmt = _fmtstr(_fmtstr("Decode: ",
+            print(fmtstr_header("Stage 4 Evaluate"))
+            fmt = _fmtstr(_fmtstr("Evaluate: ",
                           tcolors.BOLD), tcolors.OKCYAN) + "{}\n"
         else:
             fmt = ''
@@ -240,13 +246,13 @@ if __name__ == "__main__":
             checkExist('f', infr_option['config'])
         # check tokenizer
         if 'tokenizer' not in infr_option:
-            assert hyper_cfg.get('tokenizer', {}).get('location', None) is not None, \
+            assert hyper_cfg.get('tokenizer', {}).get('file', None) is not None, \
                 (
                 "\nyou should set at least one of:\n"
-                f"1. set tokenizer:location ;\n"
+                f"1. set tokenizer:file ;\n"
                 f"2. set inference:infer:option:tokenizer \n"
             )
-            infr_option['tokenizer'] = hyper_cfg['tokenizer']['location']
+            infr_option['tokenizer'] = hyper_cfg['tokenizer']['file']
             sys.stdout.write(fmt.format(fmtstr_set(
                 'tokenizer', infr_option['tokenizer']
             )))
@@ -264,6 +270,8 @@ if __name__ == "__main__":
         if intfname == 'cat.lm.ppl_compute':
             # we need to remove the uid in the transcript text
             # but for text resovled from local path, we assume it's raw text w/o uid.
+            if isinstance(hyper_cfg['data']['test'], str):
+                hyper_cfg['data']['test'] = [hyper_cfg['data']['test']]
             text_local, _ = pipeutil.resolve_in_priority(
                 hyper_cfg['data']['test'])
             # use combine_text() to remove the uid
@@ -272,7 +280,8 @@ if __name__ == "__main__":
                 for t_r in set(hyper_cfg['data']['test']) - set(text_local)
             ]
 
-            infr_option['evaluate'] = text_local+sorted(text_trans)
+            if 'evaluate' not in infr_option:
+                infr_option['evaluate'] = text_local+sorted(text_trans)
             interface.main(pipeutil.get_args(
                 infr_option,
                 interface._parser(),
@@ -304,7 +313,7 @@ if __name__ == "__main__":
                 if '{}' not in suffix:
                     sys.stdout.write(fmt.format(fmtstr_set(
                         'inference:infer:option:output',
-                        infr_option['outpu']
+                        infr_option['output']
                     )))
 
             if '{}' in infr_option['nbestlist']:
@@ -351,11 +360,17 @@ if __name__ == "__main__":
                     sys.stderr.write(fmtstr_warn(
                         f"{udl(infr_option['output'])} exists, skip.\n"
                     ))
-                interface.main(pipeutil.get_args(
-                    infr_option,
-                    interface._parser(),
-                    [infr_option['nbestlist'], infr_option['output']]
-                ))
+                    interface.main(pipeutil.get_args(
+                        infr_option,
+                        interface._parser(),
+                        [infr_option['nbestlist'], infr_option['output']]
+                    ))
+                else:
+                    interface.main(pipeutil.get_args(
+                        infr_option,
+                        interface._parser(),
+                        [infr_option['nbestlist'], infr_option['output']]
+                    ))
         else:
             sys.stderr.write(fmtstr_warn(
                 f"'{intfname}' only support handcrafted execution.\n"

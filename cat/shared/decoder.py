@@ -1,14 +1,11 @@
 # Copyright 2021 Tsinghua University
 # Apache 2.0.
 # Author: Zheng Huahuan (maxwellzh@outlook.com)
-
 """Decoder module impl
-
 """
 
 from . import layer as clayer
 import kenlm
-import pickle
 from typing import *
 
 import torch
@@ -16,6 +13,8 @@ import torch.nn as nn
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 from transformers import GPT2Model, GPT2Config
+import transformers
+import pickle
 
 
 class AbsDecoder(nn.Module):
@@ -83,7 +82,7 @@ class AbsDecoder(nn.Module):
         logits, _ = self.forward(input_ids, input_lengths=input_lengths, *args)
         # [N, U]
         log_prob = logits.log_softmax(
-            dim=-1).gather(index=targets.unsqueeze(2), dim=-1).squeeze(-1)
+            dim=-1).gather(index=targets.long().unsqueeze(2), dim=-1).squeeze(-1)
         # True for not masked, False for masked, [N, U]
         padding_mask = torch.arange(input_ids.size(1), device=input_ids.device)[
             None, :] < input_lengths[:, None].to(input_ids.device)
@@ -282,7 +281,9 @@ class CausalTransformer(AbsDecoder):
                  num_layers: int,
                  attn_dropout: float = 0.1,
                  with_head: bool = True,
-                 padding_idx: int = -1) -> None:
+                 padding_idx: int = -1,
+                 use_cache: bool = True,
+                 linfo_path = None) -> None:
         super().__init__(num_classes=num_classes, dim_emb=dim_hid,
                          padding_idx=padding_idx, with_head=with_head)
         cfg = GPT2Config(
@@ -301,11 +302,19 @@ class CausalTransformer(AbsDecoder):
         self.n_head = num_head
         self.n_layers = num_layers
         self.d_head = dim_hid//num_head
+        self.use_cache = use_cache
+        if linfo_path is not None:
+            with open(linfo_path, 'rb') as fib:
+                linfo = pickle.load(fib)
+                self.pi = torch.tensor(linfo['pi'])
+        else:
+            self.pi=None
+
 
     def forward(self, src_ids: torch.Tensor, cache: torch.Tensor = None, input_lengths: Optional[torch.Tensor] = None, *args, **kwargs):
         # (N, S) -> (N, S, D])
+        use_cache = self.use_cache or (not self.training)
         embed_x = self.embedding(src_ids)
-        use_cache = not self.training
 
         if input_lengths is None:
             padding_mask = None
@@ -319,11 +328,13 @@ class CausalTransformer(AbsDecoder):
         if 'hidden' in kwargs and cache is None:
             cache = kwargs['hidden']
 
-        clm_out = self.trans(inputs_embeds=embed_x,
-                             attention_mask=padding_mask,
-                             past_key_values=cache, use_cache=use_cache)
+        clm_out = self.trans(
+            inputs_embeds=embed_x,
+            attention_mask=padding_mask,
+            past_key_values=cache,
+            use_cache=use_cache)
         logits = self.classifier(clm_out['last_hidden_state'])
-        if use_cache:
+        if self.use_cache:
             return logits, clm_out['past_key_values']
         else:
             return logits, None
@@ -358,6 +369,137 @@ class CausalTransformer(AbsDecoder):
 
     def init_states(self, N: int = 1) -> AbsStates:
         return AbsStates(None, CausalTransformer)
+    
+    def score(self, input_ids: torch.LongTensor, targets: torch.LongTensor, input_lengths: Optional[torch.LongTensor] = None, *args):
+    
+        U = input_lengths.max()
+        if input_lengths is None:
+            input_lengths = input_ids.new_full(input_ids.size(0), U)
+
+        if input_ids.size(1) > U:
+            input_ids = input_ids[:, :U]
+        if targets.size(1) > U:
+            targets = targets[:, :U]
+
+        # [N, U, K]
+        logits, _ = self.forward(input_ids, input_lengths=input_lengths, *args)
+        # [N, U]
+        log_prob = logits.log_softmax(
+            dim=-1).gather(index=targets.long().unsqueeze(2), dim=-1).squeeze(-1)
+        # True for not masked, False for masked, [N, U]
+        padding_mask = torch.arange(input_ids.size(1), device=input_ids.device)[
+            None, :] < input_lengths[:, None].to(input_ids.device)
+        log_prob *= padding_mask
+        # [N,]
+        score = log_prob.sum(dim=-1)
+        if self.pi is not None:
+            score += torch.log(self.pi[input_lengths]).to(score.device)
+        return score
+
+class PretrainedTransformer(nn.Module):
+    """
+    This class is used for loading pretrained language model,
+    and is not necessarily a decoder
+    """
+    def __init__(self,
+                 model_name: str,
+                 config_name: str,
+                 path: str,
+                 linfo_path = None,
+                 model_type: str = 'decoder') -> None:
+        super().__init__()
+        model_cls = getattr(transformers, model_name)
+        self.model = model_cls.from_pretrained(path)
+        config_cls = getattr(transformers, config_name)
+        self.config = config_cls.from_pretrained(path)
+        self.model_type = model_type
+
+        if 'lmhead' not in model_name.lower() and self.model_type=='decoder':
+            # decoder must have a classification layer with vocab_size output dimension
+            self.classifier = nn.Linear(self.config.n_embd, self.config.vocab_size)
+        else:
+            self.classifier = None
+        
+        if linfo_path:
+            with open(linfo_path, 'rb') as fib:
+                linfo = pickle.load(fib)
+                self.pi = torch.tensor(linfo['pi'])
+        else:
+            self.pi=None
+    
+    def forward(self, src_ids: torch.Tensor, cache: torch.Tensor = None, use_cache=False, input_lengths=None, *args, **kwargs):
+        if input_lengths is None:
+            padding_mask = None
+        else:
+            padding_mask = torch.arange(src_ids.size(1), device=src_ids.device)[
+                None, :] < input_lengths[:, None].to(src_ids.device)
+            padding_mask = padding_mask.to(torch.float)
+        outputs = self.model(
+            input_ids = src_ids,
+            past_key_values = cache,
+            use_cache = use_cache,
+            attention_mask = padding_mask,
+            return_dict = True
+        )
+        if self.model_type=='decoder':
+            if self.classifier is None:
+                logits = outputs.logits
+            else:
+                logits = self.classifier(outputs.last_hidden_state)
+
+            if use_cache:
+                return logits, outputs.past_key_values
+            else:
+                return logits, None
+        else:
+            return outputs
+
+    def score(self, input_ids: torch.LongTensor, targets: torch.LongTensor, input_lengths: Optional[torch.LongTensor] = None, *args):
+        # only for decoder PLM
+        if input_ids[0][0]==0 and input_ids[0][1]==101: 
+            input_ids = input_ids[:, 1:] # delete 0 in the head
+            targets = targets[:, 1:]
+            input_lengths -= 2 # delete 0 in the tail
+        assert self.model_type=='decoder'
+        logits, _ = self.forward(input_ids, *args)
+        # [N, U]
+        log_prob = logits.log_softmax(dim=-1).gather(index=targets.long().unsqueeze(2), dim=-1).squeeze(-1)
+        # True for not masked, False for masked, [N, U]
+        padding_mask = torch.arange(input_ids.size(1), device=input_ids.device)[
+            None, :] < input_lengths[:, None].to(input_ids.device)
+        log_prob *= padding_mask
+        # [N,]
+        score = log_prob.sum(dim=-1)
+        if self.pi is not None:
+            score += torch.log(self.pi[input_lengths]).to(score.device)
+        return score
+
+class PretrainedMLM(nn.Module):
+    """
+    This class is used for loading a pretrained masked language model
+    """
+    def __init__(self,
+                 model_name: str,
+                 model_path: str) -> None:
+        super().__init__()
+        model_cls = getattr(transformers, model_name)
+        self.model = model_cls.from_pretrained(model_path)
+
+    
+    def forward(self, inputs: torch.Tensor, labels: torch.Tensor, input_lengths=None):
+        if input_lengths is None:
+            padding_mask = None
+        else:
+            padding_mask = torch.arange(inputs.size(1), device=inputs.device)[
+                None, :] < input_lengths[:, None].to(inputs.device)
+            padding_mask = padding_mask.to(torch.float)
+        outputs = self.model(
+            input_ids = inputs,
+            attention_mask = padding_mask,
+            labels = labels,
+            return_dict = True
+        )
+        return outputs.loss
 
 
 class NGram(AbsDecoder):

@@ -1,39 +1,10 @@
 {
     "type": "object",
     "properties": {
-        "transducer": {
+        "trainer": {
             "type": "object",
-            "properties": {
-                "sampled_softmax_uniform_ratio": {
-                    "type": "number",
-                    "default": 0.0
-                },
-                "sampled_softmax": {
-                    "type": "boolean",
-                    "default": false
-                },
-                "bos_id": {
-                    "type": "number",
-                    "default": 0
-                },
-                "num_predictor_mask": {
-                    "type": "number",
-                    "default": -1
-                },
-                "predictor_mask_range": {
-                    "type": "number",
-                    "default": 0.1
-                },
-                "ilme_weight": {},
-                "compact": {
-                    "type": "boolean",
-                    "default": false
-                },
-                "joiner": {},
-                "predictor": {},
-                "encoder": {}
-            },
-            "description": "Configuration of Transducer."
+            "properties": {},
+            "description": "Please refer to build_model() function in hyper:train:bin for configuring help."
         },
         "encoder": {
             "type": "object",
@@ -80,17 +51,17 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
-                                    "n_hid": {
-                                        "type": "number",
-                                        "default": -1
+                                    "with_head": {
+                                        "type": "boolean",
+                                        "default": true
                                     },
                                     "num_classes": {
                                         "type": "number",
                                         "default": -1
                                     },
-                                    "with_head": {
-                                        "type": "boolean",
-                                        "default": true
+                                    "n_hid": {
+                                        "type": "number",
+                                        "default": -1
                                     }
                                 }
                             }
@@ -110,25 +81,25 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
-                                    "with_head": {
-                                        "type": "boolean",
-                                        "default": true
-                                    },
-                                    "num_classes": {
-                                        "type": "number",
-                                        "default": -1
-                                    },
-                                    "dropout": {
-                                        "type": "number"
-                                    },
-                                    "n_layers": {
+                                    "idim": {
                                         "type": "number"
                                     },
                                     "hdim": {
                                         "type": "number"
                                     },
-                                    "idim": {
+                                    "n_layers": {
                                         "type": "number"
+                                    },
+                                    "dropout": {
+                                        "type": "number"
+                                    },
+                                    "num_classes": {
+                                        "type": "number",
+                                        "default": -1
+                                    },
+                                    "with_head": {
+                                        "type": "boolean",
+                                        "default": true
                                     }
                                 }
                             }
@@ -148,13 +119,13 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
-                                    "dropout_lstm": {
+                                    "hdim_lstm": {
                                         "type": "number"
                                     },
                                     "num_lstm_layers": {
                                         "type": "number"
                                     },
-                                    "hdim_lstm": {
+                                    "dropout_lstm": {
                                         "type": "number"
                                     }
                                 }
@@ -175,76 +146,76 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
-                                    "time_reduction_pos": {
-                                        "type": "number",
-                                        "default": -1
-                                    },
-                                    "time_reduction_factor": {
-                                        "type": "number",
-                                        "default": 1
-                                    },
-                                    "subsample_norm": {
-                                        "type": "string",
-                                        "default": "none"
-                                    },
-                                    "with_head": {
-                                        "type": "boolean",
-                                        "default": true
-                                    },
-                                    "delta_feats": {
-                                        "type": "boolean",
-                                        "default": false
-                                    },
-                                    "dropout_attn": {
-                                        "type": "number",
-                                        "default": 0.0
-                                    },
-                                    "dropout": {
-                                        "type": "number",
-                                        "default": 0.1
-                                    },
-                                    "multiplier": {
-                                        "type": "number",
-                                        "default": 1
-                                    },
-                                    "kernel_size": {
-                                        "type": "number",
-                                        "default": 32
-                                    },
-                                    "num_heads": {
-                                        "type": "number",
-                                        "default": 4
-                                    },
-                                    "d_head": {
-                                        "type": "number",
-                                        "default": -1
-                                    },
-                                    "res_factor": {
-                                        "type": "number",
-                                        "default": 0.5
-                                    },
-                                    "dropout_in": {
-                                        "type": "number",
-                                        "default": 0.2
-                                    },
-                                    "conv_multiplier": {
-                                        "type": "number"
-                                    },
-                                    "conv": {
-                                        "default": "conv2d"
-                                    },
-                                    "num_classes": {
-                                        "type": "number",
-                                        "default": -1
-                                    },
-                                    "hdim": {
+                                    "num_cells": {
                                         "type": "number"
                                     },
                                     "idim": {
                                         "type": "number"
                                     },
-                                    "num_cells": {
+                                    "hdim": {
                                         "type": "number"
+                                    },
+                                    "num_classes": {
+                                        "type": "number",
+                                        "default": -1
+                                    },
+                                    "conv": {
+                                        "default": "conv2d"
+                                    },
+                                    "conv_multiplier": {
+                                        "type": "number"
+                                    },
+                                    "dropout_in": {
+                                        "type": "number",
+                                        "default": 0.2
+                                    },
+                                    "res_factor": {
+                                        "type": "number",
+                                        "default": 0.5
+                                    },
+                                    "d_head": {
+                                        "type": "number",
+                                        "default": -1
+                                    },
+                                    "num_heads": {
+                                        "type": "number",
+                                        "default": 4
+                                    },
+                                    "kernel_size": {
+                                        "type": "number",
+                                        "default": 32
+                                    },
+                                    "multiplier": {
+                                        "type": "number",
+                                        "default": 1
+                                    },
+                                    "dropout": {
+                                        "type": "number",
+                                        "default": 0.1
+                                    },
+                                    "dropout_attn": {
+                                        "type": "number",
+                                        "default": 0.0
+                                    },
+                                    "delta_feats": {
+                                        "type": "boolean",
+                                        "default": false
+                                    },
+                                    "with_head": {
+                                        "type": "boolean",
+                                        "default": true
+                                    },
+                                    "subsample_norm": {
+                                        "type": "string",
+                                        "default": "none"
+                                    },
+                                    "time_reduction_factor": {
+                                        "type": "number",
+                                        "default": 1
+                                    },
+                                    "time_reduction_pos": {
+                                        "type": "number",
+                                        "default": -1
                                     }
                                 }
                             }
@@ -264,29 +235,29 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
-                                    "bidirectional": {
-                                        "type": "boolean",
-                                        "default": false
-                                    },
-                                    "with_head": {
-                                        "type": "boolean",
-                                        "default": true
-                                    },
-                                    "num_classes": {
-                                        "type": "number",
-                                        "default": -1
-                                    },
-                                    "dropout": {
-                                        "type": "number"
-                                    },
-                                    "n_layers": {
+                                    "idim": {
                                         "type": "number"
                                     },
                                     "hdim": {
                                         "type": "number"
                                     },
-                                    "idim": {
+                                    "n_layers": {
                                         "type": "number"
+                                    },
+                                    "dropout": {
+                                        "type": "number"
+                                    },
+                                    "num_classes": {
+                                        "type": "number",
+                                        "default": -1
+                                    },
+                                    "with_head": {
+                                        "type": "boolean",
+                                        "default": true
+                                    },
+                                    "bidirectional": {
+                                        "type": "boolean",
+                                        "default": false
                                     }
                                 }
                             }
@@ -306,25 +277,25 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
-                                    "num_classes": {
-                                        "type": "number",
-                                        "default": -1
-                                    },
-                                    "with_head": {
-                                        "type": "boolean",
-                                        "default": true
-                                    },
-                                    "dropout": {
-                                        "type": "number"
-                                    },
-                                    "n_layers": {
+                                    "idim": {
                                         "type": "number"
                                     },
                                     "hdim": {
                                         "type": "number"
                                     },
-                                    "idim": {
+                                    "n_layers": {
                                         "type": "number"
+                                    },
+                                    "dropout": {
+                                        "type": "number"
+                                    },
+                                    "with_head": {
+                                        "type": "boolean",
+                                        "default": true
+                                    },
+                                    "num_classes": {
+                                        "type": "number",
+                                        "default": -1
                                     }
                                 }
                             }
@@ -344,25 +315,25 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
-                                    "with_head": {
-                                        "type": "boolean",
-                                        "default": true
-                                    },
-                                    "num_classes": {
-                                        "type": "number",
-                                        "default": -1
-                                    },
-                                    "dropout": {
-                                        "type": "number"
-                                    },
-                                    "n_layers": {
+                                    "idim": {
                                         "type": "number"
                                     },
                                     "hdim": {
                                         "type": "number"
                                     },
-                                    "idim": {
+                                    "n_layers": {
                                         "type": "number"
+                                    },
+                                    "dropout": {
+                                        "type": "number"
+                                    },
+                                    "num_classes": {
+                                        "type": "number",
+                                        "default": -1
+                                    },
+                                    "with_head": {
+                                        "type": "boolean",
+                                        "default": true
                                     }
                                 }
                             }
@@ -382,23 +353,23 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
-                                    "with_head": {
-                                        "type": "boolean",
-                                        "default": true
+                                    "idim": {
+                                        "type": "number"
                                     },
-                                    "num_classes": {
-                                        "type": "number",
-                                        "default": -1
+                                    "hdim": {
+                                        "type": "number"
                                     },
                                     "dropout": {
                                         "type": "number",
                                         "default": 0.5
                                     },
-                                    "hdim": {
-                                        "type": "number"
+                                    "num_classes": {
+                                        "type": "number",
+                                        "default": -1
                                     },
-                                    "idim": {
-                                        "type": "number"
+                                    "with_head": {
+                                        "type": "boolean",
+                                        "default": true
                                     }
                                 }
                             }
@@ -418,33 +389,33 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
-                                    "bidirectional": {
-                                        "type": "number",
-                                        "default": false
-                                    },
-                                    "in_channel": {
-                                        "type": "number",
-                                        "default": 3
-                                    },
-                                    "with_head": {
-                                        "type": "boolean",
-                                        "default": true
-                                    },
-                                    "num_classes": {
-                                        "type": "number",
-                                        "default": -1
-                                    },
-                                    "dropout": {
-                                        "type": "number"
-                                    },
-                                    "n_layers": {
+                                    "idim": {
                                         "type": "number"
                                     },
                                     "hdim": {
                                         "type": "number"
                                     },
-                                    "idim": {
+                                    "n_layers": {
                                         "type": "number"
+                                    },
+                                    "dropout": {
+                                        "type": "number"
+                                    },
+                                    "num_classes": {
+                                        "type": "number",
+                                        "default": -1
+                                    },
+                                    "with_head": {
+                                        "type": "boolean",
+                                        "default": true
+                                    },
+                                    "in_channel": {
+                                        "type": "number",
+                                        "default": 3
+                                    },
+                                    "bidirectional": {
+                                        "type": "number",
+                                        "default": false
                                     }
                                 }
                             }
@@ -498,19 +469,7 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
-                                    "with_head": {
-                                        "type": "boolean",
-                                        "default": true
-                                    },
-                                    "tied": {
-                                        "type": "boolean",
-                                        "default": false
-                                    },
-                                    "padding_idx": {
-                                        "type": "number",
-                                        "default": -1
-                                    },
-                                    "dim_hidden": {
+                                    "num_classes": {
                                         "type": "number",
                                         "default": -1
                                     },
@@ -518,9 +477,21 @@
                                         "type": "number",
                                         "default": -1
                                     },
-                                    "num_classes": {
+                                    "dim_hidden": {
                                         "type": "number",
                                         "default": -1
+                                    },
+                                    "padding_idx": {
+                                        "type": "number",
+                                        "default": -1
+                                    },
+                                    "tied": {
+                                        "type": "boolean",
+                                        "default": false
+                                    },
+                                    "with_head": {
+                                        "type": "boolean",
+                                        "default": true
                                     }
                                 }
                             }
@@ -540,30 +511,38 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
-                                    "padding_idx": {
-                                        "type": "number",
-                                        "default": -1
-                                    },
-                                    "with_head": {
-                                        "type": "boolean",
-                                        "default": true
-                                    },
-                                    "attn_dropout": {
-                                        "type": "number",
-                                        "default": 0.1
-                                    },
-                                    "num_layers": {
-                                        "type": "number"
-                                    },
-                                    "num_head": {
+                                    "num_classes": {
                                         "type": "number"
                                     },
                                     "dim_hid": {
                                         "type": "number"
                                     },
-                                    "num_classes": {
+                                    "num_head": {
                                         "type": "number"
-                                    }
+                                    },
+                                    "num_layers": {
+                                        "type": "number"
+                                    },
+                                    "attn_dropout": {
+                                        "type": "number",
+                                        "default": 0.1
+                                    },
+                                    "with_head": {
+                                        "type": "boolean",
+                                        "default": true
+                                    },
+                                    "padding_idx": {
+                                        "type": "number",
+                                        "default": -1
+                                    },
+                                    "use_cache": {
+                                        "type": "boolean",
+                                        "default": false
+                                    },
+                                    "with_end_mark": {
+                                        "default": true
+                                    },
+                                    "linfo_path": {}
                                 }
                             }
                         }
@@ -582,24 +561,24 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
-                                    "with_head": {
-                                        "type": "boolean",
-                                        "default": true
-                                    },
-                                    "tied": {
-                                        "type": "boolean",
-                                        "default": false
-                                    },
-                                    "padding_idx": {
-                                        "type": "number",
-                                        "default": -1
+                                    "dim_emb": {
+                                        "type": "number"
                                     },
                                     "num_classes": {
                                         "type": "number",
                                         "default": -1
                                     },
-                                    "dim_emb": {
-                                        "type": "number"
+                                    "padding_idx": {
+                                        "type": "number",
+                                        "default": -1
+                                    },
+                                    "tied": {
+                                        "type": "boolean",
+                                        "default": false
+                                    },
+                                    "with_head": {
+                                        "type": "boolean",
+                                        "default": true
                                     }
                                 }
                             }
@@ -619,15 +598,15 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
-                                    "lazy_init": {
-                                        "type": "boolean",
-                                        "default": false
+                                    "f_rnnt_config": {
+                                        "type": "string"
                                     },
                                     "f_check": {
                                         "type": "string"
                                     },
-                                    "f_rnnt_config": {
-                                        "type": "string"
+                                    "lazy_init": {
+                                        "type": "boolean",
+                                        "default": false
                                     }
                                 }
                             }
@@ -647,24 +626,24 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
-                                    "with_head": {
-                                        "type": "boolean",
-                                        "default": true
-                                    },
-                                    "padding_idx": {
-                                        "type": "number",
-                                        "default": -1
-                                    },
-                                    "variational_noise": {},
-                                    "norm": {
-                                        "type": "boolean",
-                                        "default": false
+                                    "num_classes": {
+                                        "type": "number"
                                     },
                                     "hdim": {
                                         "type": "number"
                                     },
-                                    "num_classes": {
-                                        "type": "number"
+                                    "norm": {
+                                        "type": "boolean",
+                                        "default": false
+                                    },
+                                    "variational_noise": {},
+                                    "padding_idx": {
+                                        "type": "number",
+                                        "default": -1
+                                    },
+                                    "with_head": {
+                                        "type": "boolean",
+                                        "default": true
                                     }
                                 }
                             }
@@ -684,9 +663,9 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
-                                    "f_checks": {},
+                                    "weights": {},
                                     "f_configs": {},
-                                    "weights": {}
+                                    "f_checks": {}
                                 }
                             }
                         }
@@ -705,26 +684,26 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
-                                    "unk_id": {
-                                        "type": "number",
-                                        "default": 1
+                                    "gram_order": {
+                                        "type": "number"
                                     },
-                                    "eos_id": {
-                                        "type": "number",
-                                        "default": -1
+                                    "num_classes": {
+                                        "type": "number"
+                                    },
+                                    "f_binlm": {
+                                        "type": "string"
                                     },
                                     "bos_id": {
                                         "type": "number",
                                         "default": 0
                                     },
-                                    "f_binlm": {
-                                        "type": "string"
+                                    "eos_id": {
+                                        "type": "number",
+                                        "default": -1
                                     },
-                                    "num_classes": {
-                                        "type": "number"
-                                    },
-                                    "gram_order": {
-                                        "type": "number"
+                                    "unk_id": {
+                                        "type": "number",
+                                        "default": 1
                                     }
                                 }
                             }
@@ -744,27 +723,27 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
-                                    "with_head": {
-                                        "type": "boolean",
-                                        "default": true
-                                    },
-                                    "padding_idx": {
-                                        "type": "number",
-                                        "default": -1
-                                    },
-                                    "variational_noise": {},
-                                    "norm": {
-                                        "type": "boolean",
-                                        "default": false
-                                    },
-                                    "hdim": {
-                                        "type": "number"
+                                    "syllable_data": {
+                                        "type": "string"
                                     },
                                     "num_classes": {
                                         "type": "number"
                                     },
-                                    "syllable_data": {
-                                        "type": "string"
+                                    "hdim": {
+                                        "type": "number"
+                                    },
+                                    "norm": {
+                                        "type": "boolean",
+                                        "default": false
+                                    },
+                                    "variational_noise": {},
+                                    "padding_idx": {
+                                        "type": "number",
+                                        "default": -1
+                                    },
+                                    "with_head": {
+                                        "type": "boolean",
+                                        "default": true
                                     }
                                 }
                             }
@@ -797,35 +776,7 @@
         "specaug": {
             "type": "object",
             "properties": {
-                "delta_feats": {
-                    "type": "boolean",
-                    "default": false
-                },
-                "num_time_mask": {
-                    "type": "number",
-                    "default": 2
-                },
-                "time_mask_width_range": {
-                    "default": [
-                        0.0,
-                        0.1
-                    ]
-                },
-                "apply_time_mask": {
-                    "type": "boolean",
-                    "default": true
-                },
-                "num_freq_mask": {
-                    "type": "number",
-                    "default": 2
-                },
-                "freq_mask_width_range": {
-                    "default": [
-                        0.0,
-                        0.15
-                    ]
-                },
-                "apply_freq_mask": {
+                "apply_time_warp": {
                     "type": "boolean",
                     "default": true
                 },
@@ -833,9 +784,37 @@
                     "type": "number",
                     "default": 0.2
                 },
-                "apply_time_warp": {
+                "apply_freq_mask": {
                     "type": "boolean",
                     "default": true
+                },
+                "freq_mask_width_range": {
+                    "default": [
+                        0.0,
+                        0.15
+                    ]
+                },
+                "num_freq_mask": {
+                    "type": "number",
+                    "default": 2
+                },
+                "apply_time_mask": {
+                    "type": "boolean",
+                    "default": true
+                },
+                "time_mask_width_range": {
+                    "default": [
+                        0.0,
+                        0.1
+                    ]
+                },
+                "num_time_mask": {
+                    "type": "number",
+                    "default": 2
+                },
+                "delta_feats": {
+                    "type": "boolean",
+                    "default": false
                 }
             },
             "description": "Configuration of SpecAugument."
@@ -888,24 +867,24 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
-                                    "act": {
-                                        "default": "tanh"
-                                    },
-                                    "join_mode": {
-                                        "default": "add"
-                                    },
-                                    "hdim": {
-                                        "type": "number",
-                                        "default": -1
-                                    },
-                                    "num_classes": {
+                                    "odim_enc": {
                                         "type": "number"
                                     },
                                     "odim_pred": {
                                         "type": "number"
                                     },
-                                    "odim_enc": {
+                                    "num_classes": {
                                         "type": "number"
+                                    },
+                                    "hdim": {
+                                        "type": "number",
+                                        "default": -1
+                                    },
+                                    "join_mode": {
+                                        "default": "add"
+                                    },
+                                    "act": {
+                                        "default": "tanh"
                                     }
                                 }
                             }
@@ -925,28 +904,28 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
-                                    "compact": {
-                                        "type": "boolean",
-                                        "default": false
-                                    },
-                                    "act": {
-                                        "default": "tanh"
-                                    },
-                                    "join_mode": {
-                                        "default": "add"
-                                    },
-                                    "hdim": {
-                                        "type": "number",
-                                        "default": -1
-                                    },
-                                    "num_classes": {
+                                    "odim_enc": {
                                         "type": "number"
                                     },
                                     "odim_pred": {
                                         "type": "number"
                                     },
-                                    "odim_enc": {
+                                    "num_classes": {
                                         "type": "number"
+                                    },
+                                    "hdim": {
+                                        "type": "number",
+                                        "default": -1
+                                    },
+                                    "join_mode": {
+                                        "default": "add"
+                                    },
+                                    "act": {
+                                        "default": "tanh"
+                                    },
+                                    "compact": {
+                                        "type": "boolean",
+                                        "default": false
                                     }
                                 }
                             }
@@ -1017,12 +996,23 @@
                                     "kwargs": {
                                         "type": "object",
                                         "properties": {
-                                            "weight_decay": {},
-                                            "t0": {},
-                                            "alpha": {},
-                                            "lambd": {},
-                                            "lr": {},
-                                            "params": {}
+                                            "params": {},
+                                            "lr": {
+                                                "default": 0.01
+                                            },
+                                            "lambd": {
+                                                "default": 0.0001
+                                            },
+                                            "alpha": {
+                                                "default": 0.75
+                                            },
+                                            "t0": {
+                                                "default": 1000000.0
+                                            },
+                                            "weight_decay": {
+                                                "default": 0
+                                            },
+                                            "foreach": {}
                                         }
                                     }
                                 }
@@ -1041,11 +1031,20 @@
                                     "kwargs": {
                                         "type": "object",
                                         "properties": {
-                                            "weight_decay": {},
-                                            "eps": {},
-                                            "rho": {},
-                                            "lr": {},
-                                            "params": {}
+                                            "params": {},
+                                            "lr": {
+                                                "default": 1.0
+                                            },
+                                            "rho": {
+                                                "default": 0.9
+                                            },
+                                            "eps": {
+                                                "default": 1e-06
+                                            },
+                                            "weight_decay": {
+                                                "default": 0
+                                            },
+                                            "foreach": {}
                                         }
                                     }
                                 }
@@ -1064,12 +1063,23 @@
                                     "kwargs": {
                                         "type": "object",
                                         "properties": {
-                                            "eps": {},
-                                            "initial_accumulator_value": {},
-                                            "weight_decay": {},
-                                            "lr_decay": {},
-                                            "lr": {},
-                                            "params": {}
+                                            "params": {},
+                                            "lr": {
+                                                "default": 0.01
+                                            },
+                                            "lr_decay": {
+                                                "default": 0
+                                            },
+                                            "weight_decay": {
+                                                "default": 0
+                                            },
+                                            "initial_accumulator_value": {
+                                                "default": 0
+                                            },
+                                            "eps": {
+                                                "default": 1e-10
+                                            },
+                                            "foreach": {}
                                         }
                                     }
                                 }
@@ -1088,12 +1098,25 @@
                                     "kwargs": {
                                         "type": "object",
                                         "properties": {
-                                            "amsgrad": {},
-                                            "weight_decay": {},
-                                            "eps": {},
-                                            "betas": {},
-                                            "lr": {},
-                                            "params": {}
+                                            "params": {},
+                                            "lr": {
+                                                "default": 0.001
+                                            },
+                                            "betas": {
+                                                "default": [
+                                                    0.9,
+                                                    0.999
+                                                ]
+                                            },
+                                            "eps": {
+                                                "default": 1e-08
+                                            },
+                                            "weight_decay": {
+                                                "default": 0
+                                            },
+                                            "amsgrad": {
+                                                "default": false
+                                            }
                                         }
                                     }
                                 }
@@ -1112,12 +1135,25 @@
                                     "kwargs": {
                                         "type": "object",
                                         "properties": {
-                                            "amsgrad": {},
-                                            "weight_decay": {},
-                                            "eps": {},
-                                            "betas": {},
-                                            "lr": {},
-                                            "params": {}
+                                            "params": {},
+                                            "lr": {
+                                                "default": 0.001
+                                            },
+                                            "betas": {
+                                                "default": [
+                                                    0.9,
+                                                    0.999
+                                                ]
+                                            },
+                                            "eps": {
+                                                "default": 1e-08
+                                            },
+                                            "weight_decay": {
+                                                "default": 0.01
+                                            },
+                                            "amsgrad": {
+                                                "default": false
+                                            }
                                         }
                                     }
                                 }
@@ -1136,11 +1172,23 @@
                                     "kwargs": {
                                         "type": "object",
                                         "properties": {
-                                            "weight_decay": {},
-                                            "eps": {},
-                                            "betas": {},
-                                            "lr": {},
-                                            "params": {}
+                                            "params": {},
+                                            "lr": {
+                                                "default": 0.002
+                                            },
+                                            "betas": {
+                                                "default": [
+                                                    0.9,
+                                                    0.999
+                                                ]
+                                            },
+                                            "eps": {
+                                                "default": 1e-08
+                                            },
+                                            "weight_decay": {
+                                                "default": 0
+                                            },
+                                            "foreach": {}
                                         }
                                     }
                                 }
@@ -1159,14 +1207,24 @@
                                     "kwargs": {
                                         "type": "object",
                                         "properties": {
-                                            "line_search_fn": {},
-                                            "history_size": {},
-                                            "tolerance_change": {},
-                                            "tolerance_grad": {},
+                                            "params": {},
+                                            "lr": {
+                                                "default": 1
+                                            },
+                                            "max_iter": {
+                                                "default": 20
+                                            },
                                             "max_eval": {},
-                                            "max_iter": {},
-                                            "lr": {},
-                                            "params": {}
+                                            "tolerance_grad": {
+                                                "default": 1e-07
+                                            },
+                                            "tolerance_change": {
+                                                "default": 1e-09
+                                            },
+                                            "history_size": {
+                                                "default": 100
+                                            },
+                                            "line_search_fn": {}
                                         }
                                     }
                                 }
@@ -1185,12 +1243,26 @@
                                     "kwargs": {
                                         "type": "object",
                                         "properties": {
-                                            "momentum_decay": {},
-                                            "weight_decay": {},
-                                            "eps": {},
-                                            "betas": {},
-                                            "lr": {},
-                                            "params": {}
+                                            "params": {},
+                                            "lr": {
+                                                "default": 0.002
+                                            },
+                                            "betas": {
+                                                "default": [
+                                                    0.9,
+                                                    0.999
+                                                ]
+                                            },
+                                            "eps": {
+                                                "default": 1e-08
+                                            },
+                                            "weight_decay": {
+                                                "default": 0
+                                            },
+                                            "momentum_decay": {
+                                                "default": 0.004
+                                            },
+                                            "foreach": {}
                                         }
                                     }
                                 }
@@ -1209,8 +1281,8 @@
                                     "kwargs": {
                                         "type": "object",
                                         "properties": {
-                                            "defaults": {},
-                                            "params": {}
+                                            "params": {},
+                                            "defaults": {}
                                         }
                                     }
                                 }
@@ -1229,11 +1301,23 @@
                                     "kwargs": {
                                         "type": "object",
                                         "properties": {
-                                            "weight_decay": {},
-                                            "eps": {},
-                                            "betas": {},
-                                            "lr": {},
-                                            "params": {}
+                                            "params": {},
+                                            "lr": {
+                                                "default": 0.001
+                                            },
+                                            "betas": {
+                                                "default": [
+                                                    0.9,
+                                                    0.999
+                                                ]
+                                            },
+                                            "eps": {
+                                                "default": 1e-08
+                                            },
+                                            "weight_decay": {
+                                                "default": 0
+                                            },
+                                            "foreach": {}
                                         }
                                     }
                                 }
@@ -1252,13 +1336,26 @@
                                     "kwargs": {
                                         "type": "object",
                                         "properties": {
-                                            "centered": {},
-                                            "momentum": {},
-                                            "weight_decay": {},
-                                            "eps": {},
-                                            "alpha": {},
-                                            "lr": {},
-                                            "params": {}
+                                            "params": {},
+                                            "lr": {
+                                                "default": 0.01
+                                            },
+                                            "alpha": {
+                                                "default": 0.99
+                                            },
+                                            "eps": {
+                                                "default": 1e-08
+                                            },
+                                            "weight_decay": {
+                                                "default": 0
+                                            },
+                                            "momentum": {
+                                                "default": 0
+                                            },
+                                            "centered": {
+                                                "default": false
+                                            },
+                                            "foreach": {}
                                         }
                                     }
                                 }
@@ -1277,10 +1374,23 @@
                                     "kwargs": {
                                         "type": "object",
                                         "properties": {
-                                            "step_sizes": {},
-                                            "etas": {},
-                                            "lr": {},
-                                            "params": {}
+                                            "params": {},
+                                            "lr": {
+                                                "default": 0.01
+                                            },
+                                            "etas": {
+                                                "default": [
+                                                    0.5,
+                                                    1.2
+                                                ]
+                                            },
+                                            "step_sizes": {
+                                                "default": [
+                                                    1e-06,
+                                                    50
+                                                ]
+                                            },
+                                            "foreach": {}
                                         }
                                     }
                                 }
@@ -1299,12 +1409,20 @@
                                     "kwargs": {
                                         "type": "object",
                                         "properties": {
-                                            "nesterov": {},
-                                            "weight_decay": {},
-                                            "dampening": {},
-                                            "momentum": {},
+                                            "params": {},
                                             "lr": {},
-                                            "params": {}
+                                            "momentum": {
+                                                "default": 0
+                                            },
+                                            "dampening": {
+                                                "default": 0
+                                            },
+                                            "weight_decay": {
+                                                "default": 0
+                                            },
+                                            "nesterov": {
+                                                "default": false
+                                            }
                                         }
                                     }
                                 }
@@ -1323,10 +1441,19 @@
                                     "kwargs": {
                                         "type": "object",
                                         "properties": {
-                                            "eps": {},
-                                            "betas": {},
-                                            "lr": {},
-                                            "params": {}
+                                            "params": {},
+                                            "lr": {
+                                                "default": 0.001
+                                            },
+                                            "betas": {
+                                                "default": [
+                                                    0.9,
+                                                    0.999
+                                                ]
+                                            },
+                                            "eps": {
+                                                "default": 1e-08
+                                            }
                                         }
                                     }
                                 }
@@ -1354,11 +1481,11 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
+                                    "optimizer": {},
                                     "reverse": {
                                         "type": "boolean",
                                         "default": false
-                                    },
-                                    "optimizer": {}
+                                    }
                                 }
                             }
                         }
@@ -1377,25 +1504,25 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
-                                    "reverse": {
-                                        "type": "boolean",
-                                        "default": false
+                                    "optimizer": {},
+                                    "min_lr": {
+                                        "type": "number"
                                     },
-                                    "decay_factor": {
-                                        "type": "number",
-                                        "default": 1.0
+                                    "stop_step": {
+                                        "type": "number"
                                     },
                                     "period": {
                                         "type": "number",
                                         "default": 0
                                     },
-                                    "stop_step": {
-                                        "type": "number"
+                                    "decay_factor": {
+                                        "type": "number",
+                                        "default": 1.0
                                     },
-                                    "min_lr": {
-                                        "type": "number"
-                                    },
-                                    "optimizer": {}
+                                    "reverse": {
+                                        "type": "boolean",
+                                        "default": false
+                                    }
                                 }
                             }
                         }
@@ -1414,26 +1541,26 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
-                                    "reverse": {
-                                        "type": "boolean",
-                                        "default": false
-                                    },
-                                    "gamma": {
-                                        "type": "number",
-                                        "default": 0.1
-                                    },
-                                    "n_tol": {
-                                        "type": "number",
-                                        "default": 0
+                                    "optimizer": {},
+                                    "min_step": {
+                                        "type": "number"
                                     },
                                     "stop_lr": {
                                         "type": "number",
                                         "default": 1e-05
                                     },
-                                    "min_step": {
-                                        "type": "number"
+                                    "n_tol": {
+                                        "type": "number",
+                                        "default": 0
                                     },
-                                    "optimizer": {}
+                                    "gamma": {
+                                        "type": "number",
+                                        "default": 0.1
+                                    },
+                                    "reverse": {
+                                        "type": "boolean",
+                                        "default": false
+                                    }
                                 }
                             }
                         }
@@ -1452,36 +1579,36 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
-                                    "reverse": {
-                                        "type": "boolean",
-                                        "default": false
-                                    },
-                                    "gamma": {
-                                        "type": "number",
-                                        "default": 0.1
-                                    },
-                                    "n_tol": {
-                                        "type": "number",
-                                        "default": 1
-                                    },
-                                    "stop_lr": {
-                                        "type": "number",
-                                        "default": 1e-05
-                                    },
-                                    "ref_lr": {
-                                        "type": "number",
-                                        "default": 0.0
-                                    },
-                                    "ref_bs": {
+                                    "optimizer": {},
+                                    "batch_size": {
                                         "type": "number"
                                     },
                                     "warmup_step": {
                                         "type": "number"
                                     },
-                                    "batch_size": {
+                                    "ref_bs": {
                                         "type": "number"
                                     },
-                                    "optimizer": {}
+                                    "ref_lr": {
+                                        "type": "number",
+                                        "default": 0.0
+                                    },
+                                    "stop_lr": {
+                                        "type": "number",
+                                        "default": 1e-05
+                                    },
+                                    "n_tol": {
+                                        "type": "number",
+                                        "default": 1
+                                    },
+                                    "gamma": {
+                                        "type": "number",
+                                        "default": 0.1
+                                    },
+                                    "reverse": {
+                                        "type": "boolean",
+                                        "default": false
+                                    }
                                 }
                             }
                         }
@@ -1500,14 +1627,14 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
-                                    "reverse": {
-                                        "type": "boolean",
-                                        "default": false
-                                    },
+                                    "optimizer": {},
                                     "stop_step": {
                                         "type": "number"
                                     },
-                                    "optimizer": {}
+                                    "reverse": {
+                                        "type": "boolean",
+                                        "default": false
+                                    }
                                 }
                             }
                         }
@@ -1526,20 +1653,20 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
-                                    "reverse": {
-                                        "type": "boolean",
-                                        "default": false
-                                    },
-                                    "stop_step": {
+                                    "optimizer": {},
+                                    "min_step": {
                                         "type": "number"
                                     },
                                     "stop_lr": {
                                         "type": "number"
                                     },
-                                    "min_step": {
+                                    "stop_step": {
                                         "type": "number"
                                     },
-                                    "optimizer": {}
+                                    "reverse": {
+                                        "type": "boolean",
+                                        "default": false
+                                    }
                                 }
                             }
                         }
@@ -1558,24 +1685,24 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
-                                    "reverse": {
-                                        "type": "boolean",
-                                        "default": false
-                                    },
-                                    "peak_factor": {
-                                        "type": "number",
-                                        "default": 1.0
-                                    },
-                                    "stop_step": {
+                                    "optimizer": {},
+                                    "dim_model": {
                                         "type": "number"
                                     },
                                     "warmup_step": {
                                         "type": "number"
                                     },
-                                    "dim_model": {
+                                    "stop_step": {
                                         "type": "number"
                                     },
-                                    "optimizer": {}
+                                    "peak_factor": {
+                                        "type": "number",
+                                        "default": 1.0
+                                    },
+                                    "reverse": {
+                                        "type": "boolean",
+                                        "default": false
+                                    }
                                 }
                             }
                         }
@@ -1594,36 +1721,36 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {
-                                    "reverse": {
-                                        "type": "boolean",
-                                        "default": false
+                                    "optimizer": {},
+                                    "dim_model": {
+                                        "type": "number"
                                     },
-                                    "min_step": {
-                                        "default": -1
-                                    },
-                                    "gamma": {
-                                        "type": "number",
-                                        "default": 0.1
-                                    },
-                                    "n_tol": {
-                                        "type": "number",
-                                        "default": 0
-                                    },
-                                    "stop_lr": {
-                                        "type": "number",
-                                        "default": 1e-05
+                                    "warmup_step": {
+                                        "type": "number"
                                     },
                                     "peak_factor": {
                                         "type": "number",
                                         "default": 1.0
                                     },
-                                    "warmup_step": {
-                                        "type": "number"
+                                    "stop_lr": {
+                                        "type": "number",
+                                        "default": 1e-05
                                     },
-                                    "dim_model": {
-                                        "type": "number"
+                                    "n_tol": {
+                                        "type": "number",
+                                        "default": 0
                                     },
-                                    "optimizer": {}
+                                    "gamma": {
+                                        "type": "number",
+                                        "default": 0.1
+                                    },
+                                    "min_step": {
+                                        "default": -1
+                                    },
+                                    "reverse": {
+                                        "type": "boolean",
+                                        "default": false
+                                    }
                                 }
                             }
                         }

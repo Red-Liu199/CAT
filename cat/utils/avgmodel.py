@@ -117,7 +117,7 @@ def main():
     parser.add_argument("--slicing-select", type=str,
                         help="Manually select the checkpoint(s) to be averaged in python slicing way "
                         "(e.g. '-10:' means the last ten checkpoints). "
-                        "If there are negative numbers use --slicing-select=xxx:xxx"
+                        "If there are negative numbers use --slicing-select=xxx:xxx "
                         "If set, --input MUST be the checkpoint list file. This is conflict with --num-best")
     parser.add_argument("--keep-model-only", action="store_true", default=False,
                         help="Remove states other than model parameters (such as scheduler / optimizer) to reduce the output file size.")

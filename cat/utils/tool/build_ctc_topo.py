@@ -16,7 +16,7 @@ if __name__ == "__main__":
     for i in range(1, vocab_size):
         sys.stdout.write(f"0 {i} {i+1} {i}\n")
         sys.stdout.write(f"{i} {i} {i+1} 0\n")
-        sys.stdout.write(f"{i} 0 {i+1} 0\n")
+        sys.stdout.write(f"{i} 0 1 0\n")
 
     for prev_s in range(1, vocab_size):
         for next_s in range(1, vocab_size):

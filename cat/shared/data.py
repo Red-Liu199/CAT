@@ -159,6 +159,28 @@ class KaldiSpeechDataset(AbsDataset):
             self._meta_data = pickle.load(fib)
         self._feat_reader = FeatureReader()
 
+    def filt_by_len(self, filt_func: Callable[[int, int], bool]):
+        """filter the dataset according to the `filt_func`, call before loading data.
+
+        filt_func (function): invoked via filt_func(feat_len, label_len), 
+            True for keeping the data, False for removed.
+        """
+        torm = []
+        linfo = self._meta_data['linfo']
+        labellen = self._meta_data['label'][:, -1]
+        for i in range(len(self)):
+            if not filt_func(linfo[i], labellen[i]):
+                torm.append(i)
+        del linfo
+        del labellen
+
+        for metakey in ['label', 'linfo', 'arkname', 'key']:
+            self._meta_data[metakey] = np.delete(
+                self._meta_data[metakey],
+                torm, axis=0
+            )
+        return
+
     def get_seq_len(self) -> List[int]:
         return self._meta_data['linfo']
 

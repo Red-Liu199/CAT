@@ -1,0 +1,34 @@
+{
+    "decoder": {
+        "type": "TRFLM",
+        "kwargs": {
+            "num_classes": 10000,
+            "dim_hid": 256,
+            "num_head": 2,
+            "num_layers": 4,
+            "attn_dropout": 0.2,
+            "with_head": true,
+            "f_linfo": "exp/lm-trf-aishell/trf_cache/linfo.pkl",
+            "feat_type_file": "exp/lm-trf-aishell/grammar.fs",
+            "f_feats": "exp/lm-trf-aishell/trf_cache/4gram.fs",
+            "config_noise_model": "exp/lm-nn-aishell/config.json",
+            "check_noise_model": "exp/lm-nn-aishell/check/last-2.pt",
+            "feat_trans": true,
+            "feat_disc": false
+        }
+    },
+    "scheduler": {
+        "type": "SchedulerCosineAnnealing",
+        "kwargs": {
+            "min_lr": 1e-05,
+            "stop_step": 9000
+        },
+        "optimizer": {
+            "type": "Adam",
+            "zeroredundancy": true,
+            "kwargs": {
+                "lr": 0.001
+            }
+        }
+    }
+}

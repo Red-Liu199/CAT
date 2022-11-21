@@ -4,17 +4,22 @@ Uage:
     python utils/pipeline/asr.py
 """
 
-
-from cat.shared import tokenizer as tknz
-from cat.shared._constants import (
-    F_DATAINFO,
-    F_NN_CONFIG,
-    F_HYPER_CONFIG,
-    D_CHECKPOINT,
-    D_INFER
-)
-from cat.utils.data import resolvedata
-
+try:
+    from _constants import (
+        F_DATAINFO,
+        F_NN_CONFIG,
+        F_HYPER_CONFIG,
+        D_CHECKPOINT,
+        D_INFER
+    )
+except ModuleNotFoundError:
+    from cat.shared._constants import (
+        F_DATAINFO,
+        F_NN_CONFIG,
+        F_HYPER_CONFIG,
+        D_CHECKPOINT,
+        D_INFER
+    )
 
 import os
 import sys
@@ -22,7 +27,6 @@ import json
 import uuid
 import pickle
 import argparse
-from enum import Enum
 from typing import *
 from multiprocessing import Process
 
@@ -90,6 +94,7 @@ def fmtstr_set(property_name: str, value: str, isPath: bool = True):
 
 def initial_datainfo():
     if not os.path.isfile(F_DATAINFO):
+        from cat.utils.data import resolvedata
         resolvedata.main()
 
 
@@ -120,87 +125,62 @@ def dumpjson(obj: dict, target: str):
         json.dump(obj, fo, indent=4)
 
 
-def resolve_sp_path(config: dict, prefix: Optional[str] = None, allow_making: bool = False):
-    if 'model_prefix' in config:
-        spdir = os.path.dirname(config['model_prefix'])
-        if not os.path.isdir(spdir):
-            sys.stderr.write(
-                fmtstr_warn(
-                    f"trying to resolve from empty folder: {udl(spdir)}\n",
-                    resolve_sp_path
-                )
-            )
-            if allow_making:
-                os.makedirs(spdir)
-        return config, (config['model_prefix']+'.model', config['model_prefix']+'.vocab')
+class TextUtterances:
+    """Read files with uid and sort the utterances in order by uid."""
 
-    if prefix is not None:
-        prefix += '_'
-    else:
-        prefix = ''
+    def __init__(self, files: Union[str, List[str]]) -> None:
+        if isinstance(files, str):
+            files = [files]
 
-    assert 'model_type' in config, fmtstr_error(
-        f"'model_type' is not specified", resolve_sp_path)
-    if config['model_type'] == 'word' or config['model_type'] == 'char':
-        f_out = prefix + config['model_type']
-        config['use_all_vocab'] = True
-    elif config['model_type'] == 'unigram':
-        assert 'vocab_size' in config, fmtstr_error(
-            f"'vocab_size' is not specified", resolve_sp_path)
-        f_out = prefix + config['model_type'] + '_' + str(config['vocab_size'])
-    else:
-        raise NotImplementedError(
-            f"Unknown tokenization mode: {config['model_type']}, expected one of ['word', 'char', 'unigram']")
+        checkExist('f', files)
+        # [(uid, seek, file_id), ...]
+        self._seeks = []    # type: List[Tuple[str, int, int]]
+        self._files = files
 
-    config['model_prefix'] = os.path.join('sentencepiece', f_out+'/spm')
-    if allow_making:
-        os.makedirs(os.path.dirname(config['model_prefix']), exist_ok=True)
-    return config, (config['model_prefix']+'.model', config['model_prefix']+'.vocab')
+        for idf, f in enumerate(files):
+            with open(f, 'r') as fi:
+                while True:
+                    loc = fi.tell()
+                    line = fi.readline()
+                    if line == '':
+                        break
+                    uid = line.split(maxsplit=1)[0]
+                    self._seeks.append(
+                        (uid, loc, idf)
+                    )
+        self._seeks = sorted(self._seeks, key=lambda x: x[0])
 
+    def __len__(self) -> int:
+        return len(self._seeks)
 
-def sp_train(intext: str, **kwargs):
-    """Train the sentencepiece tokenizer.
+    def __getitem__(self, index: int):
+        return self._seeks[index]
 
-    Args:
-        intext   (str) : input text file for training. Each line represent a sentence.
-        spdir    (str) : output directory to store sentencepiece model and vocab.
-        **kwargs (dict): any keyword arguments would be parsed into sentencepiece training
-    """
-    try:
-        import sentencepiece as spm
-    except ModuleNotFoundError:
-        raise ModuleNotFoundError(
-            "Tokenization requires module sentencepiece. Install with\npip install sentencepiece")
+    def __iter__(self):
+        opened = {}
+        for uid, loc, idf in self._seeks:
+            if idf not in opened:
+                opened[idf] = open(self._files[idf], 'r')
 
-    checkExist('f', intext)
+            opened[idf].seek(loc)
+            cont = opened[idf].readline()[:-1].split(maxsplit=1)
 
-    DEFAULT_SETTINGS = {
-        "input": intext,
-        "num_threads": max(os.cpu_count()//2, 1),
-        "bos_id": 0,
-        "eos_id": -1,
-        "unk_id": 1,
-        "unk_surface": "<unk>",
-        "minloglevel": 1
-    }
-    DEFAULT_SETTINGS.update(kwargs)
-    if 'user_defined_symbols' in DEFAULT_SETTINGS:
-        if os.path.isfile(DEFAULT_SETTINGS['user_defined_symbols']):
-            with open(DEFAULT_SETTINGS['user_defined_symbols'], 'r') as fi:
-                syms = fi.readlines()
-            DEFAULT_SETTINGS['user_defined_symbols'] = [x.strip()
-                                                        for x in syms]
+            if len(cont) == 1:
+                yield (uid, '')
+            else:
+                yield (uid, cont[1])
 
-    # available options https://github.com/google/sentencepiece/blob/master/doc/options.md
-    spm.SentencePieceTrainer.Train(**DEFAULT_SETTINGS)
-    
+        for f in opened.values():
+            f.close()
+        return
+
 
 def pack_data(
         f_scps: Union[List[str], str],
         f_labels: Union[List[str], str],
         f_out: str,
-        filter: Optional[str] = None,
-        tokenizer=None):
+        tokenizer,
+        filter: Optional[str] = None):
     """Parsing audio feature and text label into pickle file.
 
     Args:
@@ -245,66 +225,44 @@ def pack_data(
         if u_bound != '':
             l_max = int(u_bound)
 
-    # process label files
-    labels = []
-    for _f_lb in f_labels:
-        with open(_f_lb, 'r') as fi_label:
-            labels += fi_label.readlines()
-
-    labels = [l.strip().split(maxsplit=1)
-              for l in labels]      # type: List[Tuple[str, str]]
-    num_label_lines = len(labels)
-
-    if tokenizer is None:
-        # assume the labels are given in number ids
-        labels = {
-            uid: np.asarray(
-                [int(i) for i in utt.split()],
-                dtype=np.int64
-            )
-            for uid, utt in labels
-        }
-    else:
-        labels = {
-            uid: np.asarray(
-                tokenizer.encode(utt),
-                dtype=np.int64
-            )
-            for uid, utt in labels
-        }
-
-    num_utts = [sum(1 for _ in open(_f_scp, 'r')) for _f_scp in f_scps]
-    total_utts = sum(num_utts)
-    assert total_utts == num_label_lines, fmtstr_error(
+    # Read label files and scp files.
+    twrapper_label = TextUtterances(f_labels)
+    twrapper_scp = TextUtterances(f_scps)
+    assert len(twrapper_scp) == len(twrapper_label), fmtstr_error(
         "f_scp and f_label should match on the # of lines, "
-        f"instead {total_utts} != {len(labels)}",
+        f"instead {len(twrapper_scp)} != {len(twrapper_label)}",
         pack_data
     )
 
     f_opened = {}
     cnt_frames = 0
-    linfo = np.empty(total_utts, dtype=np.int64)
-    _keys = []
-    _ark_seeks = []
-    idx = 0
-    cnt_rm = 0
-    for n, _f_scp in enumerate(f_scps):
-        with open(_f_scp, 'r') as fi_scp:
-            for line in tqdm(fi_scp, total=num_utts[n]):
-                key, loc_ark = line.split()
-                mat = kaldiio.load_mat(
-                    loc_ark, fd_dict=f_opened)   # type:np.ndarray
+    linfo = np.empty(len(twrapper_scp), dtype=np.int64)
+    uids = []
+    arks = []
+    labels = []
+    cnt = 0
+    for (uid, lb), (uid1, ark) in tqdm(zip(twrapper_label, twrapper_scp), total=len(twrapper_scp), leave=False):
+        assert uid == uid1, f"UID in label and scp files mismatch: {uid} != {uid1}"
+        if lb == '':
+            fmtstr_warn(f"skip empty utt: {uid}", pack_data)
+            continue
 
-                if mat.shape[0] < l_min or mat.shape[0] > l_max:
-                    cnt_rm += 1
-                    continue
+        mat = kaldiio.load_mat(
+            ark, fd_dict=f_opened)   # type:np.ndarray
+        if mat.shape[0] < l_min or mat.shape[0] > l_max:
+            continue
 
-                linfo[idx] = mat.shape[0]
-                _keys.append(key)
-                _ark_seeks.append(loc_ark)
-
-                cnt_frames += mat.shape[0]
-                idx += 1
+        labels.append(
+            np.asarray(
+                tokenizer.encode(lb),
+                dtype=np.int64
+            )
+        )
+        linfo[cnt] = mat.shape[0]
+        uids.append(uid)
+        arks.append(ark)
+        cnt_frames += mat.shape[0]
+        cnt += 1
 
     for f in f_opened.values():
         f.close()
@@ -314,32 +272,29 @@ def pack_data(
     # then store the length in the last place, such as
     # [0 1 2 3] -> [0 1 2 3 -1 -1 4]
     # then we can access the data via array[:array[-1]]
-    labels = list([labels[k_] for k_ in _keys])
-    cnt_tokens = sum(_x.shape[0] for _x in labels)
+    cnt_tokens = sum(x.shape[0] for x in labels)
     max_len_label = max(x.shape[0] for x in labels)
     labels = np.array([
         np.concatenate((
             _x,
             np.array([-1]*(max_len_label-_x.shape[0]) + [_x.shape[0]])
         ))
-        for _x in labels])
-
-    linfo = linfo[:idx]
-    ark_locs = np.array(_ark_seeks)
-    assert len(linfo) == len(labels)
-    assert len(labels) == len(ark_locs)
+        for _x in labels
+    ])
 
     with open(f_out, 'wb') as fo:
         pickle.dump({
             'label': labels,
-            'linfo': linfo,
-            'arkname': ark_locs,
-            'key': np.array(_keys)}, fo)
+            'linfo': linfo[:cnt],
+            'arkname': np.array(arks),
+            'key': np.array(uids)
+        }, fo)
 
-    if cnt_rm > 0:
-        print(f"pack_data(): remove {cnt_rm} unqualified sequences.")
+    cntrm = len(twrapper_scp) - cnt
+    if cntrm > 0:
+        print(f"pack_data(): remove {cntrm} unqualified sequences.")
     print(
-        f"# of frames: {cnt_frames} | tokens: {cnt_tokens} | seqs: {idx}")
+        f"# of frames: {cnt_frames} | tokens: {cnt_tokens} | seqs: {cnt}")
 
 
 def checkExist(f_type: Literal['d', 'f'], f_list: Union[str, List[str]]):
@@ -445,15 +400,18 @@ def train_nn_model(
             )
         )
     else:
-        checkExist('f', settings['tokenizer']['location'])
-        tokenizer = tknz.load(settings['tokenizer']['location'])
-        checkExist('f', f_nnconfig)
+        if '|V|' in settings['tokenizer']:
+            vocab_size = settings['tokenizer']['|V|']
+        else:
+            import cat.shared.tokenizer as tknz
+            checkExist('f', settings['tokenizer']['file'])
+            vocab_size = tknz.load(settings['tokenizer']['file']).vocab_size
 
+        checkExist('f', f_nnconfig)
         nnconfig = readjson(f_nnconfig)
         # recursively search for 'num_classes'
-        recursive_rpl(nnconfig, 'num_classes', tokenizer.vocab_size)
+        recursive_rpl(nnconfig, 'num_classes', vocab_size)
         dumpjson(nnconfig, f_nnconfig)
-        del tokenizer
 
     train_options = settings['train']['option']
     if 'trset' not in train_options:
@@ -527,84 +485,79 @@ def combine_text(datasets: Union[str, List[str]], f_out: Optional[str] = None) -
             with open(_text, 'r') as fi:
                 for line in fi:
                     # rm the seq id in first column
-                    _, utt = line.split(maxsplit=1)
-                    fo.write(utt)
+                    contents = line.split(maxsplit=1)
+                    if len(contents) == 1:
+                        continue
+                    fo.write(contents[1])
     return f_out
 
 
 def train_tokenizer(f_hyper: str):
+    def update_conf(_tok, path):
+        # store some info about the tokenizer to the file
+        cfg_hyper = readjson(f_hyper)
+        cfg_hyper['tokenizer']['|V|'] = _tok.vocab_size
+        cfg_hyper['tokenizer']['file'] = path
+        dumpjson(cfg_hyper, f_hyper)
+
     checkExist('f', f_hyper)
     cfg_hyper = readjson(f_hyper)
 
+    import cat.shared.tokenizer as tknz
+
     assert 'tokenizer' in cfg_hyper, fmtstr_error(
         "'tokenizer' is not configured.", train_tokenizer)
-    if 'location' not in cfg_hyper['tokenizer']:
-        cfg_hyper['tokenizer']['location'] = os.path.join(
+    if 'file' not in cfg_hyper['tokenizer']:
+        f_tokenizer = os.path.join(
             os.path.dirname(f_hyper), 'tokenizer.tknz')
         sys.stdout.write(
             "train_tokenizer(): " +
             fmtstr_set(
-                'location', cfg_hyper['tokenizer']['location'])+'\n'
+                'tokenizer:file', f_tokenizer)+'\n'
         )
     else:
-        if os.path.isfile(cfg_hyper['tokenizer']['location']):
+        f_tokenizer = cfg_hyper['tokenizer']['file']
+        if os.path.isfile(f_tokenizer):
+            update_conf(tknz.load(f_tokenizer), f_tokenizer)
             sys.stderr.write(
                 fmtstr_warn(
-                    f"['tokenizer']['location'] exists: {udl(cfg_hyper['tokenizer']['location'])}\n"
+                    f"['tokenizer']['file'] exists: {udl(f_tokenizer)}\n"
                     "... skip tokenizer training. If you want to do tokenizer training anyway,\n"
-                    "... remove the ['tokenizer']['location'] in setting\n"
-                    f"... or remove the file:{udl(cfg_hyper['tokenizer']['location'])} then re-run the script.\n",
+                    "... remove the ['tokenizer']['file'] in setting\n"
+                    f"... or remove the file:{udl(f_tokenizer)} then re-run the script.\n",
                     train_tokenizer
                 )
             )
             return
 
-    assert 'type' in cfg_hyper['tokenizer'], fmtstr_error(
-        "tokenizer:type is not configured.", train_tokenizer)
     assert 'data' in cfg_hyper, fmtstr_error(
         "data is not configured.", train_tokenizer)
     assert 'train' in cfg_hyper['data'], fmtstr_error(
         "data:train is not configured.", train_tokenizer)
-    assert os.access(os.path.dirname(cfg_hyper['tokenizer']['location']), os.W_OK), \
-        f"tokenizer:location is not writable: '{udl(cfg_hyper['tokenizer']['location'])}'"
+    assert os.access(os.path.dirname(f_tokenizer), os.W_OK), \
+        f"tokenizer:file is not writable: '{udl(cfg_hyper['tokenizer']['file'])}'"
 
-    if 'lang' in cfg_hyper['data']:
-        # check if it's chinese-like languages
-        if ('zh' == cfg_hyper['data']['lang'].split('-')[0]):
-            sys.stderr.write(
-                fmtstr_warn(
-                    "for Asian languages, "
-                    "it's your duty to remove the segment spaces up to your requirement.\n",
-                    train_tokenizer
-                )
-            )
+    sys.stderr.write(
+        fmtstr_warn(
+            "for Asian languages, "
+            "it's your duty to remove the segment spaces up to your requirement.\n",
+            train_tokenizer
+        )
+    )
 
-    tokenizer_type = cfg_hyper['tokenizer']['type']
-    if 'property' not in cfg_hyper['tokenizer']:
-        cfg_hyper['tokenizer']['property'] = {}
+    f_text = None
+    # combine the transcripts and remove the ids if needed.
+    if 'option-train' in cfg_hyper['tokenizer']:
+        if 'f_text' not in cfg_hyper['tokenizer']['option-train']:
+            f_text = combine_text(cfg_hyper['data']['train'])
+            cfg_hyper['tokenizer']['option-train']['f_text'] = f_text
 
-    if tokenizer_type == 'SentencePieceTokenizer':
-        f_corpus_tmp = combine_text(cfg_hyper['data']['train'])
-        sp_settings, (f_tokenizer, _) = resolve_sp_path(
-            cfg_hyper['tokenizer']['property'], os.path.basename(os.getcwd()), allow_making=True)
-        sp_train(f_corpus_tmp, **sp_settings)
-        cfg_hyper['tokenizer']['property'] = sp_settings
-        tokenizer = tknz.SentencePieceTokenizer(spmodel=f_tokenizer)
-        cfg_hyper['tokenizer']['property']['vocab_size'] = tokenizer.vocab_size
-        os.remove(f_corpus_tmp)
-    elif tokenizer_type == 'JiebaComposePhoneTokenizer':
-        tokenizer = tknz.JiebaComposePhoneTokenizer(
-            **cfg_hyper['tokenizer']['property'])
-    elif tokenizer_type == 'JiebaTokenizer':
-        # jieba tokenizer doesn't need training
-        tokenizer = tknz.JiebaTokenizer(
-            **cfg_hyper['tokenizer']['property'])
-    else:
-        raise ValueError(f"Unknown type of tokenizer: {tokenizer_type}")
+    tokenizer = tknz.initialize(cfg_hyper['tokenizer'])
+    tknz.save(tokenizer, f_tokenizer)
+    if f_text is not None:
+        os.remove(f_text)
 
-    tknz.save(tokenizer, cfg_hyper['tokenizer']['location'])
-
-    dumpjson(cfg_hyper, f_hyper)
+    update_conf(tokenizer, f_tokenizer)
 
 
 def model_average(
@@ -693,8 +646,6 @@ if __name__ == "__main__":
     checkExist('d', working_dir)
     f_hyper = os.path.join(working_dir, F_HYPER_CONFIG)
     checkExist('f', f_hyper)
-    initial_datainfo()
-    datainfo = readjson(F_DATAINFO)
     hyper_cfg = readjson(f_hyper)
     if "env" in hyper_cfg:
         for k, v in hyper_cfg["env"].items():
@@ -702,8 +653,14 @@ if __name__ == "__main__":
     if 'commit' not in hyper_cfg:
         log_commit(f_hyper)
 
+    # setting visible gpus before loading cat/torch
     if args.ngpu > -1:
         set_visible_gpus(args.ngpu)
+
+    from cat.shared import tokenizer as tknz
+
+    initial_datainfo()
+    datainfo = readjson(F_DATAINFO)
 
     ############ Stage 1  Tokenizer training ############
     if s_beg <= 1 and s_end >= 1:
@@ -734,23 +691,15 @@ if __name__ == "__main__":
 
         hyper_cfg = readjson(f_hyper)
         assert 'data' in hyper_cfg, fmtstr_missing('data', udl(f_hyper))
+        # load tokenizer from file
+        assert 'tokenizer' in hyper_cfg, fmtstr_missing(
+            'tokenizer', udl(f_hyper))
+        assert 'file' in hyper_cfg['tokenizer'], fmtstr_missing(
+            'file', (udl(f_hyper), 'tokenizer'))
 
-        if 'tokenizer' not in hyper_cfg:
-            sys.stderr.write(
-                fmtstr_missing('tokenizer', raiseerror=False) +
-                f", assume the ground truth text files as tokenized.\n"
-            )
-            istokenized = True
-            tokenizer = None
-        else:
-            # load tokenizer from file
-            assert 'location' in hyper_cfg['tokenizer'], fmtstr_missing(
-                'location', (udl(f_hyper), 'tokenizer'))
-
-            f_tokenizer = hyper_cfg['tokenizer']['location']
-            checkExist('f', f_tokenizer)
-            tokenizer = tknz.load(f_tokenizer)
-            istokenized = False
+        f_tokenizer = hyper_cfg['tokenizer']['file']
+        checkExist('f', f_tokenizer)
+        tokenizer = tknz.load(f_tokenizer)
 
         data_settings = hyper_cfg['data']
         if 'filter' not in data_settings:
@@ -784,7 +733,8 @@ if __name__ == "__main__":
                 [_data['scp'] for _data in f_data],
                 [_data['trans'] for _data in f_data],
                 f_out=os.path.join(d_pkl, dataset+'.pkl'),
-                filter=filter, tokenizer=tokenizer)
+                filter=filter, tokenizer=tokenizer
+            )
             del f_data
 
     ############ Stage 3  NN training ############
@@ -896,13 +846,13 @@ if __name__ == "__main__":
             # check tokenizer
             if intfname != "cat.ctc.cal_logit":
                 if 'tokenizer' not in infr_option:
-                    assert hyper_cfg.get('tokenizer', {}).get('location', None) is not None, \
+                    assert hyper_cfg.get('tokenizer', {}).get('file', None) is not None, \
                         (
                         "\nyou should set at least one of:\n"
-                        f"1. set tokenizer:location ;\n"
+                        f"1. set tokenizer:file ;\n"
                         f"2. set inference:infer:option:tokenizer \n"
                     )
-                    infr_option['tokenizer'] = hyper_cfg['tokenizer']['location']
+                    infr_option['tokenizer'] = hyper_cfg['tokenizer']['file']
 
             ignore_field_data = False
             os.makedirs(f"{working_dir}/decode", exist_ok=True)
@@ -932,6 +882,8 @@ if __name__ == "__main__":
                         suffix_model = os.path.basename(
                             checkpoint).removesuffix('.pt')
                     prefix = f"{topo}_bs{infr_option.get('beam_size', 'dft')}_{suffix_model}"
+                    if 'unified' in infr_option and infr_option['unified']:
+                        prefix += f"_streaming_{infr_option.get('streaming', 'false')}"
                     # set output format
                     a = infr_option.get('alpha', 0)
                     b = infr_option.get('beta', 0)
@@ -1009,8 +961,8 @@ if __name__ == "__main__":
 
                 err_option['hy'] = infr_option['output_prefix']
 
-            if err_option.get('oracle', False):
-                err_option['hy'] = err_option['hy'] + '.nbest'
+                if err_option.get('oracle', False):
+                    err_option['hy'] = err_option['hy'] + '.nbest'
 
             if '{}' in err_option['hy']:
                 # input in format string

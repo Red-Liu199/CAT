@@ -6,7 +6,6 @@
 Parallel decode with distributed GPU/CPU support 
 """
 
-from . import rnnt_builder
 from .beam_search import BeamSearcher
 from ..lm import lm_builder
 from ..shared import coreutils
@@ -37,7 +36,7 @@ def main(args: argparse.Namespace = None):
 
     if args.tokenizer is None or not os.path.isfile(args.tokenizer):
         raise FileNotFoundError(
-            "Invalid tokenizer model location: {}".format(args.tokenizer))
+            "Invalid tokenizer model file: {}".format(args.tokenizer))
     if args.cpu or not torch.cuda.is_available():
         args.cpu = True
 
@@ -201,7 +200,10 @@ def main_worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_nbest: m
                 break
             key, x, x_lens = batch
             x = x.to(device)
-            batched_output = searcher(*(model.encoder(x, x_lens)))
+            if args.streaming:
+                batched_output = searcher(*(model.chunk_infer(x, x_lens))[:2])
+            else:
+                batched_output = searcher(*(model.encoder(x, x_lens))[:2])
             for k, (hypos, scores) in zip(key, batched_output):
                 nbest[k] = {
                     nid: (scores[nid], tokenizer.decode(hypos[nid]))
@@ -216,9 +218,13 @@ def main_worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_nbest: m
 
 
 def build_model(args, device) -> Tuple[torch.nn.Module, Union[torch.nn.Module, None]]:
+
     if isinstance(device, int):
         device = f'cuda:{device}'
-
+    if args.unified:
+        from .train_unified import build_model as rnnt_builder
+    else:
+        from .train import build_model as rnnt_builder
     model = rnnt_builder(
         coreutils.readjson(args.config),
         args, dist=False)
@@ -248,7 +254,8 @@ def build_model(args, device) -> Tuple[torch.nn.Module, Union[torch.nn.Module, N
 def _parser():
     parser = coreutils.basic_trainer_parser(
         prog='RNN-Transducer decoder.',
-        training=False
+        training=False,
+        isddp=False
     )
 
     parser.add_argument("--lm-config", type=str, default=None,
@@ -268,11 +275,13 @@ def _parser():
     parser.add_argument("--output_prefix", type=str, default='./decode')
     parser.add_argument("--beam-size", type=int, default=3)
     parser.add_argument("--tokenizer", type=str,
-                        help="Tokenizer model location. See cat/shared/tokenizer.py for details.")
+                        help="Tokenizer model file. See cat/shared/tokenizer.py for details.")
     parser.add_argument("--nj", type=int, default=-1)
     parser.add_argument("--thread-per-woker", type=int, default=1)
     parser.add_argument("--cpu", action='store_true', default=False)
     parser.add_argument("--silent", action='store_true', default=False)
+    parser.add_argument("--unified", action='store_true', default=False)
+    parser.add_argument("--streaming", action='store_true', default=False)
     return parser
 
 

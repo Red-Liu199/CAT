@@ -1,0 +1,37 @@
+{
+    "data": {
+        "train": "data/corpus.train",
+        "dev": "data/corpus.dev",
+        "test": [
+            "data/corpus.dev",
+            "data/corpus.test"
+        ],
+        "text_processing": {
+            "truncate": -1
+        },
+        "lang": "zh-cn"
+    },
+    "tokenizer": {
+        "type": "SentencePieceTokenizer",
+        "property": {
+            "model_type": "char",
+            "vocab_size": 4232,
+            "use_all_vocab": true,
+            "model_prefix": "sentencepiece/aishell_char/spm"
+        },
+        "location": "tokenizer.tknz"
+    },
+    "train": {
+        "batch_size": 128,
+        "grad-norm": 5.0,
+        "amp": false,
+        "checkall": true
+    },
+    "inference": {
+        "avgmodel": {
+            "mode": "best",
+            "num": 1
+        },
+        "ppl": {}
+    }
+}

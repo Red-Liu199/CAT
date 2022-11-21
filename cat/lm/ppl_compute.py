@@ -3,6 +3,7 @@
 """
 
 from . import lm_builder
+from .trf.train import build_model as trf_builder
 from cat.shared import coreutils
 from cat.shared.data import (
     CorpusDataset,
@@ -12,6 +13,7 @@ from cat.shared.data import (
 import os
 import sys
 import math
+import time
 import uuid
 import shutil
 import argparse
@@ -67,7 +69,7 @@ def main(args: argparse.Namespace = None):
     args.usegpu = usegpu
     processed_files = []
     for testset in args.evaluate:
-        if args.tokenizer is not None:
+        if args.tokenizer is not None and not testset.endswith('.pkl'):
             binfile = os.path.join(cachedir, f"{str(uuid.uuid4())}.pkl.tmp")
             text2corpusbin(testset, binfile, args.tokenizer)
         else:
@@ -131,8 +133,6 @@ def evaluate_nnlm(pid: int, wsize: int, q: mp.Queue, args: argparse.Namespace, t
         assert model is not None
     assert next(iter(model.parameters())).device == torch.device(device)
 
-    criterion = torch.nn.CrossEntropyLoss().to(device)
-
     prob_ilm = args.probing_ilm
     output = []     # type: List[Tuple[float, int]]
     for f_data in testsets:
@@ -145,7 +145,7 @@ def evaluate_nnlm(pid: int, wsize: int, q: mp.Queue, args: argparse.Namespace, t
             num_workers=1,
             collate_fn=sortedPadCollateLM(flatten_target=False)
         )
-        nll = 0.
+        tot_log_probs = 0.
         n_tokens = 0
         for minibatch in testloader:
             in_tokens, in_lens, targets, _ = minibatch
@@ -153,25 +153,14 @@ def evaluate_nnlm(pid: int, wsize: int, q: mp.Queue, args: argparse.Namespace, t
                 in_lens -= 1
             in_tokens = in_tokens.to(device, non_blocking=True)
             targets = targets.to(device, non_blocking=True)
-            preds, _ = model(in_tokens, input_lengths=in_lens)
-            # gather op doesn't support cpu
-            if device == 'cpu':
-                logits = torch.cat([
-                    preds[n, :in_lens[n], :]
-                    for n in range(preds.size(0))
-                ], dim=0)
-                targets = torch.cat([
-                    targets[n, :in_lens[n], :]
-                    for n in range(preds.size(0))
-                ], dim=0)
-            else:
-                logits = gather.cat(preds, in_lens)
-                targets = gather.cat(targets, in_lens)
-            nll += criterion(logits, targets) * logits.size(0)
-            n_tokens += logits.size(0)
-        output.append((-nll.item(), n_tokens))
+
+            tot_log_probs += model.score(in_tokens,
+                                         targets, in_lens).sum(dim=0)
+            n_tokens += in_lens.sum(dim=0)
+        output.append((tot_log_probs.item(), n_tokens))
 
     q.put(output, block=True)
+    time.sleep(2.)
 
 
 def consume_worker(wsize: int, q: mp.Queue, args):
@@ -217,7 +206,10 @@ def build_model(args: argparse.Namespace, device, verbose: bool = True):
     configures = coreutils.readjson(args.config)
     isngram = (configures['decoder']['type'] == 'NGram')
     if not isngram:
-        model = lm_builder(configures, dist=False, wrapper=True)
+        if configures['decoder']['type']=='TRFLM':
+            model = trf_builder(configures, dist=False, wrapper=True)
+        else:
+            model = lm_builder(configures, dist=False, wrapper=True)
         if args.resume is None:
             if verbose:
                 sys.stderr.write(

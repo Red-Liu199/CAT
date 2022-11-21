@@ -218,7 +218,7 @@ def basic_ddp_parser(prog: str = '') -> argparse.ArgumentParser:
                         help='distributed backend')
     parser.add_argument('--world-size', default=1, type=int,
                         help='number of nodes for distributed training')
-    parser.add_argument('--gpu', default=None, type=int,
+    parser.add_argument('--gpu', default=0, type=int,
                         help='GPU id to use.')
     return parser
 
@@ -309,7 +309,7 @@ def divide_almost_equally(arr_weighted: List[Tuple[Any, Union[float, int]]], num
     return groups.values()
 
 
-def weighted_group(weighted_list: List[Tuple[Any, Union[float, int]]], N: int, consider_padding: bool = True) -> List[List[Any]]:
+def weighted_group(weighted_list: List[Tuple[Any, Union[float, int]]], N: int, consider_padding: bool = False) -> List[List[Any]]:
     """
     weighted_list is list of (obj, weight)
     Split `weighted_list` by weight into `N` parts and return the indices.
@@ -321,7 +321,7 @@ def weighted_group(weighted_list: List[Tuple[Any, Union[float, int]]], N: int, c
 
     len_src = len(weighted_list)
     assert len_src >= N, f"list to be split is shorter than number of groups: {len_src} < {N}"
-
+    weighted_list=[(item[0], item[1]**2) for item in weighted_list]
     if N == 1:
         return [[obj for obj, _ in weighted_list]]
     if N == len_src:
@@ -386,7 +386,7 @@ def weighted_group(weighted_list: List[Tuple[Any, Union[float, int]]], N: int, c
     return [src_list[indices[i]:indices[i+1]] for i in range(N)]
 
 
-def main_spawner(args, _main_worker: Callable[[int, int, argparse.Namespace], None]):
+def main_spawner(args: argparse.Namespace, _main_worker: Callable[[int, int, argparse.Namespace], None]):
     if not torch.cuda.is_available():
         highlight_msg("CPU only training is unsupported")
         return None

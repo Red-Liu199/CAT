@@ -14,7 +14,7 @@ from typing import Literal
 import math
 import torch
 import torch.nn as nn
-
+from transformers import BertConfig, BertModel
 
 def get_vgg2l_odim(idim, in_channel=1, out_channel=128):
     idim = idim / in_channel
@@ -45,6 +45,39 @@ class AbsEncoder(nn.Module):
         else:
             return self.classifier(out)
 
+
+class BiTransformer(AbsEncoder):
+    def __init__(self,
+                 num_classes: int,
+                 dim_hid: int,
+                 num_head: int,
+                 num_layers: int,
+                 with_head: bool = False,
+                 attn_dropout: float = 0.1) -> None:
+        super().__init__(num_classes=num_classes, with_head=with_head, n_hid=dim_hid)
+        self.config = BertConfig(vocab_size=num_classes, hidden_size=dim_hid,
+            num_hidden_layers=num_layers, num_attention_heads=num_head, 
+            intermediate_size=4*dim_hid, attention_probs_dropout_prob=attn_dropout)
+        self.model = BertModel(self.config)
+        self.n_head = num_head
+        self.n_layers = num_layers
+        self.d_head = dim_hid//num_head
+        self.classifier = None
+    
+    def forward(self, input_ids: torch.Tensor, input_lengths: torch.Tensor = None):
+        if input_lengths is None:
+            padding_mask = None
+        else:
+            padding_mask = torch.arange(input_ids.size(1), device=input_ids.device)[
+                None, :] < input_lengths[:, None].to(input_ids.device)
+            padding_mask = padding_mask.to(torch.float)
+        outputs = self.model(
+            input_ids=input_ids,
+            attention_mask=padding_mask,
+            return_dict=True)
+        return outputs
+
+    
 
 class LSTM(AbsEncoder):
     def __init__(self,
@@ -271,14 +304,16 @@ class ConformerNet(AbsEncoder):
 
         self.cells = nn.ModuleList()
         pe = c_layers.PositionalEncoding(hdim)
+
         for i in range(num_cells):
             if i == time_reduction_pos and time_reduction_factor > 1:
                 cell = c_layers.TimeReduction(time_reduction_factor)
-            else:
-                cell = c_layers.ConformerCell(
-                    hdim, pe, res_factor, d_head, num_heads, kernel_size, multiplier, dropout, dropout_attn)
+                self.cells.append(cell)
+
+            cell = c_layers.ConformerCell(
+                hdim, pe, res_factor, d_head, num_heads, kernel_size, multiplier, dropout, dropout_attn)
             self.cells.append(cell)
-        
+
         if time_reduction_factor > 1 and time_reduction_pos == -1:
             self.cells.append(c_layers.TimeReduction(time_reduction_factor))
 

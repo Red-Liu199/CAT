@@ -261,14 +261,14 @@ def draw_loss(ax: plt.Axes, smr: BaseSummary, smooth_value: float = 0.9, ylabel:
 
     min_loss = min(scalars)
     if min_loss <= 0. or (max(scalars) / min_loss < 10.):
-        ax.plot(x, scalars, color='C0', alpha=alpha)
+        ax.plot(x, scalars, alpha=alpha)
         if smooth_value > 0.:
-            ax.plot(x, running_mean, color='C0')
+            ax.plot(x, running_mean, color=ax.get_lines()[-1].get_color())
         ax.ticklabel_format(axis="y", style="sci", scilimits=(0, 0))
     else:
-        ax.semilogy(x, scalars, color='C0', alpha=alpha)
+        ax.semilogy(x, scalars, alpha=alpha)
         if smooth_value > 0.:
-            ax.semilogy(x, running_mean, color='C0')
+            ax.semilogy(x, running_mean, color=ax.get_lines()[-1].get_color())
 
     if prop_box:
         props = dict(boxstyle='round', facecolor='wheat', alpha=0.8)

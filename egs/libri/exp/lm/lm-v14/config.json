@@ -1,0 +1,27 @@
+{
+    "decoder": {
+        "type": "LSTM",
+        "kwargs": {
+            "hdim": 512,
+            "with_head": true,
+            "num_layers": 6,
+            "num_classes": 1024
+        }
+    },
+    "scheduler": {
+        "type": "SchedulerEarlyStop",
+        "optimizer": {
+            "type": "Adam",
+            "use_zero": true,
+            "kwargs": {
+                "lr": 0.001,
+                "weight_decay": 1e-06
+            }
+        },
+        "kwargs": {
+            "epoch_min": 5,
+            "gamma": 0.1,
+            "lr_stop": 1e-05
+        }
+    }
+}

@@ -1,7 +1,7 @@
 {
     "data": {
         "train": [
-            "train_sp"
+            "train-3sp"
         ],
         "dev": [
             "dev"
@@ -15,22 +15,25 @@
     },
     "tokenizer": {
         "type": "SentencePieceTokenizer",
-        "location": "exp/rnnt/rnnt-v15/tokenizer.tknz"
+        "file": "exp/rnnt/rnnt-v15/tokenizer.tknz"
+    },
+    "env": {
+        "CUDA_VISIBLE_DEVICES": "2,3,4,5,6,7,8,9"
     },
     "train": {
         "bin": "cat.ctc.train",
         "option": {
             "amp": true,
-            "dynamic_batch_mode": 0,
-            "dynamic_bucket_size": 200000,
             "batch_size": 512,
             "check-freq": 1000,
-            "grad-norm": 5.0
+            "dynamic_batch_mode": 0,
+            "dynamic_bucket_size": 245760,
+            "grad-norm": 2.0
         }
     },
     "inference": {
         "avgmodel": {
-            "mode": "last",
+            "mode": "best",
             "num": 10
         },
         "infer": {
@@ -38,12 +41,13 @@
             "option": {
                 "beam_size": 16,
                 "cpu": true,
-                "nj": 40
+                "nj": 48,
+                "resume": "exp/ctc-v1/check/best-10.pt"
             }
         },
         "er": {
             "cer": true
         }
     },
-    "commit": "f18eda1a3bf358f92bceede6389f8e7cfcb94097"
+    "commit": "8714fb5a462f2a20b29d08926fd4e769796f6349"
 }

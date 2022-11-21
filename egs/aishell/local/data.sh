@@ -1,5 +1,7 @@
-set -e
-set -u
+#!/bin/bash
+# Author: Huahuan Zheng (maxwellzh@outlook.com)
+# This script prepare aishell data by torchaudio
+set -e -u
 
 [ ! $(command -v python) ] && (
     echo "No python executable found in PATH"
@@ -14,15 +16,11 @@ set -u
     help="Speed perturbation factor(s). Default: None.")
 ("-subsets-fbank", type=str, nargs="+", choices=["train", "dev", "test"],
     default=["train", "dev", "test"], help="Subset(s) for extracting FBanks. Default: ['train', 'dev', 'test']")
-("-subsets-sp", type=str, nargs="+", choices=["train", "dev", "test"],
-    default=["train"], help="Subset(s) for conducting speed perturbation. Default: ['train']")
 PARSER
 eval $(python utils/parseopt.py $0 $*)
 
 opt_sp="1.0"
-[ "$sp" != "None" ] && (
-    opt_sp=$sp
-)
+[ "$sp" != "None" ] && export opt_sp=$sp
 
 # Extract 80-dim FBank features
 python local/extract_meta.py $src/wav \

@@ -13,6 +13,7 @@ P.S. CPU is faster when rescoring with n-gram model, while GPU
 """
 
 from . import lm_builder
+from .trf.train import build_model as trf_builder
 from ..shared import tokenizer as tknz
 from ..shared import coreutils
 from ..shared.decoder import (
@@ -202,10 +203,16 @@ def main_worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_out: mp.
 def build_lm(f_config: str, f_check: str, device='cuda') -> AbsDecoder:
     if isinstance(device, int):
         device = f'cuda:{device}'
-
-    model = lm_builder(coreutils.readjson(f_config), dist=False)
-    if not isinstance(model.lm, NGram):
+    
+    configures = coreutils.readjson(f_config)
+    if configures['decoder']['type']=='TRFLM':
+        model = trf_builder(configures, dist=False, wrapper=True)
+    else:
+        model = lm_builder(configures, dist=False)
+    if not isinstance(model.lm, NGram) and f_check:
         model = coreutils.load_checkpoint(model.to(device), f_check)
+    else:
+        model.to(device)
     model = model.lm
     model.eval()
     return model
@@ -227,7 +234,7 @@ def _parser():
     parser.add_argument("--beta", type=float, default=0.0,
                         help="The 'beta' value for LM integration, a.k.a. the penalty of tokens.")
     parser.add_argument("--tokenizer", type=str,
-                        help="Tokenizer model location. See cat/shared/tokenizer.py for details.")
+                        help="Tokenizer model file. See cat/shared/tokenizer.py for details.")
     parser.add_argument("--save-lm-nbest", type=str,
                         help="Path to save the LM N-best scores.")
 

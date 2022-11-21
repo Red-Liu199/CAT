@@ -52,8 +52,8 @@ def cnt_we(gt: List[str], hy: List[str]) -> List[int]:
 
 
 class MWERTransducerTrainer(TransducerTrainer):
-    def __init__(self, beamdecoder: RNNTDecoder, mle_weight: float, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, beamdecoder: RNNTDecoder, mle_weight: float, **kwargs):
+        super().__init__(**kwargs)
         self.searcher = beamdecoder
         assert self._compact
         assert isinstance(mle_weight, float)
@@ -143,13 +143,13 @@ class MWERTransducerTrainer(TransducerTrainer):
         joinout, squeezed_targets, enc_out_lens, expd_target_lens = \
             self.compute_join(enc_out_expand, pred_out,
                               squeezed_targets, enc_out_lens, expd_target_lens)
-        with autocast(enabled=False):
-            ll = -RNNTLoss(
-                joinout.float(), squeezed_targets,
-                enc_out_lens,
-                expd_target_lens,
-                gather=True, compact=True
-            )
+
+        ll = -RNNTLoss(
+            joinout, squeezed_targets,
+            enc_out_lens,
+            expd_target_lens,
+            gather=True, compact=True
+        )
 
         # den: (bs, )
         den = torch.logsumexp(ll * mask_batches, dim=1)
@@ -176,44 +176,41 @@ class MWERTransducerTrainer(TransducerTrainer):
             joinout, targets, enc_out_lens, target_lens = self.compute_join(
                 enc_out, pred_out, targets, enc_out_lens, target_lens
             )
-            with autocast(enabled=False):
-                loss_mle = RNNTLoss(
-                    joinout.float(), targets,
-                    enc_out_lens, target_lens,
-                    reduction='mean', gather=True, compact=True
-                )
+
+            loss_mle = RNNTLoss(
+                joinout, targets,
+                enc_out_lens, target_lens,
+                reduction='mean', gather=True, compact=True
+            )
             return loss_mbr + self.mle_weight * loss_mle
 
 
 def build_model(cfg: dict, args: argparse.Namespace, dist: bool = True) -> MWERTransducerTrainer:
     """
     cfg:
-        mwer:
-            decoder:
+        trainer:
+            decoder:    # settings for the beam search decoder
                 ...
-            trainer:
-                ...
-        # basic transducer config
-        ...
 
+            ...     # other options for trainer
+        ...
     """
-    assert 'mwer' in cfg, f"missing 'mwer' in field:"
-    assert 'decoder' in cfg['mwer'], f"missing 'decoder' in field:mwer:"
+    assert 'trainer' in cfg, f"missing 'trainer' in field:"
+    assert 'decoder' in cfg['trainer'], f"missing 'decoder' in field:trainer:"
 
     encoder, predictor, joiner = rnnt_builder(cfg, dist=False, wrapped=False)
 
     rnnt_decoder = RNNTDecoder(
         predictor=predictor,
         joiner=joiner,
-        **cfg['mwer']['decoder']
+        **cfg['trainer']['decoder']
     )
     model = MWERTransducerTrainer(
         rnnt_decoder,
         encoder=encoder,
         predictor=predictor,
         joiner=joiner,
-        **cfg['mwer']['trainer'],
-        **cfg['transducer'])
+        **cfg['trainer'])
 
     if not dist:
         return model

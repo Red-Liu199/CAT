@@ -54,8 +54,8 @@ if __name__ == "__main__":
         )
 
     # export spec as kaldi format
-    scp_dir = "data/src/all_ark"
+    scp_dir = "data/src/yesno"
     os.makedirs(scp_dir, exist_ok=True)
-    with kaldiio.WriteHelper(f'ark,scp:{scp_dir}/yesno.ark,{scp_dir}/yesno.scp') as writer:
+    with kaldiio.WriteHelper(f'ark,scp:{scp_dir}/feats.ark,{scp_dir}/feats.scp') as writer:
         for uid, mat in specs.items():
             writer(uid, mat.numpy())

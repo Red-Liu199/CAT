@@ -131,7 +131,7 @@ if __name__ == "__main__":
     parser.add_argument("-t", action="store_true", dest="istext",
                         help="Identify the input to be text instead of binary file. Used with --tokenizer")
     parser.add_argument("--tokenizer", type=str,
-                        help="Tokenizer model location. See cat/shared/tokenizer.py for details.")
+                        help="Tokenizer model file. See cat/shared/tokenizer.py for details.")
     parser.add_argument("--keep-empty-line", action="store_true",
                         help="Keep empty lines instead removing them (default).")
     parser.add_argument("--map", nargs='*', type=str,

@@ -6,35 +6,41 @@ __all__ = ["AMTrainer", "build_model", "_parser", "main"]
 
 from ..shared import Manager
 from ..shared import coreutils
+from ..shared import tokenizer as tknz
 from ..shared import encoder as model_zoo
 from ..shared.data import (
     KaldiSpeechDataset,
     sortedPadCollateASR
 )
+from ..rnnt.train_nce import cal_wer, custom_evaluate
 
 import os
 import argparse
 from typing import *
+from ctcdecode import CTCBeamDecoder
 
 import torch
 import torch.nn as nn
 import torch.distributed as dist
 from torch.cuda.amp import autocast
 
+# NOTE:
+#   1/4 subsampling is used for Conformer model defaultly
+#   for other sampling ratios, you may need to modify the values.
+#   Commonly, you can use a relatively larger value for allowing some margin.
+SUBSAMPLING = 4
+
 
 def check_label_len_for_ctc(tupled_mat_label: Tuple[torch.FloatTensor, torch.LongTensor]):
     """filter the short seqs for CTC/CRF"""
-    # NOTE:
-    #   1/4 subsampling is used for Conformer model defaultly
-    #   for other sampling ratios, you may need to modify the values
-    return (tupled_mat_label[0].shape[0] // 4 > tupled_mat_label[1].shape[0])
+    return (tupled_mat_label[0].shape[0] // SUBSAMPLING > tupled_mat_label[1].shape[0])
 
 
 def filter_hook(dataset):
     return dataset.select(check_label_len_for_ctc)
 
 
-def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
+def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace, **mkwargs):
     coreutils.set_random_seed(args.seed)
     args.gpu = gpu
     args.rank = args.rank * ngpus_per_node + gpu
@@ -44,13 +50,35 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         backend=args.dist_backend, init_method=args.dist_url,
         world_size=args.world_size, rank=args.rank)
 
+    if 'func_build_model' not in mkwargs:
+        mkwargs['func_build_model'] = build_model
+    if '_wds_hook' not in mkwargs:
+        mkwargs['_wds_hook'] = filter_hook
+    
+    # NOTE: uncomment following lines to enable wer evaluation.
+    # if 'func_eval' not in mkwargs:
+    #     mkwargs['func_eval'] = custom_evaluate
+
     manager = Manager(
         KaldiSpeechDataset,
         sortedPadCollateASR(flatten_target=True),
         args,
-        func_build_model=build_model,
-        _wds_hook=filter_hook
+        **mkwargs
     )
+
+    # NOTE: for CTC training, the input feat len must be longer than the label len
+    #       ... when using webdataset (--largedataset) to load the data, we deal with
+    #       ... the issue by `_wds_hook`; if not, we filter the unqualified utterances
+    #       ... before training start.
+    if not args.large_dataset:
+        tr_dataset = manager.trainloader.dl.dataset
+        orilen = len(tr_dataset)
+        tr_dataset.filt_by_len(lambda x, y: x//SUBSAMPLING > y)
+        if len(tr_dataset) < orilen:
+            coreutils.distprint(
+                f"warning: filtered {orilen-len(tr_dataset)} utterances.",
+                args.gpu
+            )
 
     # training
     manager.run(args)
@@ -62,6 +90,7 @@ class AMTrainer(nn.Module):
             am: model_zoo.AbsEncoder,
             use_crf: bool = False,
             lamb: Optional[float] = 0.01,
+            decoder: CTCBeamDecoder = None,
             **kwargs):
         super().__init__()
 
@@ -75,6 +104,10 @@ class AMTrainer(nn.Module):
         else:
             self.criterion = nn.CTCLoss()
 
+        self.attach = {
+            'decoder': decoder
+        }
+
     def register_crf_ctx(self, den_lm: Optional[str] = None):
         """Register the CRF context on model device."""
         assert self.is_crf
@@ -83,26 +116,82 @@ class AMTrainer(nn.Module):
         self._crf_ctx = CRFContext(den_lm, next(
             iter(self.am.parameters())).device.index)
 
-    def forward(self, logits, labels, input_lengths, label_lengths):
+    @torch.no_grad()
+    def get_wer(self, xs: torch.Tensor, ys: torch.Tensor, lx: torch.Tensor, ly: torch.Tensor):
+        if self.attach['decoder'] is None:
+            raise RuntimeError(
+                f"{self.__class__.__name__}: self.attach['decoder'] is not initialized.")
 
-        netout, lens_o = self.am(logits, input_lengths)
-        netout = torch.log_softmax(netout, dim=-1)
+        bs = xs.size(0)
+        logits, lx = self.am(xs, lx)
+        # NOTE: the beam decoder conduct softmax internally
+        # logits = logits.log_softmax(dim=-1)
+
+        # y_samples: (N, k, L), ly_samples: (N, k)
+        y_samples, _, _, ly_samples = self.attach['decoder'].decode(
+            logits.float().cpu(), lx.cpu())
+
+        """NOTE:
+            for CTC training, we flatten the label seqs to 1-dim,
+            so here we need to deal with that
+        """
+        ground_truth = [t.cpu().tolist() for t in torch.split(ys, ly.tolist())]
+        hypos = [y_samples[n, 0, :ly_samples[n, 0]].tolist()
+                 for n in range(bs)]
+
+        return cal_wer(ground_truth, hypos)
+
+    def forward(self, feats, labels, lx, ly):
+
+        logits, lx = self.am(feats, lx)
+        logits = torch.log_softmax(logits, dim=-1)
 
         labels = labels.cpu()
-        lens_o = lens_o.cpu()
-        label_lengths = label_lengths.cpu()
+        lx = lx.cpu()
+        ly = ly.cpu()
         if self.is_crf:
             assert self._crf_ctx is not None
             with autocast(enabled=False):
                 loss = self.criterion(
-                    netout.float(), labels.to(torch.int),
-                    lens_o.to(torch.int), label_lengths.to(torch.int))
+                    logits.float(), labels.to(torch.int),
+                    lx.to(torch.int), ly.to(torch.int))
         else:
             # [N, T, C] -> [T, N, C]
-            netout = netout.transpose(0, 1)
-            loss = self.criterion(netout, labels.to(torch.int), lens_o.to(
-                torch.int), label_lengths.to(torch.int))
+            logits = logits.transpose(0, 1)
+            loss = self.criterion(logits, labels.to(torch.int), lx.to(
+                torch.int), ly.to(torch.int))
         return loss
+
+
+def build_beamdecoder(cfg: dict) -> CTCBeamDecoder:
+    """
+    beam_size: 
+    num_classes:
+    kenlm:
+    alpha: 
+    beta:
+    ...
+    """
+
+    assert 'num_classes' in cfg, "number of vocab size is required."
+
+    if 'kenlm' in cfg:
+        labels = [str(i) for i in range(cfg['num_classes'])]
+        labels[0] = '<s>'
+        labels[1] = '<unk>'
+    else:
+        labels = ['']*cfg['num_classes']
+
+    return CTCBeamDecoder(
+        labels=labels,
+        model_path=cfg.get('kenlm', None),
+        beam_width=cfg.get('beam_size', 16),
+        alpha=cfg.get('alpha', 1.),
+        beta=cfg.get('beta', 0.),
+        num_processes=6,
+        log_probs_input=True,
+        is_token_based=('kenlm' in cfg)
+    )
 
 
 def build_model(
@@ -110,9 +199,25 @@ def build_model(
         args: Optional[Union[argparse.Namespace, dict]] = None,
         dist: bool = True,
         wrapper: bool = True) -> Union[nn.parallel.DistributedDataParallel, AMTrainer, model_zoo.AbsEncoder]:
+    """
+    for ctc-crf training, you need to add extra settings in 
+    cfg:
+        trainer:
+            use_crf: true/false,
+            lamb: 0.01,
+            den-lm: xxx
 
-    if 'ctc-trainer' not in cfg:
-        cfg['ctc-trainer'] = {}
+            decoder:
+                beam_size: 
+                num_classes: 
+                kenlm: 
+                alpha: 
+                beta:
+                ...
+        ...
+    """
+    if 'trainer' not in cfg:
+        cfg['trainer'] = {}
 
     assert 'encoder' in cfg
     netconfigs = cfg['encoder']
@@ -133,7 +238,13 @@ def build_model(
     if not wrapper:
         return am_model
 
-    model = AMTrainer(am_model, **cfg['ctc-trainer'])
+    # initialize beam searcher
+    if 'decoder' in cfg['trainer']:
+        cfg['trainer']['decoder'] = build_beamdecoder(
+            cfg['trainer']['decoder']
+        )
+
+    model = AMTrainer(am_model, **cfg['trainer'])
     if not dist:
         return model
 
@@ -147,9 +258,9 @@ def build_model(
     model = coreutils.convert_syncBatchNorm(model)
 
     model.cuda(args['gpu'])
-    if 'use_crf' in cfg['ctc-trainer'] and cfg['ctc-trainer']['use_crf']:
-        assert 'den-lm' in cfg['ctc-trainer']
-        model.register_crf_ctx(cfg['ctc-trainer']['den-lm'])
+    if 'use_crf' in cfg['trainer'] and cfg['trainer']['use_crf']:
+        assert 'den-lm' in cfg['trainer']
+        model.register_crf_ctx(cfg['trainer']['den-lm'])
     model = torch.nn.parallel.DistributedDataParallel(
         model, device_ids=[args['gpu']])
     return model

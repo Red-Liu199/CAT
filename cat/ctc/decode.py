@@ -1,5 +1,8 @@
 """CTC decode module
 
+NOTE (Huahuan):
+    I deprecate the batch decoding function for bs=1 gives best RTF.
+    Currently, bs=1 is hard-coded.
 Derived from
 https://github.com/parlance/ctcdecode
 """
@@ -34,7 +37,7 @@ def main(args: argparse.Namespace = None):
 
     if args.tokenizer is None or not os.path.isfile(args.tokenizer):
         raise FileNotFoundError(
-            "Invalid tokenizer model location: {}".format(args.tokenizer))
+            "Invalid tokenizer model file: {}".format(args.tokenizer))
 
     if args.nj == -1:
         world_size = os.cpu_count()
@@ -103,9 +106,8 @@ def datawriter(args, q: mp.Queue):
                 continue
             key, content = nbestlist
             nbest[key] = content
-            del nbestlist
-
             fo.write(f"{key}\t{content[0][1]}\n")
+            del nbestlist
 
     with open(args.output_prefix+'.nbest', 'wb') as fo:
         pickle.dump(nbest, fo)
@@ -119,17 +121,18 @@ def worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_out: mp.Queue
         # w/o LM, labels won't be used in decoding.
         labels = [''] * tokenizer.vocab_size
         searcher = CTCBeamDecoder(
-            labels, beam_width=args.beam_size, num_processes=1)
+            labels, beam_width=args.beam_size, log_probs_input=True, num_processes=args.thread_per_woker)
     else:
-        if pid == 0:
-            print(
-                "warning: ctc decoding with an ext. LM assumes <s> -> 0 and <unk> -> 1.")
-        labels = [str(i) for i in range(tokenizer.vocab_size)]
-        labels[0] = '<s>'
-        labels[1] = '<unk>'
+        assert os.path.isfile(
+            args.lm_path), f"--lm-path={args.lm_path} is not a valid file."
+
+        # NOTE: ctc decoding with an ext. LM assumes <s> -> 0 and <unk> -> 1
+        labels = ['<s>', '<unk>'] + [str(i)
+                                     for i in range(2, tokenizer.vocab_size)]
         searcher = CTCBeamDecoder(
             labels, model_path=args.lm_path, alpha=args.alpha, beta=args.beta,
-            beam_width=args.beam_size, num_processes=1, is_token_based=True)
+            beam_width=args.beam_size, num_processes=args.thread_per_woker,
+            log_probs_input=True, is_token_based=True)
 
     # {'uid': {0: (-10.0, 'a b c'), 1: (-12.5, 'a b c d')}}
     nbest = {}  # type: Dict[str, Dict[int, Tuple[float, str]]]
@@ -138,12 +141,12 @@ def worker(pid: int, args: argparse.Namespace, q_data: mp.Queue, q_out: mp.Queue
             batch = q_data.get(block=True)
             if batch is None:
                 break
-            key, x, x_lens = batch
-            assert len(key) == 1, "Batch size > 1 is not currently support."
+            key, x, x_len = batch
             key = key[0]
-            probs = torch.softmax(model(x, x_lens)[0], dim=-1)
+            # beam decoder conducts the softmax internally
+            # probs = torch.softmax(logits, dim=-1)
             beam_results, beam_scores, _, out_lens = searcher.decode(
-                probs)
+                *model(x, x_len))
             # make it in decending order
             # -log(p) -> log(p)
             beam_scores = -beam_scores
@@ -185,7 +188,7 @@ def _parser():
                         help="The 'beta' value for LM integration, a.k.a. the penalty of tokens.")
     parser.add_argument("--beam-size", type=int, default=3)
     parser.add_argument("--tokenizer", type=str,
-                        help="Tokenizer model location. See cat/shared/tokenizer.py for details.")
+                        help="Tokenizer model file. See cat/shared/tokenizer.py for details.")
     parser.add_argument("--nj", type=int, default=-1)
     parser.add_argument("--thread-per-woker", type=int, default=1)
     return parser

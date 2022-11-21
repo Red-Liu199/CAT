@@ -24,9 +24,9 @@ from ..shared.data import (
 
 
 import os
-import jiwer
 import math
 import argparse
+import Levenshtein
 from typing import *
 from tqdm import tqdm
 from warp_rnnt import rnnt_loss as RNNTLoss
@@ -72,17 +72,14 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
 class NCETransducerTrainer(TransducerTrainer):
     def __init__(
             self,
-            encoder: AbsEncoder,
-            predictor: AbsDecoder,
-            joiner: AbsJointNet,
             ext_lm: AbsDecoder,
             beamdecoder: RNNTDecoder,
             ilm_weight: float,
             elm_weight: float,
             mle_weight: Optional[float] = 0.,
             trainable_weight: bool = False,
-            *args, **kwargs) -> None:
-        super().__init__(encoder, predictor, joiner, *args, **kwargs)
+            **kwargs) -> None:
+        super().__init__(*args, **kwargs)
 
         assert isinstance(ext_lm, AbsDecoder)
         assert isinstance(beamdecoder, RNNTDecoder)
@@ -152,14 +149,13 @@ class NCETransducerTrainer(TransducerTrainer):
                 enc_out, noise_pred_out, lx, ly+1
             )
 
-            with autocast(enabled=False):
-                # q_y_x: (N, )
-                q_y_x = -RNNTLoss(
-                    noise_join_out.float(), squeeze_targets,
-                    lx.to(device=device, dtype=torch.int32),
-                    ly.to(device=device, dtype=torch.int32),
-                    gather=True, compact=True
-                )
+            # q_y_x: (N, )
+            q_y_x = -RNNTLoss(
+                noise_join_out, squeeze_targets,
+                lx.to(device=device, dtype=torch.int32),
+                ly.to(device=device, dtype=torch.int32),
+                gather=True, compact=True
+            )
 
         # cal ILM scores, refer to cat.shared.decoder.AbsDecoder.score()
         pred_out, _ = self.predictor(padded_targets, input_lengths=ly+1)
@@ -198,13 +194,12 @@ class NCETransducerTrainer(TransducerTrainer):
         model_join_out, squeeze_targets, lx, ly = self.compute_join(
             enc_out, pred_out, squeeze_targets, lx, ly
         )
-        with autocast(enabled=False):
-            # model_log_prob: (N, )
-            p_y_x = -RNNTLoss(
-                model_join_out.float(),
-                squeeze_targets, lx, ly,
-                gather=True, compact=True
-            )
+        # p_y_x: (N, )
+        p_y_x = -RNNTLoss(
+            model_join_out,
+            squeeze_targets, lx, ly,
+            gather=True, compact=True
+        )
 
         p_hat_y_x = p_y_x + \
             self.weights['ilm'] * ilm_scores + \
@@ -281,22 +276,15 @@ class NCETransducerTrainer(TransducerTrainer):
             enc_out, lx)
 
         ground_truth = [
-            ' '.join(
-                str(x)
-                for x in targets[n, :target_lens[n]].cpu().tolist()
-            )
+            targets[n, :target_lens[n]].cpu().tolist()
             for n in range(bs)
         ]
         hypos = [
-            ' '.join(str(x) for x in list_hypos[0].pred[1:])
+            list_hypos[0].pred[1:]
             for list_hypos in batched_hypos
         ]
-        assert len(hypos) == len(ground_truth)
 
-        err = cal_wer(ground_truth, hypos)
-        cnt_err = sum(x for x, _ in err)
-        cnt_sum = sum(x for _, x in err)
-        return cnt_err, cnt_sum
+        return cal_wer(ground_truth, hypos)
 
 
 def custom_hook(
@@ -352,15 +340,18 @@ def custom_train(*args):
     return default_train_func(*args, hook_func=custom_hook)
 
 
-def cal_wer(gt: List[str], hy: List[str]) -> List[Tuple[int, int]]:
-    def _get_wer(_gt, _hy):
-        measure = jiwer.compute_measures(_gt, _hy)
-        cnt_err = measure['substitutions'] + \
-            measure['deletions'] + measure['insertions']
-        cnt_sum = measure['substitutions'] + \
-            measure['deletions'] + measure['hits']
-        return (cnt_err, cnt_sum)
-    return [_get_wer(_gt, _hy) for _gt, _hy in zip(gt, hy)]
+def cal_wer(gt: List[List[int]], hy: List[List[int]]) -> Tuple[int, int]:
+    """compute error count for list of tokens"""
+    assert len(gt) == len(hy)
+    err = 0
+    cnt = 0
+    for i in range(len(gt)):
+        err += Levenshtein.distance(
+            ''.join(chr(n) for n in hy[i]),
+            ''.join(chr(n) for n in gt[i])
+        )
+        cnt += len(gt[i])
+    return (err, cnt)
 
 
 @torch.no_grad()
@@ -370,16 +361,17 @@ def custom_evaluate(testloader, args: argparse.Namespace, manager: Manager) -> f
     cnt_tokens = 0
     cnt_err = 0
     n_proc = dist.get_world_size()
-    # register beam searcher
-    model.module.attach['_eval_beam_searcher'] = RNNTDecoder(
-        model.module.predictor,
-        model.module.joiner,
-        beam_size=model.module.attach['searcher'].beam_size,
-        lm_module=model.module.attach['elm'],
-        alpha=model.module.weights['elm'],
-        est_ilm=True,
-        ilm_weight=model.module.weights['ilm']
-    )
+    if isinstance(model.module, NCETransducerTrainer):
+        # register beam searcher
+        model.module.attach['_eval_beam_searcher'] = RNNTDecoder(
+            model.module.predictor,
+            model.module.joiner,
+            beam_size=model.module.attach['searcher'].beam_size,
+            lm_module=model.module.attach['elm'],
+            alpha=model.module.weights['elm'],
+            est_ilm=True,
+            ilm_weight=model.module.weights['ilm']
+        )
 
     for i, minibatch in tqdm(enumerate(testloader), desc=f'Epoch: {manager.epoch} | eval',
                              unit='batch', total=len(testloader), disable=(args.gpu != 0), leave=False):
@@ -418,40 +410,38 @@ def custom_evaluate(testloader, args: argparse.Namespace, manager: Manager) -> f
 def build_model(cfg: dict, args: argparse.Namespace, dist: bool = True) -> NCETransducerTrainer:
     """
     cfg:
-        nce:
+        trainer:
             init-n-model: # the noise model shares the encoder of training one.
                 check:
-            init-elm:
+            init-elm:     # settings for the ELM
                 config:
                 check:
-            decoder:
+            decoder:      # settings for the beam search decoder 
                 ...
-            trainer:
-                ...
-        # basic transducer config
+            ...     # other settings
         ...
 
     """
-    assert 'nce' in cfg, f"missing 'nce' in field:"
 
     # initialize noise model.
     dummy_trainer = rnnt_builder(cfg, dist=False, wrapped=True)
     coreutils.load_checkpoint(
-        dummy_trainer, cfg['nce']['init-n-model']['check'])
+        dummy_trainer, cfg['trainer']['init-n-model']['check'])
     dummy_trainer.eval()
     dummy_trainer.requires_grad_(False)
     beam_searcher = RNNTDecoder(
         predictor=dummy_trainer.predictor,
         joiner=dummy_trainer.joiner,
-        **cfg['nce']['decoder']
+        **cfg['trainer']['decoder']
     )
     del dummy_trainer
 
     # initialize external lm
     dummy_lm = lm_builder(coreutils.readjson(
-        cfg['nce']['init-elm']['config']), dist=False)
-    if cfg['nce']['init-elm'].get('check', None) is not None:
-        coreutils.load_checkpoint(dummy_lm, cfg['nce']['init-elm']['check'])
+        cfg['trainer']['init-elm']['config']), dist=False)
+    if cfg['trainer']['init-elm'].get('check', None) is not None:
+        coreutils.load_checkpoint(
+            dummy_lm, cfg['trainer']['init-elm']['check'])
     elm = dummy_lm.lm
     elm.eval()
     elm.requires_grad_(False)
@@ -459,14 +449,16 @@ def build_model(cfg: dict, args: argparse.Namespace, dist: bool = True) -> NCETr
 
     # initialize the real model
     enc, pred, join = rnnt_builder(cfg, dist=False, wrapped=False)
+    cfg['trainer'].update({
+        'encoder': enc,
+        'predictor': pred,
+        'joiner': join
+    })
+
     model = NCETransducerTrainer(
-        encoder=enc,
-        predictor=pred,
-        joiner=join,
         ext_lm=elm,
         beamdecoder=beam_searcher,
-        **cfg['nce']['trainer'],
-        **cfg['transducer']
+        **cfg['trainer']
     )
 
     if not dist:
