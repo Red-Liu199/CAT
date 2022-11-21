@@ -81,7 +81,7 @@ class SCRFTrainer(AMTrainer):
             tuning_prior: bool = False,
             local_normalized_prior: bool = True,
             # compute gradients via mapped y seqs by CTC loss, instead of computing probs of pi seqs.
-            compute_gradient_via_y: bool = False,
+            compute_gradient_via_y: bool = True,
             numerator_warmup: int = -1,
             **kwargs):
         super().__init__(**kwargs)
@@ -280,7 +280,7 @@ def mc_builder(Trainer: AMTrainer):
         # initialize beam searcher
         assert 'decoder' in trainer_cfg, f"missing 'decoder' in field:trainer"
         trainer_cfg['decoder']['alpha'] = trainer_cfg['decoder'].get(
-            'alpha', trainer_cfg['lm'].get('weight', 1.0))
+            'alpha', trainer_cfg.get('lm_weight', 1.0))
         if 'kenlm' not in trainer_cfg['decoder']:
             lmconfig = coreutils.readjson(trainer_cfg['lm']['config'])
             assert lmconfig['decoder']['type'] == 'NGram', \
@@ -314,9 +314,10 @@ def build_model(*args, **kwargs):
     cfg:
         trainer:
             n_samples:
-            ctc_weight:
+            lm_weight: 
+            num_aux_weight:
+            ...
             lm:
-                weight:
                 config:
                 check:
             ...

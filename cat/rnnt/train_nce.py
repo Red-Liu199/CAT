@@ -4,22 +4,19 @@
 
 __all__ = ["NCETransducerTrainer", "build_model", "_parser", "main"]
 
-from . import rnnt_builder
-from .train import TransducerTrainer
-from .joiner import AbsJointNet
+from .train import (
+    TransducerTrainer,
+    build_model as rnnt_builder,
+    main_worker as basic_worker
+)
 from .beam_search import BeamSearcher as RNNTDecoder
 from ..ctc.train import cal_wer, custom_evaluate
 from ..lm import lm_builder
 from ..shared import coreutils
-from ..shared.encoder import AbsEncoder
 from ..shared.decoder import AbsDecoder, ILM
 from ..shared.manager import (
     Manager,
     train as default_train_func
-)
-from ..shared.data import (
-    KaldiSpeechDataset,
-    sortedPadCollateASR
 )
 
 
@@ -27,45 +24,20 @@ import os
 import math
 import argparse
 from typing import *
-from tqdm import tqdm
 from warp_rnnt import rnnt_loss as RNNTLoss
 
 import torch
 import torch.nn as nn
-import torch.distributed as dist
-from torch.cuda.amp import autocast
 
 
 def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
-    coreutils.set_random_seed(args.seed)
-    args.gpu = gpu
-    args.rank = args.rank * ngpus_per_node + gpu
-    torch.cuda.set_device(args.gpu)
 
-    dist.init_process_group(
-        backend=args.dist_backend, init_method=args.dist_url,
-        world_size=args.world_size, rank=args.rank)
-
-    manager = Manager(
-        KaldiSpeechDataset,
-        sortedPadCollateASR(),
-        args, build_model,
+    return basic_worker(
+        gpu, ngpus_per_node, args,
+        func_build_model=build_model,
         func_train=custom_train,
-        func_eval=custom_evaluate,
-        extra_tracks=[
-            'loss/ml',
-            'loss/nce',
-            'loss/nce-data',
-            'loss/nce-noise',
-            'acc/data',
-            'acc/noise',
-            'weight/ilm',
-            'weight/elm'
-        ]
+        func_eval=custom_evaluate
     )
-
-    # training
-    manager.run(args)
 
 
 class NCETransducerTrainer(TransducerTrainer):
