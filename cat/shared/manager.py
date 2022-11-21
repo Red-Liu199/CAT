@@ -1232,6 +1232,181 @@ def train_trf(trainloader: ReadBatchDataLoader, args: argparse.Namespace, manage
     p_bar.close()
     return
 
+def train_ebm(trainloader: ReadBatchDataLoader, args: argparse.Namespace, manager: Manager, hook_func: Callable = None):
+    """
+    The default train function.
+
+    Args:
+        trainloader (Dataloader)
+        args (Namespace) : configurations
+        manager (Manager) : the manager for pipeline control
+        _trainer_hook (optional, callable function) : custom hook function, check source code for usage.
+    """
+
+    def _go_step(g_batch_size: int, minibatch) -> Tuple[torch.Tensor, int]:
+        feats, frame_lens, labels, label_lens = minibatch
+        feats = feats.cuda(args.gpu, non_blocking=True)
+        if manager.specaug is not None:
+            feats, frame_lens = manager.specaug(feats, frame_lens)
+
+        with autocast(enabled=use_amp):
+            if hook_func is None:
+                loss = model(feats, labels, frame_lens, label_lens)
+            else:
+                # you could custom model forward, tracks logging and metric calculation in the hook
+                loss = hook_func(
+                    manager, model, args, i+1,
+                    (feats, labels, frame_lens, label_lens)
+                )
+            if isinstance(loss, tuple):
+                loss = loss[0]
+
+            raw_loss = loss.detach()
+            # divide loss with fold since we want the gradients to be divided by fold
+            loss /= fold
+
+        loss.data = loss.detach() * (feats.size(0) * world_size / g_batch_size)
+        scaler.scale(loss).backward()
+
+        # return for logging
+        return raw_loss, feats.size(0)
+
+    coreutils.check_parser(args, ['grad_accum_fold', 'n_steps', 'verbose',
+                                  'print_freq', 'check_freq', 'rank', 'gpu', 'debug', 'amp', 'grad_norm'])
+
+    model = manager.model
+    scaler = manager.scaler
+    scheduler = manager.scheduler
+    optimizer = scheduler.optimizer
+    optimizer.zero_grad()
+    use_amp = args.amp
+    grad_norm = args.grad_norm
+
+    world_size = dist.get_world_size()
+    fold = args.grad_accum_fold
+    assert fold >= 1
+    accum_loss = 0.
+    n_batch = 0
+    t_data = 0.
+    t_last_step = time.time()
+    t_last_batch = time.time()
+    cnt_step_update = 0
+    is_quit = torch.tensor(0, dtype=torch.bool, device=args.gpu)
+
+    def get_progress_bar():
+        return tqdm(
+            desc=f'Epoch: {manager.epoch} | train',
+            unit='batch',
+            total=(args.n_steps if args.check_freq == -1 else args.check_freq),
+            disable=(args.gpu != 0 or args.verbose),
+            leave=False
+        )
+    # when check_freq > epoch size, the progress bar would display in mistake.
+    p_bar = get_progress_bar()
+    for i, (bs, minibatch) in enumerate(trainloader):
+        # since the gradient fold could be > 1, we need to accumulate the time
+        if args.verbose:
+            t_data += time.time() - t_last_batch
+
+        # skip steps when resuming from stop training
+        if (cnt_step_update + manager.step_by_last_epoch < manager.step):
+            if fold == 1 or (i+1) % fold == 0:
+                cnt_step_update += 1
+                p_bar.update()
+                if args.verbose and args.gpu == 0:
+                    sys.stderr.write(
+                        f"\rIn skipping steps: {cnt_step_update + manager.step_by_last_epoch}/{manager.step}")
+                    sys.stderr.flush()
+            continue
+
+        dist.all_reduce(is_quit, op=dist.ReduceOp.MAX)
+        if is_quit:
+            break
+
+        # update every fold times and drop the last few batches (number of which <= fold)
+        if fold == 1 or (i+1) % fold == 0:
+            local_loss, local_bs = _go_step(bs, minibatch)
+            accum_loss += local_loss * local_bs
+            n_batch += local_bs
+
+            if grad_norm > 0.0:
+                if use_amp:
+                    scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(), grad_norm, error_if_nonfinite=False)
+
+            scaler.step(optimizer)
+            scaler.update()
+            optimizer.zero_grad()
+
+            manager.step += 1
+            if model.module.lm.dynamic_ratio:
+                model.module.lm.noise_mask_ratio = max(0.1, model.module.lm.noise_mask_ratio-2e-5)
+            scheduler.update_lr_step(manager.step)
+            cnt_step_update += 1
+            if cnt_step_update==290:
+                temp=1
+            p_bar.update()
+
+            # measure accuracy and record loss; item() can sync all processes.
+            tolog = {
+                'loss': (accum_loss/n_batch).item(),
+                'lr': scheduler.lr_cur
+            }
+
+            # update tensorboard
+            if args.rank == 0:
+                manager.writer.add_scalar(
+                    'loss/train_loss', tolog['loss'], manager.step)
+                manager.writer.add_scalar(
+                    'lr', tolog['lr'], manager.step)
+
+                # update monitor
+                manager.monitor.update({
+                    monitor_anno['tr-metric']: (tolog['loss'], manager.step),
+                    monitor_anno['tr-lr']: (tolog['lr'], manager.step)
+                })
+
+            if args.verbose:
+                coreutils.distprint(
+                    f"[{manager.epoch} - {cnt_step_update}/{args.n_steps}] | data {t_data:6.3f} | time {time.time()-t_last_step:6.3f} | "
+                    f"loss {tolog['loss']:.2e} | lr {tolog['lr']:.2e}",
+                    args.gpu)
+                t_data = 0.0
+                t_last_step = time.time()
+
+            if args.check_freq != -1 and (manager.step % args.check_freq) == 0:
+                p_bar.close()
+                yield None
+                p_bar = get_progress_bar()
+
+            # reset accumulated loss
+            accum_loss = 0.
+            n_batch = 0
+        else:
+            # gradient accumulation w/o sync
+            with model.no_sync():
+                local_loss, local_bs = _go_step(bs, minibatch)
+                accum_loss += local_loss * local_bs
+                n_batch += local_bs
+
+        if args.verbose:
+            t_last_batch = time.time()
+
+    if not is_quit:
+        # set quit flag to True
+        is_quit = ~is_quit
+        # wait until other processes quit
+        dist.all_reduce(is_quit, op=dist.ReduceOp.MAX)
+
+    manager.step_by_last_epoch += cnt_step_update
+    # update n_steps, since we don't know how many steps there are with large dataset mode.
+    args.n_steps = cnt_step_update
+    if args.check_freq == -1:
+        yield
+    p_bar.close()
+    return
+
 
 
 class CheckManager:

@@ -205,7 +205,7 @@ def build_lm(f_config: str, f_check: str, device='cuda') -> AbsDecoder:
         device = f'cuda:{device}'
     
     configures = coreutils.readjson(f_config)
-    if configures['decoder']['type']=='TRFLM':
+    if configures['decoder']['type'] in ['TRFLM', 'REBM', 'EBM']:
         model = trf_builder(configures, dist=False, wrapper=True)
     else:
         model = lm_builder(configures, dist=False)

@@ -14,7 +14,9 @@ from zmq import has
 from ...shared import coreutils
 from ...shared.decoder import AbsDecoder
 from ...shared.manager import (
+    Manager,
     TRFManager,
+    train_ebm as origin_train_func,
     train_trf as default_train_func,
     evaluate,
     evaluate_nce
@@ -53,15 +55,19 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
     dist.init_process_group(
         backend=args.dist_backend, init_method=args.dist_url,
         world_size=args.world_size, rank=args.rank)
-
-    extra_tracks = [
-        'train/loss_data',
-        'train/loss_noise',
-        'train/acc_data',
-        'train/acc_noise'
-    ]
+    
     configures = coreutils.readjson(args.config)
     mode = configures['decoder']['kwargs'].get('method', 'nce')
+    model_type = configures['decoder']['type']
+    extra_tracks = [
+        'train/loss_data',
+        'train/loss_noise'
+    ]
+    if model_type=='TRFLM':
+        extra_tracks +=[
+            'train/acc_data',
+            'train/acc_noise'
+        ]
     if mode == 'dnce':
         extra_tracks += [
             'train/ppl_trfM_data',
@@ -79,11 +85,13 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
             'train/zeta_25'
         ]
     evaluate_func = evaluate_nce if mode=='dnce' else evaluate
-    manager = TRFManager(
+    manager_cls = TRFLMTrainer if model_type=='TRFLM' else Manager
+    train_func = custom_train if model_type =='TRFLM' else origin_train
+    manager = manager_cls(
         CorpusDataset,
         sortedPadCollateLM(flatten_target=False),
         args, build_model,
-        func_train=custom_train,
+        func_train=train_func,
         func_eval=evaluate_func,
         extra_tracks=extra_tracks
     )
@@ -140,6 +148,9 @@ def custom_hook(
 
 def custom_train(*args):
     return default_train_func(*args, hook_func=custom_hook)
+
+def origin_train(*args):
+    return origin_train_func(*args, hook_func=custom_hook)
 
 
 @torch.no_grad()

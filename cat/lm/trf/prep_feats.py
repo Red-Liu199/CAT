@@ -45,7 +45,7 @@ def main(trset: str, f_linfo: str,  feat_type_file: str = None, f_feats: str = N
     Ls = train_set.get_seq_len()
     # predifine a max length
     max_len = max(Ls)+1
-    max_len = max(200, max_len)
+    max_len = max(50, max_len)
     linfo = np.zeros(max_len, dtype=np.float32)
 
     for l in Ls:
