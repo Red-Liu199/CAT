@@ -8,11 +8,15 @@ from .train import (
     main_worker as basic_worker
 )
 from .beam_search import BeamSearcher as RNNTDecoder
-from ..ctc.train import cal_wer, custom_evaluate
 from ..lm import lm_builder
 from ..shared import coreutils
 from ..shared.decoder import AbsDecoder
 from ..shared.manager import train as default_train_func
+from ..ctc.train import (
+    cal_wer,
+    custom_evaluate,
+    build_beamdecoder
+)
 from ..ctc.train_scrf import (
     unique,
     score_prior
@@ -42,6 +46,7 @@ class STRFTransducerTrainer(TransducerTrainer):
                  lm_weight: float = 1.0,
                  num_aux_weight: float = 0.,
                  n_samples: int = 256,
+                 decoder=None,
                  **kwargs):
         super().__init__(**kwargs)
         assert isinstance(n_samples, int) and n_samples > 0
@@ -49,7 +54,10 @@ class STRFTransducerTrainer(TransducerTrainer):
         assert isinstance(num_aux_weight, (int, float))
 
         self.n_samples = n_samples
-        self.attach = {'lm': lm}
+        self.attach = {
+            'decoder': decoder,
+            'lm': lm
+        }
         self.weights = {
             'lm_weight': lm_weight,
             'num_weight': num_aux_weight
@@ -58,7 +66,7 @@ class STRFTransducerTrainer(TransducerTrainer):
         self._ctc = nn.CTCLoss(reduction='none')
 
     @torch.no_grad()
-    def get_wer(self, inputs: torch.FloatTensor, targets: torch.LongTensor, in_lens: torch.LongTensor, target_lens: torch.LongTensor) -> torch.FloatTensor:
+    def dget_wer(self, inputs: torch.FloatTensor, targets: torch.LongTensor, in_lens: torch.LongTensor, target_lens: torch.LongTensor) -> torch.FloatTensor:
 
         if '_beam_decoder' not in self.attach:
             # register beam searcher
@@ -86,6 +94,25 @@ class STRFTransducerTrainer(TransducerTrainer):
 
         return cal_wer(ground_truth, hypos)
 
+    @torch.no_grad()
+    def get_wer(self, xs: torch.Tensor, ys: torch.Tensor, lx: torch.Tensor, ly: torch.Tensor):
+        if self.attach['decoder'] is None:
+            raise RuntimeError(
+                f"{self.__class__.__name__}: self.attach['decoder'] is not initialized.")
+
+        bs = xs.size(0)
+        logits, lx = self.encoder(xs, lx)
+
+        # y_samples: (N, k, L), ly_samples: (N, k)
+        y_samples, _, _, ly_samples = self.attach['decoder'].decode(
+            logits.float().cpu(), lx.cpu())
+
+        ground_truth = [ys[i, :ly[i]] for i in range(ys.size(0))]
+        hypos = [y_samples[n, 0, :ly_samples[n, 0]].tolist()
+                 for n in range(bs)]
+
+        return cal_wer(ground_truth, hypos)
+
     def _IS(self, enc_out: torch.Tensor, lx: torch.Tensor):
         """copied from cat.ctc.train_scrf"""
 
@@ -106,6 +133,9 @@ class STRFTransducerTrainer(TransducerTrainer):
         ysamples = ysamples[:, :lsamples.max()]
         ysamples *= torch.arange(ysamples.size(1), device=ysamples.device)[
             None, :] < lsamples[:, None]
+
+        # FIXME: a hack avoid zero length
+        lsamples[lsamples == 0] = 1
 
         # (N*K, U) -> (N', U)
         unique_samples, inverse, ordered = unique(ysamples, dim=0)
@@ -163,29 +193,21 @@ class STRFTransducerTrainer(TransducerTrainer):
                 expand_enc_out = enc_out[ordered_src].contiguous()
                 expand_lframes = lx[ordered_src]
 
-                try:
-                    score_rnnt = -rnnt_loss_simple(
-                        f_enc=expand_enc_out,
-                        g_pred=self.predictor(padded_ys, lsamples+1)[0],
-                        labels=unique_samples,
-                        lf=expand_lframes,
-                        ll=lsamples,
-                        reduction='none'
-                    )
-                except Exception as e:
-                    print(expand_enc_out.size())
-                    print(padded_ys.size())
-                    print(unique_samples)
-                    print(expand_lframes),
-                    print(lsamples)
-                    raise RuntimeError(str(e))
+                ## calculate log P_ctc
+                score_ctc = -self._ctc(
+                    expand_enc_out.detach().log_softmax(dim=-1).transpose(0, 1),
+                    unique_samples.to(device='cpu'),
+                    expand_lframes, lsamples
+                )
 
-            ## calculate log P_ctc
-            score_ctc = -self._ctc(
-                expand_enc_out.log_softmax(dim=-1).transpose(0, 1),
-                unique_samples.to(device='cpu'),
-                expand_lframes, lsamples
-            )
+                score_rnnt = -rnnt_loss_simple(
+                    f_enc=expand_enc_out,
+                    g_pred=self.predictor(padded_ys, lsamples+1)[0],
+                    labels=unique_samples,
+                    lf=expand_lframes,
+                    ll=lsamples,
+                    reduction='none'
+                )
 
             ## w_hat = log(w_i): (N', ) -> (N, K)
             w_hat = torch.gather(
@@ -195,6 +217,7 @@ class STRFTransducerTrainer(TransducerTrainer):
 
         score_rnnt = torch.gather(
             score_rnnt, dim=0, index=inverse).view(N, K)
+
         den = (torch.softmax(w_hat, dim=1) * score_rnnt).sum(dim=1)
 
         return ((1+self.weights['num_weight'])*num + den).mean(dim=0), squeeze_ratio, num
@@ -232,6 +255,8 @@ def build_model(
 
     assert 'trainer' in cfg, f"missing 'trainer' in field:"
     cfg_trainer = cfg['trainer']
+    assert 'decoder' in cfg_trainer
+    cfg_trainer['decoder'] = build_beamdecoder(cfg_trainer['decoder'])
 
     encoder, predictor, joiner = build_base_model(
         cfg, args, dist=False, wrapped=False)
