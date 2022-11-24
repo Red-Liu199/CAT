@@ -37,7 +37,7 @@ def draw_time(ax: plt.Axes, scalar_events: list, prop_box=True):
 
     ax.plot(steps, d_time)
     title = 'tot. time (hour)'
-    speed = d_time[-1]/d_time.shape[0]
+    speed = d_time[-1]/(steps[-1]-steps[0])
 
     ax.ticklabel_format(axis="y", style="sci", scilimits=(0, 0))
     if prop_box:
@@ -196,6 +196,8 @@ def cmp(tbevents: List[str], legends: Union[List[str], None] = None, title: str 
             accumulator = EventAccumulator(_event).Reload()
 
         for i in range(nr*nc):
+            if anno_scalars[i] not in accumulator.Tags()['scalars']:
+                continue
             r, c = (i//nc), (i % nc)
             if i >= n_plottings:
                 # rm empty plotting

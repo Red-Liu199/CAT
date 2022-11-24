@@ -1015,6 +1015,10 @@
                                     "compact": {
                                         "type": "boolean",
                                         "default": false
+                                    },
+                                    "pre_project": {
+                                        "type": "boolean",
+                                        "default": true
                                     }
                                 }
                             }
