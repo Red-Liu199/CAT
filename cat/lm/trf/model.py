@@ -292,7 +292,7 @@ class TRFLM(AbsDecoder):
         else:
             truncate_num = 0 if self.with_end_mark else 1
         noise_in_lens = in_lens - truncate_num
-        log_probs = self.noise_module[0].score(seqs, targets, noise_in_lens)
+        log_probs = self.noise_module[0].score(seqs, targets, noise_in_lens.to(seqs.device))
         if self.noise_module[0].pi is None:
             log_probs += torch.log(self.pi[in_lens])
         return log_probs
@@ -574,6 +574,14 @@ class REBM(AbsDecoder):
         # w: (N, L, K)
         return w
 
+    def noisem_score(self, seqs, in_lens, targets):
+        if targets.dim()==3:
+            targets = targets.squeeze(2)
+        truncate_num = 1 if self.bert_tokenizer else 0
+        noise_in_lens = in_lens - truncate_num
+        noise_device = next(self.noise_module[0].parameters()).device
+        log_probs = self.noise_module[0].score(seqs.to(noise_device), targets.to(noise_device), noise_in_lens.to(noise_device))
+        return log_probs
 
     def score(self, input_ids: torch.LongTensor, targets: torch.LongTensor, in_lens: torch.Tensor, *args):
         if self.bert_tokenizer and input_ids[0][0]==0: 
@@ -581,13 +589,14 @@ class REBM(AbsDecoder):
             targets = targets[:, 1:]
             in_lens -= 1
         energy = self.calculate_energy(input_ids, targets, in_lens)
-        score = -energy
+        noise_score = self.noisem_score(input_ids, in_lens, targets) # log noise_prob
+        score = noise_score.to(input_ids.device)-energy
         return score
 
     
-    def get_batch_noise(self, inputs, in_lens):
+    def get_batch_noise(self, inputs, in_lens, targets):
         if inputs.size(0)==0:
-            return inputs, in_lens
+            return inputs, in_lens, targets
         with torch.no_grad():
             max_len = inputs.size(1)
             probs = self.noise_mask_ratio*torch.ones([max_len], device=inputs.device)
@@ -595,6 +604,7 @@ class REBM(AbsDecoder):
             masked_indices = torch.bernoulli(probs).bool()
             noise = inputs.clone()
             noiselens = in_lens.clone()
+            noisetargets = targets.clone()
             for i in range(max_len):
                 if not masked_indices[i]:
                     continue
@@ -602,36 +612,43 @@ class REBM(AbsDecoder):
                 noise_out, _ = self.noise_module[0](src_ids=noise_input) # (B,T,V)
                 noise_next = noise_out[:, -1, :].argmax(-1) # (B,)
                 noise[:, i] = noise_next
+                noisetargets[:, i-1] = noise_next
             padding_mask = (torch.arange(max_len, device=inputs.device)[
                 None, :] < in_lens[:, None].to(inputs.device))
             noise *= padding_mask
-        return noise, noiselens
+        return noise, noiselens, noisetargets
 
 
-    def get_masked_noise(self, inputs, in_lens):
+    def get_masked_noise(self, inputs, in_lens, targets):
         frac_part = self.noise_rate - int(self.noise_rate)
-        noise, noiselens = self.get_batch_noise(inputs[:frac_part, :], in_lens[:frac_part])
+        noise, noiselens, noisetargets = self.get_batch_noise(inputs[:frac_part, :], in_lens[:frac_part], targets[:frac_part, :])
         for k in range(int(self.noise_rate)):
-            noise_k, noiselens_k = self.get_batch_noise(inputs, in_lens)
+            noise_k, noiselens_k, noisetargets_k = self.get_batch_noise(inputs, in_lens, targets)
             noise = torch.cat((noise, noise_k), dim=0)
             noiselens = torch.cat((noiselens, noiselens_k), dim=0)
-        targets = torch.cat((noise[:, 1:], torch.zeros(inputs.size(0), 1, device=noise.device, dtype=torch.long)), dim=1)
-        return noise, noiselens, targets
+            noisetargets = torch.cat((noisetargets, noisetargets_k), dim=0)
+        return noise, noiselens, noisetargets
 
     def cal_loss(self, inputs: torch.Tensor, energy_values, in_lens, targets):
         loss_data = -torch.mean(F.logsigmoid(-energy_values-math.log(self.noise_rate)))
-        seqs, seqlens, seqtargets = self.get_masked_noise(inputs, in_lens)
+        seqs, seqlens, seqtargets = self.get_masked_noise(inputs, in_lens, targets)
         noise_energy = self.calculate_energy(seqs, seqtargets, seqlens)
         loss_noise = -torch.mean(F.logsigmoid(noise_energy+math.log(self.noise_rate)))
         loss = loss_data + loss_noise
+        with torch.no_grad():
+            p0_data = F.sigmoid(-energy_values-math.log(self.noise_rate))
+            p1_noise = F.sigmoid(noise_energy+math.log(self.noise_rate))
+            acc_data = sum(p0_data.data > 0.5)/int(p0_data.shape[0])
+            acc_noise = sum(p1_noise.data > 0.5)/int(p1_noise.shape[0])
         return loss, \
             {
                 'train/loss_data': loss_data.detach(),
-                'train/loss_noise': loss_noise.detach()
+                'train/loss_noise': loss_noise.detach(),
+                'train/acc_data': acc_data.detach(),
+                'train/acc_noise': acc_noise.detach()
             }
 
-        
-
+    
     def calculate_energy(self, inputs, targets, input_lengths: torch.LongTensor):
         if self.energy_func=='sumtargetlogit':
             # only this type will calculate energy per token
@@ -652,13 +669,249 @@ class REBM(AbsDecoder):
                 outputs = self.udlying_nn(inputs, input_lengths=input_lengths)
                 assert 'last_hidden_state' in outputs, 'The outputs has no attribute last_hidden_state'
                 hiddens = outputs.last_hidden_state # (B, T, H)
-                energy = self.energy_lin(hiddens).squeeze(-1).sum(-1) # (B,)
+                padding_mask = torch.arange(inputs.size(1), device=inputs.device)[
+                    None, :] < input_lengths[:, None].to(inputs.device)
+                energy = self.energy_lin(hiddens).squeeze(-1) # (B, T)
+                energy = (energy*padding_mask).sum(-1) # (B, )
 
             else: # default: use the hidden state of [CLS] to represent the sentence hidden
                 outputs = self.udlying_nn(inputs, input_lengths=input_lengths)
                 assert 'pooler_output' in outputs, 'The outputs has no attribute pooler_output'
                 hidden = outputs.pooler_output # (B,H)
                 energy = self.energy_lin(hidden).squeeze(-1) # (B,)
+
+        elif self.energy_func=='logsumexplogit':
+            outputs = self.udlying_nn(inputs, input_lengths=input_lengths)
+            assert 'logits' in outputs, 'The output has no attribute logits'
+            logit = outputs.logits[:, 0, :] # (B, Classes)
+            energy = -torch.logsumexp(logit, dim=-1)
+        elif self.energy_func=='maxlogit':
+            outputs = self.udlying_nn(inputs, input_lengths=input_lengths)
+            assert 'logits' in outputs, 'The output has no attribute logits'
+            logit = outputs.logits[:, 0, :] # (B, Classes)
+            energy = -torch.max(logit, dim=-1)
+        elif self.energy_func=='summasklogit':
+            # mask each token and obtain its logit on the original token
+            # then sum all mask logits. (only for bert with LM head)
+            # This energy function is more time-consuming than others
+            energy = 0
+            for t in range(1, inputs.shape[1]):
+                masked_inputs = inputs.clone()
+                masked_inputs[:, t] = 103*torch.ones([inputs.shape[0]], device=inputs.device, dtype=torch.long)
+                outputs = self.udlying_nn(masked_inputs, input_lengths=input_lengths)
+                assert 'logits' in outputs, 'The output has no attribute logits'
+                logit = outputs.logits[:, t, :] # (B, V)
+                energy += -logit.gather(index=inputs[:, t].unsqueeze(1), dim=-1).squeeze() #(B,)
+        elif self.energy_func=='sumtokenlogit':
+            outputs = self.udlying_nn(inputs, input_lengths=input_lengths)
+            assert 'logits' in outputs, 'The output has no attribute logits'
+            logits = outputs.logits # (B, T, V)
+            energy = -logits.gather(index=inputs.unsqueeze(-1), dim=-1).squeeze().sum(-1) # (B,)
+        else:
+            raise RuntimeError
+        return energy # shape: (B,)
+
+    def forward(self, inputs, targets, input_lengths: torch.LongTensor):
+        return self.calculate_energy(inputs, targets, input_lengths)
+
+class EBM(AbsDecoder):
+    def __init__(
+        self,
+        noise_rate: float = 1.,  # rate of noise data number/ real data number
+        method: Literal['nce', 'dnce'] = "nce", # nce or dynamic nce
+        energy_func: str = 'sumtargetlogit', # 'hidden2scalar'/'logsumexplogit'/'maxlogit'/'sumtargetlogit'
+        episilon: float = 1e-30,  # min of log()
+        config_noise_model: str = None, # noise configuration file path
+        config_trf_model: str =None, # TRF model configuration file path
+        check_trf_model: str =None, # load energy model from this checkpoint if its not None
+        check_noise_model: str = None, # load noise model from this checkpoint if its not None
+        linear_scale: float = 1, # only used for hidden2scalar energy function, we need a scale to match the energy and log pn
+        tokenizer_path: str = None,
+        bert_tokenizer: bool = False # the data is encoded by bert tokenizer, with [CLS] in the head and [SEP] in the tail
+        ):
+        super().__init__()
+
+        # assign settings for EBM training
+        self.noise_rate = noise_rate
+        self.energy_func = energy_func
+        self.episilon = episilon
+        self.tokenizer = tknz.load(tokenizer_path) if tokenizer_path else None
+        self.bert_tokenizer = bert_tokenizer
+        self.method = method
+        self.linear_scale = linear_scale
+
+        # initialize trf and noise model
+        noise_config = coreutils.readjson(config_noise_model)
+        self.noise_type = list(noise_config.keys())[0]
+        self.noise_cls = noise_config['decoder']['type']
+        trf_config = coreutils.readjson(config_trf_model)
+        self.nn_type = list(trf_config.keys())[0] # encoder or decoder
+        if check_trf_model is not None:
+            trf_model = lm_builder(trf_config, dist=False)
+            coreutils.load_checkpoint(trf_model, check_trf_model)
+            self.udlying_nn = trf_model.lm
+        else:
+            model_cls = eval(trf_config[self.nn_type]['type'])
+            self.udlying_nn = model_cls(**trf_config[self.nn_type]['kwargs'])
+
+        if check_noise_model is not None:
+            nlm = lm_builder(noise_config, dist=False)
+            coreutils.load_checkpoint(nlm, check_noise_model)
+            self.noise_model = nlm.lm
+        else:
+            model_cls = eval(noise_config['decoder']['type'])
+            self.noise_model = model_cls(**noise_config['decoder']['kwargs'])
+        if method=='nce':
+            # freeze noise model if nce training
+            self.noise_model.requires_grad_(False)
+            self.noise_module = [self.noise_model]
+            self.noise_model = None
+        else:
+            self.noise_module = [self.noise_model]
+        if self.energy_func!='sumtargetlogit':
+            # the trf model must be an encoder or pretrained bert if energy function is not sum-target-logit
+            assert self.nn_type=='encoder' or 'Bert' in trf_config[self.nn_type]['kwargs'].get('model_name', ''),\
+                'Currently the TRF model must be Bert for other energy funciton'
+        else:
+            assert self.nn_type=='decoder', 'The TRF model must be a decoder if using the sum-target-logit energy function'
+        if 'hidden2scalar' in self.energy_func:
+            hidden_size = self.udlying_nn.config.hidden_size if hasattr(self.udlying_nn, 'config') else self.udlying_nn.dim_hid
+            self.energy_lin = nn.Linear(in_features=hidden_size, out_features=1)
+            if self.energy_func=='hidden2scalar-sum' and hasattr(self.udlying_nn, 'model') and hasattr(self.udlying_nn.model, 'pooler'):
+                self.udlying_nn.model.pooler = None
+
+    # get NN feature
+    def get_logit_feat(self, input_ids, logits, targets, in_lens: torch.LongTensor):
+        # targets: (N, L, K)
+        # logits: the output of nnlm, (N, L, V)
+        if targets.dim() == 2:
+            targets = targets.unsqueeze(-1)        
+        w = logits.gather(index=targets, dim=-1)
+        # find the length and mask the tail
+        padding_mask = torch.arange(input_ids.size(1), device=input_ids.device)[
+            None, :] < in_lens[:, None].to(input_ids.device)
+        padding_mask = padding_mask.unsqueeze(2)
+        w *= padding_mask
+        # w: NN feature of the N sentences in this batch
+        # w: (N, L, K)
+        return w
+
+    def noisem_score(self, seqs, in_lens, targets):
+        if targets.dim()==3:
+            targets = targets.squeeze(2)
+        noise_device = next(self.noise_module[0].parameters()).device
+        log_probs = self.noise_module[0].score(seqs.to(noise_device), targets.to(noise_device), in_lens.to(noise_device))
+        return log_probs
+
+    def score(self, input_ids: torch.LongTensor, targets: torch.LongTensor, in_lens: torch.Tensor, *args):
+        if self.bert_tokenizer and input_ids[0][0]==0: 
+            input_ids = input_ids[:, 1:] # delete 0 in the head
+            targets = targets[:, 1:]
+            in_lens -= 1
+        energy = self.calculate_energy(input_ids, targets, in_lens)
+        return -energy
+    
+    def getnoise(self, noise_num, maxlennoise=40):
+        with torch.no_grad():
+            noise = torch.zeros([noise_num, maxlennoise], device=next(self.noise_module[0].parameters()).device, dtype=torch.long)
+            ones = torch.ones([noise_num], device=next(self.noise_module[0].parameters()).device, dtype=torch.long)
+            if self.bert_tokenizer:
+                # initialize the start token id with [CLS] id (101)
+                noise_next = 101*torch.ones([noise_num, 1], device=next(
+                    self.noise_module[0].parameters()).device, dtype=torch.long)
+                noise[:, 0] = 101*torch.ones([noise_num], device=next(
+                    self.noise_module[0].parameters()).device, dtype=torch.long)
+            else:
+                noise_next = torch.zeros([noise_num, 1], device=next(
+                    self.noise_module[0].parameters()).device, dtype=torch.long)
+            cache = None
+            is_end = torch.zeros([noise_num], dtype=torch.bool, device=noise.device)
+            lennoise = torch.ones([noise_num], dtype=torch.long, device=noise.device)
+            end_mark = 102 if self.bert_tokenizer else 0
+            for i in range(maxlennoise-1):
+                if self.noise_cls=='PretrainedTransformer':
+                    noise_out, cache = self.noise_module[0](noise_next, cache=cache, use_cache=True)
+                else:
+                    noise_out, cache = self.noise_module[0](src_ids=noise_next, cache=cache, input_lengths=ones)
+                noise_out = noise_out[:, -1, :] # (B,V)
+                noise_distribution = F.softmax(noise_out, dim=-1)
+                noise_next = torch.multinomial(noise_distribution, 1, True) # (B, 1)
+                noise[:, i+1] = noise_next.squeeze(1)
+                lennoise += ones*(~is_end)
+                is_end |= (noise_next.squeeze(-1)==end_mark)
+                if all(is_end):
+                    break
+        
+            padding_mask = torch.arange(noise.size(1), device=noise.device)[
+                None, :] < lennoise[:, None].to(noise.device)
+            noise *= padding_mask
+            targets = torch.cat((noise[:,1:], torch.zeros([noise_num, 1], device=noise.device, dtype=torch.long)), dim=1)
+
+        return noise, lennoise, targets
+    
+    def cal_loss(self, inputs: torch.Tensor, energy_values, in_lens, targets):
+
+        data_sample_num = energy_values.shape[0]
+        noise_sample_num = int(data_sample_num * self.noise_rate)
+
+        if targets.dim() == 2:
+            targets = targets.unsqueeze(2)
+
+        log_pm = -energy_values
+        log_pn = self.noisem_score(inputs, in_lens, targets)
+        # ppl_data = torch.exp(-log_pm.sum()/in_lens.sum())
+        with torch.no_grad():
+            p1 = torch.sigmoid(math.log(self.noise_rate)- log_pm + log_pn)
+        loss_data = -(p1*log_pm).mean(dim=0)
+        seqs, seqlens, seqtars = self.getnoise(noise_sample_num)
+        log_pm_noise = -self.calculate_energy(seqs, seqtars, seqlens)
+        log_pn_noise = self.noisem_score(seqs, seqlens, seqtars)
+        with torch.no_grad():
+            p0 = torch.sigmoid(-math.log(self.noise_rate) + log_pm_noise - log_pn_noise)
+        loss_noise = self.noise_rate*(p0*log_pm_noise).mean(dim=0)
+        acc_data = (p1.data < 0.5).sum()/data_sample_num
+        acc_noise = (p0.data < 0.5).sum()/noise_sample_num
+        loss_noisem_ml = -log_pn.sum()/in_lens.sum() if self.method=='dnce' else 0
+        loss = loss_data + loss_noise + loss_noisem_ml
+        return loss, \
+            {
+                'train/loss_data': loss_data.detach(),
+                'train/loss_noise': loss_noise.detach(),
+                'train/acc_data': acc_data.detach(),
+                'train/acc_noise': acc_noise.detach()
+            }
+
+    
+    def calculate_energy(self, inputs, targets, input_lengths: torch.LongTensor):
+        if self.energy_func=='sumtargetlogit':
+            # only this type will calculate energy per token
+            # so we can use token-level discrete feature
+            if targets.dim() == 2:
+                targets = targets.unsqueeze(2)
+
+            nn_logits, _ = self.udlying_nn(inputs, input_lengths=input_lengths)
+            features = self.get_logit_feat(inputs, nn_logits, targets, input_lengths)
+            padding_mask = (torch.arange(inputs.size(1), device=inputs.device)[
+                None, :] < input_lengths[:, None].to(inputs.device)).unsqueeze(2)
+            energy = -(features*padding_mask).sum(dim=1).squeeze(1)
+        # Note: the nn model must be BERT for the following 3 energy functions
+        elif 'hidden2scalar' in self.energy_func:
+        # elif self.energy_func=='hidden2scalar':
+            # TODO: add input length
+            if self.energy_func=='hidden2scalar-sum':
+                outputs = self.udlying_nn(inputs, input_lengths=input_lengths)
+                assert 'last_hidden_state' in outputs, 'The outputs has no attribute last_hidden_state'
+                hiddens = outputs.last_hidden_state # (B, T, H)
+                padding_mask = torch.arange(inputs.size(1), device=inputs.device)[
+                    None, :] < input_lengths[:, None].to(inputs.device)
+                energy = self.energy_lin(hiddens).squeeze(-1) # (B, T)
+                energy = self.linear_scale*(energy*padding_mask).sum(-1) # (B, )
+
+            else: # default: use the hidden state of [CLS] to represent the sentence hidden
+                outputs = self.udlying_nn(inputs, input_lengths=input_lengths)
+                assert 'pooler_output' in outputs, 'The outputs has no attribute pooler_output'
+                hidden = outputs.pooler_output # (B,H)
+                energy = self.linear_scale*self.energy_lin(hidden).squeeze(-1) # (B,)
 
         elif self.energy_func=='logsumexplogit':
             outputs = self.udlying_nn(inputs, input_lengths=input_lengths)

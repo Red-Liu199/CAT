@@ -50,14 +50,11 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
     model_type = configures['decoder']['type']
     extra_tracks = [
         'train/loss_data',
-        'train/loss_noise'
+        'train/loss_noise',
+        'train/acc_data',
+        'train/acc_noise'
     ]
-    if model_type=='TRFLM':
-        extra_tracks +=[
-            'train/acc_data',
-            'train/acc_noise'
-        ]
-    if mode == 'dnce':
+    if mode == 'dnce' and model_type=='TRFLM':
         extra_tracks += [
             'train/ppl_trfM_data',
             'train/ppl_trfM_noise',
@@ -73,7 +70,7 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
             'train/zeta_15',
             'train/zeta_25'
         ]
-    evaluate_func = evaluate_nce if mode=='dnce' else evaluate
+    evaluate_func = evaluate_nce if mode=='dnce' and model_type=='TRFLM' else evaluate
     manager_cls = TRFLMTrainer if model_type=='TRFLM' else Manager
     train_func = custom_train if model_type =='TRFLM' else origin_train
     manager = manager_cls(

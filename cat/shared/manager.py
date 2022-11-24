@@ -328,7 +328,7 @@ class Manager(object):
                 pass
             else:
                 self.train_sampler.set_epoch(self.epoch)
-            if self.step == 0 and not self.DEBUG:
+            if self.step == -1 and not self.DEBUG:
                 # get the initialized perf. before training start
                 self.model.eval()
                 metrics = self.evaluate(self.valloader, args, self)
@@ -1340,12 +1340,10 @@ def train_ebm(trainloader: ReadBatchDataLoader, args: argparse.Namespace, manage
             optimizer.zero_grad()
 
             manager.step += 1
-            if model.module.lm.dynamic_ratio:
+            if hasattr(model.module.lm, "dynamic_ratio") and model.module.lm.dynamic_ratio:
                 model.module.lm.noise_mask_ratio = max(0.1, model.module.lm.noise_mask_ratio-2e-5)
             scheduler.update_lr_step(manager.step)
             cnt_step_update += 1
-            if cnt_step_update==290:
-                temp=1
             p_bar.update()
 
             # measure accuracy and record loss; item() can sync all processes.
