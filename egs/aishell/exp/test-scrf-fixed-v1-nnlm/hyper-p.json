@@ -1,0 +1,49 @@
+{
+    "data": {
+        "train": [
+            "train-3sp"
+        ],
+        "dev": "dev",
+        "test": [
+            "dev",
+            "test"
+        ],
+        "filter": "10:2000"
+    },
+    "tokenizer": {
+        "type": "SentencePieceTokenizer",
+        "|V|": 4232,
+        "file": "exp/rnnt/rnnt-v15/tokenizer.tknz"
+    },
+    "env": {
+        "CUDA_VISIBLE_DEVICES": "4,5,6,7,8,9"
+    },
+    "train": {
+        "bin": "cat.ctc.train_scrf",
+        "option": {
+            "amp": true,
+            "batch_size": 128,
+            "grad_norm": 2.0,
+            "dynamic_batch_mode": 0,
+            "check_freq": 2000
+        }
+    },
+    "inference": {
+        "avgmodel": {
+            "mode": "best",
+            "num": 20
+        },
+        "infer": {
+            "bin": "cat.ctc.decode",
+            "option": {
+                "built_model_by": "cat.ctc.train_scrf",
+                "beam_size": 32,
+                "nj": 64
+            }
+        },
+        "er": {
+            "cer": true
+        }
+    },
+    "commit": "445fc01248f4a0ed1210f75393bbe676c40d1af5"
+}

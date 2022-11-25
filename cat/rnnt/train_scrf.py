@@ -129,13 +129,12 @@ class STRFTransducerTrainer(TransducerTrainer):
             # (N, ) -> (N, 1) -> (N, K) -> (N*K, )
             lx.unsqueeze(1).repeat(1, K).contiguous().view(-1)
         )
+        # FIXME: a hack avoid zero length
+        lsamples[lsamples == 0] = 1
         # (N*K, T) -> (N*K, U)
         ysamples = ysamples[:, :lsamples.max()]
         ysamples *= torch.arange(ysamples.size(1), device=ysamples.device)[
             None, :] < lsamples[:, None]
-
-        # FIXME: a hack avoid zero length
-        lsamples[lsamples == 0] = 1
 
         # (N*K, U) -> (N', U)
         unique_samples, inverse, ordered = unique(ysamples, dim=0)
@@ -145,7 +144,7 @@ class STRFTransducerTrainer(TransducerTrainer):
     def forward(self, feats: torch.Tensor, labels: torch.Tensor, lx: torch.Tensor, ly: torch.Tensor):
 
         device = feats.device
-        enc_out, lframes = self.encoder(feats, lx)
+        enc_out, lx = self.encoder(feats, lx)
         pred_out, _ = self.predictor(self._pad(labels))
 
         lx = lx.to(device=device, dtype=torch.int)
@@ -160,7 +159,7 @@ class STRFTransducerTrainer(TransducerTrainer):
             f_enc=enc_out,
             g_pred=pred_out,
             labels=labels,
-            lf=lframes,
+            lf=lx,
             ll=ly,
             reduction='none'
         )
@@ -191,20 +190,20 @@ class STRFTransducerTrainer(TransducerTrainer):
             with torch.enable_grad():
                 ordered_src = torch.div(ordered, K, rounding_mode='floor')
                 expand_enc_out = enc_out[ordered_src].contiguous()
-                expand_lframes = lx[ordered_src]
+                expand_lx = lx[ordered_src]
 
                 ## calculate log P_ctc
                 score_ctc = -self._ctc(
                     expand_enc_out.detach().log_softmax(dim=-1).transpose(0, 1),
                     unique_samples.to(device='cpu'),
-                    expand_lframes, lsamples
+                    expand_lx, lsamples
                 )
 
                 score_rnnt = -rnnt_loss_simple(
                     f_enc=expand_enc_out,
-                    g_pred=self.predictor(padded_ys, lsamples+1)[0],
+                    g_pred=self.predictor(padded_ys)[0],
                     labels=unique_samples,
-                    lf=expand_lframes,
+                    lf=expand_lx,
                     ll=lsamples,
                     reduction='none'
                 )
