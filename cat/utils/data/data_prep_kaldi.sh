@@ -80,28 +80,29 @@ for dir in $data_dir; do
                     mv $dir/feats.scp $dir/feats_orin.scp
                 fi
             }
-            ln -snf $dir/feats_cmvn.scp $dir/feats.scp
+            ln -snf feats_cmvn.scp $dir/feats.scp
         else
+            [ ! -f $dir/feats_orin.scp ] &&
+                mv $dir/feats.scp $dir/feats_orin.scp
+            ln -snf feats_orin.scp $dir/feats.scp
+
             steps/compute_cmvn_stats.sh \
                 $dir \
                 $feat_dir/log-cmvn \
                 $feat_dir/cmvn ||
                 exit 1
 
-            [ ! -f $dir/feats_orin.scp ] &&
-                mv $dir/feats.scp $dir/feats_orin.scp
-
             copy-feats --compress=true \
                 "ark,s,cs:apply-cmvn --norm-vars=true --utt2spk=ark:$dir/utt2spk \
                 scp:$dir/cmvn.scp scp:$dir/feats_orin.scp ark:- |" \
                 "ark,scp:$dir/applied_cmvn.ark,$dir/feats_cmvn.scp"
 
-            ln -snf $dir/feats_cmvn.scp $dir/feats.scp
+            ln -snf feats_cmvn.scp $dir/feats.scp
         fi
     else
         [ ! -f $dir/feats_orin.scp ] &&
             mv $dir/feats.scp $dir/feats_orin.scp
-        ln -snf $dir/feats_orin.scp $dir/feats.scp
+        ln -snf feats_orin.scp $dir/feats.scp
     fi
 
 done
