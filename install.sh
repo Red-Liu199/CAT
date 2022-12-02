@@ -191,7 +191,7 @@ done
 
 ## python>3
 [ "$(python -V 2>&1 | awk '{print $2}' | cut -d '.' -f 1)" -ne 3 ] && {
-    echo "Require python3+, instead $(python --version)"
+    echo "Require python3+, instead $(python -V 2>&1)"
     exit 1
 }
 

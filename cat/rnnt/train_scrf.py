@@ -9,7 +9,7 @@ from .train import (
 )
 from .beam_search import BeamSearcher as RNNTDecoder
 from ..lm import lm_builder
-from ..shared import coreutils
+from ..shared import coreutils, layer
 from ..shared.decoder import AbsDecoder
 from ..shared.manager import train as default_train_func
 from ..ctc.train import (
@@ -22,6 +22,7 @@ from ..ctc.train_scrf import (
     score_prior
 )
 
+import random
 import ctc_align
 import argparse
 from typing import *
@@ -40,14 +41,27 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
     )
 
 
+class CTCHEAD(nn.Module):
+    def __init__(self, hdim: int, num_classes: int) -> None:
+        super().__init__()
+        self.rnn = layer._LSTM(hdim, hdim)
+        self.fc = nn.Linear(hdim, num_classes)
+
+    def forward(self, x, lx):
+        return self.fc(self.rnn(x, lx)[0])
+
+
 class STRFTransducerTrainer(TransducerTrainer):
-    def __init__(self,
-                 lm: Optional[AbsDecoder] = None,
-                 lm_weight: float = 1.0,
-                 num_aux_weight: float = 0.,
-                 n_samples: int = 256,
-                 decoder=None,
-                 **kwargs):
+    def __init__(
+            self,
+            hdim_last_enc_hid: int,
+            num_classes: int,
+            lm: Optional[AbsDecoder] = None,
+            lm_weight: float = 1.0,
+            num_aux_weight: float = 0.,
+            n_samples: int = 256,
+            decoder=None,
+            **kwargs):
         super().__init__(**kwargs)
         assert isinstance(n_samples, int) and n_samples > 0
         assert isinstance(lm_weight, (int, float)) and lm_weight > 0
@@ -63,7 +77,9 @@ class STRFTransducerTrainer(TransducerTrainer):
             'num_weight': num_aux_weight
         }
         self._pad = nn.ConstantPad1d((1, 0), 0)
-        self._ctc = nn.CTCLoss(reduction='none')
+        self.ctc_loss = nn.CTCLoss(reduction='none')
+        self.aux_ctc_head = CTCHEAD(hdim_last_enc_hid, num_classes)
+        self.head = nn.Linear(hdim_last_enc_hid, num_classes)
 
     @torch.no_grad()
     def dget_wer(self, inputs: torch.FloatTensor, targets: torch.LongTensor, in_lens: torch.LongTensor, target_lens: torch.LongTensor) -> torch.FloatTensor:
@@ -101,7 +117,8 @@ class STRFTransducerTrainer(TransducerTrainer):
                 f"{self.__class__.__name__}: self.attach['decoder'] is not initialized.")
 
         bs = xs.size(0)
-        logits, lx = self.encoder(xs, lx)
+        last_enc_hid, lx = self.encoder(xs, lx)
+        logits = self.aux_ctc_head(last_enc_hid, lx)
 
         # y_samples: (N, k, L), ly_samples: (N, k)
         y_samples, _, _, ly_samples = self.attach['decoder'].decode(
@@ -113,24 +130,31 @@ class STRFTransducerTrainer(TransducerTrainer):
 
         return cal_wer(ground_truth, hypos)
 
-    def _IS(self, enc_out: torch.Tensor, lx: torch.Tensor):
-        """copied from cat.ctc.train_scrf"""
+    @torch.no_grad()
+    def _IS(self, ctc_out: torch.Tensor, lx: torch.Tensor):
+        """modified from cat.ctc.train_scrf
 
-        T = enc_out.size(1)
+        ctc_out : (T, N, V), log probs
+        """
+
+        T = ctc_out.size(0)
         K = self.n_samples
 
-        # (K, N, T) -> (N, T, K)
-        m = torch.distributions.categorical.Categorical(logits=enc_out)
-        pi_samples = m.sample((K, )).permute(1, 2, 0)
+        # (T, N, V) -> (K, T, N)
+        m = torch.distributions.categorical.Categorical(ctc_out.exp())
+        # (K, T, N) -> (N, K, T)
+        pi_samples = m.sample((K, )).permute(2, 0, 1).contiguous()
 
-        # (N, T, K) -> (N, K, T) -> (N*K, T)
+        # (N, K, T) -> (N*K, T)
         ysamples, lsamples = ctc_align.align_(
-            pi_samples.transpose(1, 2).contiguous().view(-1, T),
+            pi_samples.view(-1, T),
             # (N, ) -> (N, 1) -> (N, K) -> (N*K, )
             lx.unsqueeze(1).repeat(1, K).contiguous().view(-1)
         )
-        # FIXME: a hack avoid zero length
+        # FIXME: a hack to avoid lsamples == 1
         lsamples[lsamples == 0] = 1
+        ysamples[lsamples == 0] = random.randint(0, self.head.out_features-1)
+
         # (N*K, T) -> (N*K, U)
         ysamples = ysamples[:, :lsamples.max()]
         ysamples *= torch.arange(ysamples.size(1), device=ysamples.device)[
@@ -144,95 +168,101 @@ class STRFTransducerTrainer(TransducerTrainer):
     def forward(self, feats: torch.Tensor, labels: torch.Tensor, lx: torch.Tensor, ly: torch.Tensor):
 
         device = feats.device
-        enc_out, lx = self.encoder(feats, lx)
+        last_enc_hid, lx = self.encoder(feats, lx)
         pred_out, _ = self.predictor(self._pad(labels))
 
         lx = lx.to(device=device, dtype=torch.int)
         ly = ly.to(device=device, dtype=torch.int)
         labels = labels.to(torch.int)
 
-        N, T, V = enc_out.shape
+        N = last_enc_hid.size(0)
         K = self.n_samples
 
         # numerator: (N, )
+        enc_out = self.head(last_enc_hid)
+
         num = rnnt_loss_simple(
             f_enc=enc_out,
             g_pred=pred_out,
             labels=labels,
             lf=lx,
-            ll=ly,
+            ll=ly
+        )
+
+        # (T, N, V)
+        ctc_log_probs = self.aux_ctc_head(
+            last_enc_hid.detach(), lx).log_softmax(dim=-1).transpose(0, 1)
+        # joint ctc loss
+        num_ctc = self.ctc_loss(ctc_log_probs, labels.to(
+            device='cpu'), lx, ly).mean(dim=0)
+
+        # denominator
+        ## sample from ctc aux dist
+        unique_samples, lsamples, inverse, ordered = self._IS(
+            ctc_log_probs, lx)
+        squeeze_ratio = 1 - ordered.size(0) / N / K
+
+        ## piror(y): (N', )
+        padded_ys = self._pad(unique_samples)
+        if self.attach['lm'] is None:
+            prior_ys = 0.
+        else:
+            ## <s> A B C -> A B C <s>
+            dummy_targets = torch.roll(padded_ys, -1, dims=1)
+            prior_ys = score_prior(
+                self.attach['lm'],
+                padded_ys,
+                dummy_targets,
+                lsamples+1
+            ) * self.weights['lm_weight']
+
+        ordered_src = torch.div(ordered, K, rounding_mode='floor')
+        expand_lx = lx[ordered_src]
+
+        ## calculate log P_ctc (N', )
+        score_ctc = -self.ctc_loss(
+            ctc_log_probs.detach().transpose(
+                0, 1)[ordered_src].transpose(0, 1),
+            unique_samples.to(device='cpu'),
+            expand_lx, lsamples
+        )
+
+        ## calculate rnnt score (N', )
+        score_rnnt = -rnnt_loss_simple(
+            f_enc=enc_out[ordered_src].contiguous(),
+            g_pred=self.predictor(padded_ys)[0].contiguous(),
+            labels=unique_samples,
+            lf=expand_lx,
+            ll=lsamples,
             reduction='none'
         )
 
-        with torch.no_grad():
-            # denominator
-            ## sample from enc_out
-            unique_samples, lsamples,  inverse, ordered = self._IS(enc_out, lx)
-            squeeze_ratio = 1 - ordered.size(0) / N / K
-
-            padded_ys = self._pad(unique_samples)
-            ## <s> A B C -> A B C <s>
-            dummy_targets = torch.roll(padded_ys, -1, dims=1)
-
-            ## piror(y): (N', )
-            if self.attach['lm'] is None:
-                prior_ys = 0.
-            else:
-                prior_ys = score_prior(
-                    self.attach['lm'],
-                    padded_ys,
-                    dummy_targets,
-                    lsamples+1
-                ) * self.weights['lm_weight']
-
-            ## calculate log score_rnnt
-            ## score_rnnt: (N', )
-            with torch.enable_grad():
-                ordered_src = torch.div(ordered, K, rounding_mode='floor')
-                expand_enc_out = enc_out[ordered_src].contiguous()
-                expand_lx = lx[ordered_src]
-
-                ## calculate log P_ctc
-                score_ctc = -self._ctc(
-                    expand_enc_out.detach().log_softmax(dim=-1).transpose(0, 1),
-                    unique_samples.to(device='cpu'),
-                    expand_lx, lsamples
-                )
-
-                score_rnnt = -rnnt_loss_simple(
-                    f_enc=expand_enc_out,
-                    g_pred=self.predictor(padded_ys)[0],
-                    labels=unique_samples,
-                    lf=expand_lx,
-                    ll=lsamples,
-                    reduction='none'
-                )
-
-            ## w_hat = log(w_i): (N', ) -> (N, K)
-            w_hat = torch.gather(
-                score_rnnt + prior_ys -
-                score_ctc, dim=0, index=inverse
-            ).view(N, K)
+        ## w_hat = log(w_i): (N', ) -> (N, K)
+        w_hat = torch.gather(
+            score_rnnt.detach() + prior_ys -
+            score_ctc, dim=0, index=inverse
+        ).view(N, K)
 
         score_rnnt = torch.gather(
             score_rnnt, dim=0, index=inverse).view(N, K)
 
         den = (torch.softmax(w_hat, dim=1) * score_rnnt).sum(dim=1)
 
-        return ((1+self.weights['num_weight'])*num + den).mean(dim=0), squeeze_ratio, num
+        return (1+self.weights['num_weight'])*num + den.mean(dim=0) + num_ctc, squeeze_ratio, num, num_ctc
 
 
 def custom_hook(manager, model, args, n_step, nnforward_args):
 
-    loss, squeeze_ratio, numerator_loss = model(*nnforward_args)
+    loss, squeeze_ratio, numerator_loss, aux_ctc_loss = model(*nnforward_args)
 
     fold = args.grad_accum_fold
     if args.rank == 0 and n_step % fold == 0:
         manager.writer.add_scalar(
             'sample/squeeze-ratio', squeeze_ratio, manager.step)
         manager.writer.add_scalar(
-            'loss/numerator', numerator_loss.detach().mean(dim=0).item(), manager.step)
-
+            'loss/numerator', float(numerator_loss), manager.step)
+        manager.writer.add_scalar(
+            'loss/aux-ctc-loss', float(aux_ctc_loss), manager.step)
     return loss
 
 

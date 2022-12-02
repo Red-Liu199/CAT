@@ -57,6 +57,7 @@ cd $KALDI_ROOT/egs/wsj/s5 && . ./path.sh
 mkdir -p $feat_dir
 for dir in $data_dir; do
     if [ ! -f $dir/.feats.done ]; then
+        utils/fix_data_dir.sh $dir
         steps/make_fbank.sh --cmd run.pl --nj $nj \
             --fbank-config $fbank_conf \
             $dir \
@@ -68,8 +69,6 @@ for dir in $data_dir; do
         echo "Found previous features, if you want to re-compute anyway,"
         echo "... remove the '$dir/.feats.done' then re-run this script."
     fi
-
-    utils/fix_data_dir.sh $dir
 
     if [ $not_apply_cmvn == "False" ]; then
         if [ -f $dir/feats_cmvn.scp ]; then
