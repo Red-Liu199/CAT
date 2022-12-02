@@ -71,8 +71,8 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
             'train/zeta_25'
         ]
     evaluate_func = evaluate_nce if mode=='dnce' and model_type=='TRFLM' else evaluate
-    manager_cls = TRFLMTrainer if model_type=='TRFLM' else Manager
-    train_func = custom_train if model_type =='TRFLM' else origin_train
+    manager_cls = TRFManager if model_type=='TRFLM' and 'scheduler_noise' in configures else Manager
+    train_func = custom_train if model_type =='TRFLM' and 'scheduler_noise' in configures else origin_train
     manager = manager_cls(
         CorpusDataset,
         sortedPadCollateLM(flatten_target=False),

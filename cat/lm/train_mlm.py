@@ -56,8 +56,8 @@ class LMTrainer(nn.Module):
         self.lm = lm 
 
     def forward(self, inputs: torch.FloatTensor, targets: torch.LongTensor, input_lengths: torch.LongTensor, *args, **kwargs) -> torch.FloatTensor:
-        loss = self.lm(inputs, targets, input_lengths)
-        return loss
+        outputs = self.lm(inputs, targets, input_lengths)
+        return outputs.loss
 
 
 # NOTE:

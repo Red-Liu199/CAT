@@ -493,13 +493,39 @@ class PretrainedMLM(nn.Module):
             padding_mask = torch.arange(inputs.size(1), device=inputs.device)[
                 None, :] < input_lengths[:, None].to(inputs.device)
             padding_mask = padding_mask.to(torch.float)
-        outputs = self.model(
-            input_ids = inputs,
-            attention_mask = padding_mask,
-            labels = labels,
-            return_dict = True
-        )
-        return outputs.loss
+        if labels is None:
+            outputs = self.model(
+                input_ids = inputs,
+                attention_mask = padding_mask,
+                return_dict = True
+            )
+        else:
+            outputs = self.model(
+                input_ids = inputs,
+                attention_mask = padding_mask,
+                labels = labels,
+                return_dict = True
+            )
+        return outputs
+    
+    def score(self, input_ids: torch.LongTensor, targets: torch.LongTensor, input_lengths: Optional[torch.LongTensor] = None, *args):
+        if input_ids[0][0]==0 and input_ids[0][1]==101: 
+            input_ids = input_ids[:, 1:] # delete 0 in the head
+            targets = targets[:, 1:]
+            input_lengths -= 1
+        energy = input_ids.new_zeros(input_ids.shape)
+        for t in range(1, input_ids.shape[1]):
+            masked_inputs = input_ids.clone()
+            masked_inputs[:, t] = 103*torch.ones([input_ids.shape[0]], device=input_ids.device, dtype=torch.long)
+            outputs = self.forward(masked_inputs, labels=None, input_lengths=input_lengths)
+            assert 'logits' in outputs, 'The output has no attribute logits'
+            logit = outputs.logits[:, t, :] # (B, V)
+            energy[:, t] = -logit.gather(index=input_ids[:, t].unsqueeze(1), dim=-1).squeeze() # (B,T)
+        padding_mask = torch.arange(input_ids.size(1), device=input_ids.device)[
+            None, :] < input_lengths[:, None].to(input_ids.device)
+        energy = (energy*padding_mask).sum(-1) # (B,)
+        return -energy
+        
 
 
 class NGram(AbsDecoder):

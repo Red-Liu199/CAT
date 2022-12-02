@@ -475,14 +475,18 @@ class TRFLM(AbsDecoder):
             # mask each token and obtain its logit on the original token
             # then sum all mask logits. (only for bert with LM head)
             # This energy function is more time-consuming than others
-            energy = 0
+            energy = inputs.new_zeros(inputs.shape)
             for t in range(1, inputs.shape[1]):
                 masked_inputs = inputs.clone()
                 masked_inputs[:, t] = 103*torch.ones([inputs.shape[0]], device=inputs.device, dtype=torch.long)
                 outputs = self.udlying_nn(masked_inputs, input_lengths=input_lengths)
                 assert 'logits' in outputs, 'The output has no attribute logits'
                 logit = outputs.logits[:, t, :] # (B, V)
-                energy += -logit.gather(index=inputs[:, t].unsqueeze(1), dim=-1).squeeze() #(B,)
+                energy[:, t] = -logit.gather(index=inputs[:, t].unsqueeze(1), dim=-1).squeeze() #(B,)
+                # energy += -logit.gather(index=inputs[:, t].unsqueeze(1), dim=-1).squeeze() #(B,)
+            padding_mask = torch.arange(inputs.size(1), device=inputs.device)[
+                None, :] < input_lengths[:, None].to(inputs.device)
+            energy = (energy*padding_mask).sum(-1) # (B,)
         elif self.energy_func=='sumtokenlogit':
             outputs = self.udlying_nn(inputs, input_lengths=input_lengths)
             assert 'logits' in outputs, 'The output has no attribute logits'
@@ -726,6 +730,8 @@ class EBM(AbsDecoder):
         check_trf_model: str =None, # load energy model from this checkpoint if its not None
         check_noise_model: str = None, # load noise model from this checkpoint if its not None
         linear_scale: float = 1, # only used for hidden2scalar energy function, we need a scale to match the energy and log pn
+        zeta_factor: float = 0,
+        greedy_sampling: bool = False,
         tokenizer_path: str = None,
         bert_tokenizer: bool = False # the data is encoded by bert tokenizer, with [CLS] in the head and [SEP] in the tail
         ):
@@ -739,6 +745,8 @@ class EBM(AbsDecoder):
         self.bert_tokenizer = bert_tokenizer
         self.method = method
         self.linear_scale = linear_scale
+        self.zeta_factor = zeta_factor
+        self.greedy_sampling = greedy_sampling
 
         # initialize trf and noise model
         noise_config = coreutils.readjson(config_noise_model)
@@ -777,6 +785,9 @@ class EBM(AbsDecoder):
         if 'hidden2scalar' in self.energy_func:
             hidden_size = self.udlying_nn.config.hidden_size if hasattr(self.udlying_nn, 'config') else self.udlying_nn.dim_hid
             self.energy_lin = nn.Linear(in_features=hidden_size, out_features=1)
+            with torch.no_grad():
+                for params in self.energy_lin.parameters():
+                    params *= self.linear_scale
             if self.energy_func=='hidden2scalar-sum' and hasattr(self.udlying_nn, 'model') and hasattr(self.udlying_nn.model, 'pooler'):
                 self.udlying_nn.model.pooler = None
 
@@ -835,7 +846,10 @@ class EBM(AbsDecoder):
                     noise_out, cache = self.noise_module[0](src_ids=noise_next, cache=cache, input_lengths=ones)
                 noise_out = noise_out[:, -1, :] # (B,V)
                 noise_distribution = F.softmax(noise_out, dim=-1)
-                noise_next = torch.multinomial(noise_distribution, 1, True) # (B, 1)
+                if self.greedy_sampling:
+                    noise_next = noise_distribution.argmax(-1).unsqueeze(-1)
+                else:
+                    noise_next = torch.multinomial(noise_distribution, 1, True) # (B, 1)
                 noise[:, i+1] = noise_next.squeeze(1)
                 lennoise += ones*(~is_end)
                 is_end |= (noise_next.squeeze(-1)==end_mark)
@@ -857,7 +871,7 @@ class EBM(AbsDecoder):
         if targets.dim() == 2:
             targets = targets.unsqueeze(2)
 
-        log_pm = -energy_values
+        log_pm = -energy_values+self.zeta_factor*in_lens
         log_pn = self.noisem_score(inputs, in_lens, targets)
         # ppl_data = torch.exp(-log_pm.sum()/in_lens.sum())
         with torch.no_grad():
@@ -905,13 +919,13 @@ class EBM(AbsDecoder):
                 padding_mask = torch.arange(inputs.size(1), device=inputs.device)[
                     None, :] < input_lengths[:, None].to(inputs.device)
                 energy = self.energy_lin(hiddens).squeeze(-1) # (B, T)
-                energy = self.linear_scale*(energy*padding_mask).sum(-1) # (B, )
+                energy = (energy*padding_mask).sum(-1) # (B, )
 
             else: # default: use the hidden state of [CLS] to represent the sentence hidden
                 outputs = self.udlying_nn(inputs, input_lengths=input_lengths)
                 assert 'pooler_output' in outputs, 'The outputs has no attribute pooler_output'
                 hidden = outputs.pooler_output # (B,H)
-                energy = self.linear_scale*self.energy_lin(hidden).squeeze(-1) # (B,)
+                energy = self.energy_lin(hidden).squeeze(-1) # (B,)
 
         elif self.energy_func=='logsumexplogit':
             outputs = self.udlying_nn(inputs, input_lengths=input_lengths)
@@ -927,14 +941,18 @@ class EBM(AbsDecoder):
             # mask each token and obtain its logit on the original token
             # then sum all mask logits. (only for bert with LM head)
             # This energy function is more time-consuming than others
-            energy = 0
+            energy = inputs.new_zeros(inputs.shape)
             for t in range(1, inputs.shape[1]):
                 masked_inputs = inputs.clone()
                 masked_inputs[:, t] = 103*torch.ones([inputs.shape[0]], device=inputs.device, dtype=torch.long)
                 outputs = self.udlying_nn(masked_inputs, input_lengths=input_lengths)
                 assert 'logits' in outputs, 'The output has no attribute logits'
                 logit = outputs.logits[:, t, :] # (B, V)
-                energy += -logit.gather(index=inputs[:, t].unsqueeze(1), dim=-1).squeeze() #(B,)
+                energy[:, t] = -logit.gather(index=inputs[:, t].unsqueeze(1), dim=-1).squeeze() #(B,)
+                # energy += -logit.gather(index=inputs[:, t].unsqueeze(1), dim=-1).squeeze() #(B,)
+            padding_mask = torch.arange(inputs.size(1), device=inputs.device)[
+                None, :] < input_lengths[:, None].to(inputs.device)
+            energy = (energy*padding_mask).sum(-1) # (B,)
         elif self.energy_func=='sumtokenlogit':
             outputs = self.udlying_nn(inputs, input_lengths=input_lengths)
             assert 'logits' in outputs, 'The output has no attribute logits'
