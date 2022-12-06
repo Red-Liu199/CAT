@@ -1,0 +1,31 @@
+{
+    "decoder": {
+        "type": "EBM",
+        "kwargs": {
+            "noise_rate": 1,
+            "method": "nce",
+            "energy_func": "hidden2scalar-sum",
+            "config_trf_model": "exp/ebm/config_ebm.json",
+            "config_noise_model": "exp/ebm/config_noise.json",
+            "check_noise_model": "exp/pretrained_lm/check/best-2.pt",
+            "tokenizer_path": "exp/ebm/tokenizer.tknz",
+            "bert_tokenizer": true
+        }
+    },
+    "scheduler": {
+        "type": "SchedulerNoam",
+        "kwargs": {
+            "dim_model": 768,
+            "peak_factor": 0.45,
+            "warmup_step": 5000,
+            "stop_step": 2000
+        },
+        "optimizer": {
+            "type": "Adam",
+            "zeroredundancy": true,
+            "kwargs": {
+                "lr": 0.001
+            }
+        }
+    }
+}

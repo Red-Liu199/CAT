@@ -408,7 +408,7 @@ class TRFLM(AbsDecoder):
                     # "train/acc_data_sample": acc_data_sample.detach(),
                     # "train/acc_data_noise": acc_data_noise.detach(),
                     'train/acc_noise': acc_noise.detach(),
-                    'train/ppl_trfM_data': ppl_data.detach(),
+                    'train/ppl_data': ppl_data.detach(),
                     'train/ppl_trfM_noise': ppl_noise.detach(),
                     'train/ppl_noiseM_data': ppl_data_onnoise.detach(),
                     'train/ppl_noiseM_noise': ppl_noise_onnoise.detach(),
@@ -730,6 +730,7 @@ class EBM(AbsDecoder):
         check_trf_model: str =None, # load energy model from this checkpoint if its not None
         check_noise_model: str = None, # load noise model from this checkpoint if its not None
         linear_scale: float = 1, # only used for hidden2scalar energy function, we need a scale to match the energy and log pn
+        noise_score: bool =False,
         zeta_factor: float = 0,
         greedy_sampling: bool = False,
         tokenizer_path: str = None,
@@ -747,6 +748,7 @@ class EBM(AbsDecoder):
         self.linear_scale = linear_scale
         self.zeta_factor = zeta_factor
         self.greedy_sampling = greedy_sampling
+        self.noise_score = noise_score
 
         # initialize trf and noise model
         noise_config = coreutils.readjson(config_noise_model)
@@ -819,8 +821,12 @@ class EBM(AbsDecoder):
             input_ids = input_ids[:, 1:] # delete 0 in the head
             targets = targets[:, 1:]
             in_lens -= 1
-        energy = self.calculate_energy(input_ids, targets, in_lens)
-        return -energy
+        if self.noise_score:
+            score = self.noisem_score(input_ids, in_lens, targets)
+        else:
+            energy = self.calculate_energy(input_ids, targets, in_lens)
+            score = -energy
+        return score
     
     def getnoise(self, noise_num, maxlennoise=40):
         with torch.no_grad():
@@ -872,17 +878,21 @@ class EBM(AbsDecoder):
             targets = targets.unsqueeze(2)
 
         log_pm = -energy_values+self.zeta_factor*in_lens
+        ppl_data = torch.exp(-log_pm.sum()/in_lens.sum())
         log_pn = self.noisem_score(inputs, in_lens, targets)
         # ppl_data = torch.exp(-log_pm.sum()/in_lens.sum())
         with torch.no_grad():
             p1 = torch.sigmoid(math.log(self.noise_rate)- log_pm + log_pn)
         loss_data = -(p1*log_pm).mean(dim=0)
+        loss_data_true = -torch.mean(torch.log(1-p1+self.episilon))
+        
         seqs, seqlens, seqtars = self.getnoise(noise_sample_num)
         log_pm_noise = -self.calculate_energy(seqs, seqtars, seqlens)
         log_pn_noise = self.noisem_score(seqs, seqlens, seqtars)
         with torch.no_grad():
             p0 = torch.sigmoid(-math.log(self.noise_rate) + log_pm_noise - log_pn_noise)
         loss_noise = self.noise_rate*(p0*log_pm_noise).mean(dim=0)
+        loss_noise_true = -self.noise_rate*torch.mean(torch.log(1-p0+self.episilon))
         acc_data = (p1.data < 0.5).sum()/data_sample_num
         acc_noise = (p0.data < 0.5).sum()/noise_sample_num
         loss_noisem_ml = -log_pn.sum()/in_lens.sum() if self.method=='dnce' else 0
@@ -892,7 +902,9 @@ class EBM(AbsDecoder):
                 'train/loss_data': loss_data.detach(),
                 'train/loss_noise': loss_noise.detach(),
                 'train/acc_data': acc_data.detach(),
-                'train/acc_noise': acc_noise.detach()
+                'train/acc_noise': acc_noise.detach(),
+                'train/loss_true': (loss_data_true+loss_noise_true).detach(),
+                'train/ppl_data': ppl_data.detach()
             }
 
     

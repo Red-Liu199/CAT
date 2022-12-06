@@ -17,7 +17,8 @@ from ...shared.manager import (
     train_ebm as origin_train_func,
     train_trf as default_train_func,
     evaluate,
-    evaluate_nce
+    evaluate_trf,
+    evaluate_ebm
 )
 from ...shared.data import (
     CorpusDataset,
@@ -52,25 +53,26 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         'train/loss_data',
         'train/loss_noise',
         'train/acc_data',
-        'train/acc_noise'
+        'train/acc_noise',
+        'train/ppl_data',
+        'train/loss_true',
+        'dev/ppl'
     ]
     if mode == 'dnce' and model_type=='TRFLM':
         extra_tracks += [
-            'train/ppl_trfM_data',
             'train/ppl_trfM_noise',
             'train/ppl_noiseM_data',
             'train/ppl_noiseM_noise',
             'train/loss_noise_kl',
             'train/loss_data_true',
             'train/loss_noise_true',
-            'train/loss_true',
-            'dev/ppl_trf',
+            'dev/ppl',
             'dev/ppl_noise',
             'train/zeta_5',
             'train/zeta_15',
             'train/zeta_25'
         ]
-    evaluate_func = evaluate_nce if mode=='dnce' and model_type=='TRFLM' else evaluate
+    evaluate_func = evaluate_trf if mode=='dnce' and model_type=='TRFLM' else evaluate_ebm
     manager_cls = TRFManager if model_type=='TRFLM' and 'scheduler_noise' in configures else Manager
     train_func = custom_train if model_type =='TRFLM' and 'scheduler_noise' in configures else origin_train
     manager = manager_cls(

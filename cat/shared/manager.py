@@ -997,7 +997,7 @@ def evaluate(testloader: DataLoader, args: argparse.Namespace, manager: Manager)
     return avg_loss
 
 @torch.no_grad()
-def evaluate_nce(testloader: DataLoader, args: argparse.Namespace, manager: Manager) -> float:
+def evaluate_trf(testloader: DataLoader, args: argparse.Namespace, manager: Manager) -> float:
     
     model = manager.model
     cnt_seq = 0
@@ -1036,10 +1036,48 @@ def evaluate_nce(testloader: DataLoader, args: argparse.Namespace, manager: Mana
     if args.rank == 0:
         manager.writer.add_scalar('loss/dev', avg_loss, manager.step)
         manager.monitor.update(monitor_anno['dev-metric'], (avg_loss, manager.step))
-        manager.monitor.update('dev/ppl_trf', (PPL_trf, manager.step))
+        manager.monitor.update('dev/ppl', (PPL_trf, manager.step))
         manager.monitor.update('dev/ppl_noise', (PPL_noise, manager.step))
     return avg_loss
 
+@torch.no_grad()
+def evaluate_ebm(testloader: DataLoader, args: argparse.Namespace, manager: Manager) -> float:
+    
+    model = manager.model
+    cnt_seq = 0
+    total_loss = 0.
+    total_tokens = 0
+    avg_ppl = 0
+    for i, minibatch in tqdm(enumerate(testloader), desc=f'Epoch: {manager.epoch} | eval',
+                             unit='batch', total=len(testloader), disable=(args.gpu != 0), leave=False):
+
+        feats, ilens, labels, olens = minibatch
+        feats = feats.cuda(args.gpu, non_blocking=True)
+
+        '''
+        Suppose the loss is reduced by mean
+        '''
+        loss, _, metrics = model(feats, labels, ilens, olens)
+
+        cnt_seq += feats.size(0)
+        total_tokens += ilens.sum()
+        total_loss += metrics['train/loss_true'] * feats.size(0)
+        avg_ppl += metrics['train/ppl_data']
+
+    cnt_seq = total_loss.new_tensor(cnt_seq)
+
+    # sync info for loggin and further state control
+    # NOTE: this sync is required.
+    dist.all_reduce(total_loss, dist.ReduceOp.SUM)
+    dist.all_reduce(cnt_seq, dist.ReduceOp.SUM)
+    avg_loss = (total_loss/cnt_seq).item()
+    avg_ppl = (avg_ppl/len(testloader)).item()
+
+    if args.rank == 0:
+        manager.writer.add_scalar('loss/dev', avg_loss, manager.step)
+        manager.monitor.update(monitor_anno['dev-metric'], (avg_loss, manager.step))
+        manager.monitor.update('dev/ppl', (avg_ppl, manager.step))
+    return avg_loss
 
 def train_trf(trainloader: ReadBatchDataLoader, args: argparse.Namespace, manager: Manager, hook_func: Callable = None):
     """
