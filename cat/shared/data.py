@@ -110,6 +110,9 @@ class IndexMappingDataset(AbsDataset):
             '''
             x = self[i][0]
             _ls[i] = x.size(0)
+
+        self.dataset.close()
+        self.dataset = None
         return _ls
 
     def __len__(self) -> int:
