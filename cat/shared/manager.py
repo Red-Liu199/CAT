@@ -132,7 +132,7 @@ class Manager(object):
             train_sampler = None
         else:
             tr_set = Dataset(args.trset)
-            if args.dynamic_batch_mode != -1 and world_size > 1:
+            if args.dynamic_batch_mode != -1:
                 coreutils.distprint(
                     "> enable dynamic batching", args.gpu)
                 if args.dynamic_batch_mode == 0 and args.grad_accum_fold > 1:

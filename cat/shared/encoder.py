@@ -385,3 +385,32 @@ class Wav2Vec2Encoder(AbsEncoder):
         if self._wav2vec2_encoder is not None:
             x = self._wav2vec2_encoder(x, xlens)
         return self._enc_head(x, xlens)
+
+
+class EmbeddingEncoder(AbsEncoder):
+    def __init__(
+            self,
+            edim: int,
+            num_classes: int,
+            enc_head_type: str = 'ConformerNet', 
+            **enc_head_kwargs) -> None:
+        """
+        enc_head_type (str): any of the AbsEncoder class
+        enc_head_kwargs : options passed to enc_head_type()
+
+        dataflow in forward:
+            x -> embedding -> enc_head -> out
+        """
+        super().__init__(False)
+
+        assert enc_head_type.isidentifier(), "invalid type"
+
+        self.embedding = nn.Embedding(num_classes, edim)
+        T_enc = eval(enc_head_type)
+        assert issubclass(T_enc, AbsEncoder)
+        self._enc_head = T_enc(num_classes=num_classes,
+                               **enc_head_kwargs)   # type: AbsEncoder
+
+    def forward(self, x: torch.Tensor, xlens: torch.Tensor):
+        x_emb = self.embedding(x)
+        return self._enc_head(x_emb, xlens)

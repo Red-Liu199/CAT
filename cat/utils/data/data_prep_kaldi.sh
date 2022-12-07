@@ -91,7 +91,7 @@ for dir in $data_dir; do
                 $feat_dir/cmvn ||
                 exit 1
 
-            copy-feats --compress=true \
+            copy-feats \
                 "ark,s,cs:apply-cmvn --norm-vars=true --utt2spk=ark:$dir/utt2spk \
                 scp:$dir/cmvn.scp scp:$dir/feats_orin.scp ark:- |" \
                 "ark,scp:$dir/applied_cmvn.ark,$dir/feats_cmvn.scp"
