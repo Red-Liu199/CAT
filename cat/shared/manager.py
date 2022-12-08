@@ -613,7 +613,7 @@ def evaluate(testloader: DataLoader, args: argparse.Namespace, manager: Manager)
     if args.batch_size == -1:
         est_len = None
     else:
-        est_len = len(testloader) // args.batch_size
+        est_len = len(testloader) // args.batch_size * args.world_size
 
     for i, minibatch in tqdm(
             enumerate(testloader), desc=f'Epoch: {manager.epoch} | eval',
