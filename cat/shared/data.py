@@ -534,6 +534,7 @@ class Grouper:
     def __init__(self, rank: int, n_procs: int, linfo: List[int] = None, dispatch_even: bool = False) -> None:
         self.weight = linfo
         self.rank = rank
+        self.offset = rank
         self.num_procs = n_procs
         self.dispatch_even = dispatch_even
         self._bsinfo = Queue(maxsize=4096)
@@ -541,14 +542,15 @@ class Grouper:
     def _call_group(self, indices: List[int]):
         self._bsinfo.put(len(indices))
         if self.dispatch_even:
+            return indices[self.rank:len(indices):self.num_procs]
+        else:
+            self.offset = (self.offset+1) % self.num_procs
             g_sorted = sorted(list(zip(
                 indices,
-                [self.weight[i]for i in indices]
+                [self.weight[i] for i in indices]
             )), key=lambda x: x[1], reverse=True)
             return coreutils.weighted_group(
-                g_sorted, self.num_procs)[self.rank]
-        else:
-            return indices[self.rank:len(indices):self.num_procs]
+                g_sorted, self.num_procs)[self.offset]
 
 
 class BatchGrouper(Grouper):
