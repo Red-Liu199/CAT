@@ -452,6 +452,8 @@ class BatchDistSampler(DistributedSampler):
                  drop_last: bool = False) -> None:
         super().__init__(dataset, num_replicas=num_replicas, rank=rank,
                          shuffle=shuffle, seed=seed, drop_last=drop_last)
+        if self.num_replicas == 1:
+            dispatch_even = True
 
         if not (dispatch_even and mode == 'batch'):
             # get length info

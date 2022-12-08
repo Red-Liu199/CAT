@@ -610,9 +610,14 @@ def evaluate(testloader: DataLoader, args: argparse.Namespace, manager: Manager)
     model = manager.model
     cnt_seq = 0
     total_loss = 0.
+    if args.batch_size == -1:
+        est_len = None
+    else:
+        est_len = len(testloader) // args.batch_size
 
-    for i, minibatch in tqdm(enumerate(testloader), desc=f'Epoch: {manager.epoch} | eval',
-                             unit='batch', total=len(testloader), disable=(args.gpu != 0), leave=False):
+    for i, minibatch in tqdm(
+            enumerate(testloader), desc=f'Epoch: {manager.epoch} | eval',
+            unit='batch', total=est_len, disable=(args.gpu != 0), leave=False):
 
         feats, ilens, labels, olens = minibatch
         feats = feats.cuda(args.gpu, non_blocking=True)
