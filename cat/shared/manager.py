@@ -14,7 +14,7 @@ from ._constants import (
     F_TRAINING_INFO
 )
 from .data import (
-    DynamicBatchDistSampler,
+    BatchDistSampler,
     ReadBatchDataLoader,
     PipeTokenize
 )
@@ -65,7 +65,8 @@ class Manager(object):
         super().__init__()
 
         coreutils.check_parser(args, [
-            'rank', 'gpu', 'workers', 'trset', 'devset', 'dynamic_batch_mode',
+            'rank', 'gpu', 'workers', 'trset', 'devset',
+            'batching_mode', 'batching_uneven_dispatch',
             'batch_size', 'grad_accum_fold', 'config', 'dir', 'debug',
             '_logdir', '_checkdir', 'resume', 'init_model'
         ])
@@ -75,12 +76,17 @@ class Manager(object):
 
         setattr(args, 'n_steps', 0)
         world_size = dist.get_world_size()
+        if args.batching_mode == 'batch' and (not args.batching_uneven_dispatch):
+            args.batch_size = (args.batch_size//world_size) * world_size
+
         if args.large_dataset:
             assert args.tokenizer is not None, f"--tokenizer is required for --large-dataset"
             assert os.path.isfile(args.tokenizer), \
                 f"--tokenizer={args.tokenizer} is not a valid file."
-            # large dataset doesnot support dynamic batching
-            args.dynamic_batch_mode = -1
+            # large dataset doesnot support dynamic dispatching
+            args.batching_uneven_dispatch = False
+            args.batching_mode = 'batch'
+            args.batch_size = (args.batch_size//world_size) * world_size
 
             '''
             NOTE (Huahuan):
@@ -129,60 +135,56 @@ class Manager(object):
                 tr_set, num_workers=1, shuffle=False,
                 # batching is done by webdataset
                 batch_size=None)
-            train_sampler = None
-        else:
-            tr_set = Dataset(args.trset)
-            if args.dynamic_batch_mode != -1:
-                coreutils.distprint(
-                    "> enable dynamic batching", args.gpu)
-                if args.dynamic_batch_mode == 0 and args.grad_accum_fold > 1:
-                    """
-                    NOTE (huahuan): with dynamic batching, in batch mode, at each update, the global
-                    ... batch size (g_bs) is always `args.batch_size`. However, with bucket mode,
-                    ... the g_bs could be different at steps, so the
-                    ... grad_accum_fold would introduce grad bias. I think this won't
-                    ... affect much, because the g_bs would only vary in a small range.
-                    ... That's why here is a WARNING instead of an ERROR.
-                    """
-                    coreutils.distprint(
-                        "warning: bucket dynamic batching with --grad_accum_fold > 1 "
-                        "would probably produce inconsistent results.",
-                        args.gpu
-                    )
-                train_sampler = DynamicBatchDistSampler(
-                    dataset=tr_set,
-                    mode=['bucket', 'batch'][args.dynamic_batch_mode],
-                    global_batch_size=args.batch_size,
-                    max_bucket_size=args.dynamic_bucket_size,
-                    local_rank=args.gpu
-                )
-                trainloader = DataLoader(
-                    tr_set, batch_sampler=train_sampler,
-                    num_workers=args.workers, collate_fn=collate_fn,
-                    prefetch_factor=4, persistent_workers=True
-                )
-            else:
-                args.dynamic_batch_mode = -1
-                train_sampler = DistributedSampler(tr_set)
-                trainloader = DataLoader(
-                    tr_set, batch_size=args.batch_size//world_size,
-                    num_workers=args.workers, sampler=train_sampler, collate_fn=collate_fn,
-                    prefetch_factor=4, persistent_workers=True)
-
-        if args.dynamic_batch_mode == -1:
-            args.batch_size = (args.batch_size // world_size) * world_size
+            tr_sampler = None
             trainloader = ReadBatchDataLoader(trainloader, bs=args.batch_size)
         else:
-            trainloader = ReadBatchDataLoader(trainloader, dynamic=True)
+            tr_set = Dataset(args.trset)
+            if args.batching_mode == 'bucket' and args.grad_accum_fold > 1:
+                """
+                NOTE (huahuan): with dynamic batching, in batch mode, at each update, the global
+                ... batch size (g_bs) is always `args.batch_size`. However, with bucket mode,
+                ... the g_bs could be different at steps, so the
+                ... grad_accum_fold would introduce grad bias. I think this won't
+                ... affect much, because the g_bs would only vary in a small range.
+                ... That's why here is a WARNING instead of an ERROR.
+                """
+                coreutils.distprint(
+                    "warning: bucket dynamic batching with --grad_accum_fold > 1 "
+                    "would probably produce inconsistent results.",
+                    args.gpu
+                )
 
-        val_sampler = DistributedSampler(val_set, shuffle=False)
+            tr_sampler = BatchDistSampler(
+                dataset=tr_set,
+                mode=args.batching_mode,
+                dispatch_even=(not args.batching_uneven_dispatch),
+                global_batch_size=args.batch_size,
+                max_bucket_size=args.bucket_size,
+                local_rank=args.gpu
+            )
+            trainloader = DataLoader(
+                tr_set, batch_sampler=tr_sampler,
+                num_workers=args.workers, collate_fn=collate_fn,
+                prefetch_factor=4, persistent_workers=True
+            )
+            trainloader = ReadBatchDataLoader(trainloader)
+
+        val_sampler = BatchDistSampler(
+            dataset=val_set,
+            mode=args.batching_mode,
+            dispatch_even=(not args.batching_uneven_dispatch),
+            global_batch_size=args.batch_size,
+            max_bucket_size=args.bucket_size,
+            local_rank=args.gpu,
+            shuffle=False
+        )
+        # NOTE: global batch size info is not required for evaluation.
         valloader = DataLoader(
-            val_set, batch_size=args.batch_size//world_size, shuffle=False,
-            num_workers=args.workers, sampler=val_sampler,
-            collate_fn=collate_fn, persistent_workers=True
+            val_set, batch_sampler=val_sampler,
+            num_workers=args.workers, collate_fn=collate_fn, persistent_workers=True
         )
 
-        self.train_sampler = train_sampler
+        self.train_sampler = tr_sampler
         self.trainloader = trainloader
         self.valloader = valloader
 
@@ -618,12 +620,13 @@ def evaluate(testloader: DataLoader, args: argparse.Namespace, manager: Manager)
         '''
         Suppose the loss is reduced by mean
         '''
-        loss = model(feats, labels, ilens, olens)
+        with autocast(enabled=args.amp):
+            loss = model(feats, labels, ilens, olens)
         if isinstance(loss, tuple):
             loss = loss[0]
 
         cnt_seq += feats.size(0)
-        total_loss += loss * feats.size(0)
+        total_loss += loss.float() * feats.size(0)
 
     cnt_seq = total_loss.new_tensor(cnt_seq)
 

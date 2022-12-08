@@ -509,20 +509,23 @@
                                         "type": "string",
                                         "description": "Directory to save the log and model files."
                                     },
-                                    "dynamic_bucket_size": {
+                                    "bucket_size": {
                                         "type": "number",
-                                        "description": "The approximate maximum bucket size in dynamic_batch_mode=0.",
+                                        "description": "Number of seq lengths in total of a mini-batch, valid in --batching-mode='batch'",
                                         "default": -1
                                     },
-                                    "dynamic_batch_mode": {
-                                        "type": "number",
-                                        "description": "Dynamic batching mode. -1: disable; 0: bucket mode; 1: batch mode. default -1.",
-                                        "default": -1,
+                                    "batching_mode": {
+                                        "type": "string",
+                                        "description": "Batching mode: 'batch' or 'bucker', default: 'batch'",
+                                        "default": "batch",
                                         "examples": [
-                                            -1,
-                                            0,
-                                            1
+                                            "batch",
+                                            "bucket"
                                         ]
+                                    },
+                                    "batching_uneven_dispatch": {
+                                        "description": "Dispatch samples to processors 'smartly' (not always) instead evenly. Default: False",
+                                        "default": false
                                     },
                                     "tokenizer": {
                                         "type": "string",
@@ -646,20 +649,23 @@
                                         "type": "string",
                                         "description": "Directory to save the log and model files."
                                     },
-                                    "dynamic_bucket_size": {
+                                    "bucket_size": {
                                         "type": "number",
-                                        "description": "The approximate maximum bucket size in dynamic_batch_mode=0.",
+                                        "description": "Number of seq lengths in total of a mini-batch, valid in --batching-mode='batch'",
                                         "default": -1
                                     },
-                                    "dynamic_batch_mode": {
-                                        "type": "number",
-                                        "description": "Dynamic batching mode. -1: disable; 0: bucket mode; 1: batch mode. default -1.",
-                                        "default": -1,
+                                    "batching_mode": {
+                                        "type": "string",
+                                        "description": "Batching mode: 'batch' or 'bucker', default: 'batch'",
+                                        "default": "batch",
                                         "examples": [
-                                            -1,
-                                            0,
-                                            1
+                                            "batch",
+                                            "bucket"
                                         ]
+                                    },
+                                    "batching_uneven_dispatch": {
+                                        "description": "Dispatch samples to processors 'smartly' (not always) instead evenly. Default: False",
+                                        "default": false
                                     },
                                     "tokenizer": {
                                         "type": "string",
@@ -783,20 +789,23 @@
                                         "type": "string",
                                         "description": "Directory to save the log and model files."
                                     },
-                                    "dynamic_bucket_size": {
+                                    "bucket_size": {
                                         "type": "number",
-                                        "description": "The approximate maximum bucket size in dynamic_batch_mode=0.",
+                                        "description": "Number of seq lengths in total of a mini-batch, valid in --batching-mode='batch'",
                                         "default": -1
                                     },
-                                    "dynamic_batch_mode": {
-                                        "type": "number",
-                                        "description": "Dynamic batching mode. -1: disable; 0: bucket mode; 1: batch mode. default -1.",
-                                        "default": -1,
+                                    "batching_mode": {
+                                        "type": "string",
+                                        "description": "Batching mode: 'batch' or 'bucker', default: 'batch'",
+                                        "default": "batch",
                                         "examples": [
-                                            -1,
-                                            0,
-                                            1
+                                            "batch",
+                                            "bucket"
                                         ]
+                                    },
+                                    "batching_uneven_dispatch": {
+                                        "description": "Dispatch samples to processors 'smartly' (not always) instead evenly. Default: False",
+                                        "default": false
                                     },
                                     "tokenizer": {
                                         "type": "string",
@@ -920,20 +929,23 @@
                                         "type": "string",
                                         "description": "Directory to save the log and model files."
                                     },
-                                    "dynamic_bucket_size": {
+                                    "bucket_size": {
                                         "type": "number",
-                                        "description": "The approximate maximum bucket size in dynamic_batch_mode=0.",
+                                        "description": "Number of seq lengths in total of a mini-batch, valid in --batching-mode='batch'",
                                         "default": -1
                                     },
-                                    "dynamic_batch_mode": {
-                                        "type": "number",
-                                        "description": "Dynamic batching mode. -1: disable; 0: bucket mode; 1: batch mode. default -1.",
-                                        "default": -1,
+                                    "batching_mode": {
+                                        "type": "string",
+                                        "description": "Batching mode: 'batch' or 'bucker', default: 'batch'",
+                                        "default": "batch",
                                         "examples": [
-                                            -1,
-                                            0,
-                                            1
+                                            "batch",
+                                            "bucket"
                                         ]
+                                    },
+                                    "batching_uneven_dispatch": {
+                                        "description": "Dispatch samples to processors 'smartly' (not always) instead evenly. Default: False",
+                                        "default": false
                                     },
                                     "tokenizer": {
                                         "type": "string",
@@ -1057,20 +1069,23 @@
                                         "type": "string",
                                         "description": "Directory to save the log and model files."
                                     },
-                                    "dynamic_bucket_size": {
+                                    "bucket_size": {
                                         "type": "number",
-                                        "description": "The approximate maximum bucket size in dynamic_batch_mode=0.",
+                                        "description": "Number of seq lengths in total of a mini-batch, valid in --batching-mode='batch'",
                                         "default": -1
                                     },
-                                    "dynamic_batch_mode": {
-                                        "type": "number",
-                                        "description": "Dynamic batching mode. -1: disable; 0: bucket mode; 1: batch mode. default -1.",
-                                        "default": -1,
+                                    "batching_mode": {
+                                        "type": "string",
+                                        "description": "Batching mode: 'batch' or 'bucker', default: 'batch'",
+                                        "default": "batch",
                                         "examples": [
-                                            -1,
-                                            0,
-                                            1
+                                            "batch",
+                                            "bucket"
                                         ]
+                                    },
+                                    "batching_uneven_dispatch": {
+                                        "description": "Dispatch samples to processors 'smartly' (not always) instead evenly. Default: False",
+                                        "default": false
                                     },
                                     "tokenizer": {
                                         "type": "string",
@@ -1194,20 +1209,23 @@
                                         "type": "string",
                                         "description": "Directory to save the log and model files."
                                     },
-                                    "dynamic_bucket_size": {
+                                    "bucket_size": {
                                         "type": "number",
-                                        "description": "The approximate maximum bucket size in dynamic_batch_mode=0.",
+                                        "description": "Number of seq lengths in total of a mini-batch, valid in --batching-mode='batch'",
                                         "default": -1
                                     },
-                                    "dynamic_batch_mode": {
-                                        "type": "number",
-                                        "description": "Dynamic batching mode. -1: disable; 0: bucket mode; 1: batch mode. default -1.",
-                                        "default": -1,
+                                    "batching_mode": {
+                                        "type": "string",
+                                        "description": "Batching mode: 'batch' or 'bucker', default: 'batch'",
+                                        "default": "batch",
                                         "examples": [
-                                            -1,
-                                            0,
-                                            1
+                                            "batch",
+                                            "bucket"
                                         ]
+                                    },
+                                    "batching_uneven_dispatch": {
+                                        "description": "Dispatch samples to processors 'smartly' (not always) instead evenly. Default: False",
+                                        "default": false
                                     },
                                     "tokenizer": {
                                         "type": "string",
@@ -1331,20 +1349,23 @@
                                         "type": "string",
                                         "description": "Directory to save the log and model files."
                                     },
-                                    "dynamic_bucket_size": {
+                                    "bucket_size": {
                                         "type": "number",
-                                        "description": "The approximate maximum bucket size in dynamic_batch_mode=0.",
+                                        "description": "Number of seq lengths in total of a mini-batch, valid in --batching-mode='batch'",
                                         "default": -1
                                     },
-                                    "dynamic_batch_mode": {
-                                        "type": "number",
-                                        "description": "Dynamic batching mode. -1: disable; 0: bucket mode; 1: batch mode. default -1.",
-                                        "default": -1,
+                                    "batching_mode": {
+                                        "type": "string",
+                                        "description": "Batching mode: 'batch' or 'bucker', default: 'batch'",
+                                        "default": "batch",
                                         "examples": [
-                                            -1,
-                                            0,
-                                            1
+                                            "batch",
+                                            "bucket"
                                         ]
+                                    },
+                                    "batching_uneven_dispatch": {
+                                        "description": "Dispatch samples to processors 'smartly' (not always) instead evenly. Default: False",
+                                        "default": false
                                     },
                                     "tokenizer": {
                                         "type": "string",

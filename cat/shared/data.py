@@ -437,10 +437,11 @@ class sortedScpPadCollate():
         return keys, mats, lengths
 
 
-class DynamicBatchDistSampler(DistributedSampler):
+class BatchDistSampler(DistributedSampler):
     def __init__(self,
                  dataset: AbsDataset,
-                 mode: Literal['bucket', 'batch'],
+                 mode: Literal['bucket', 'batch'] = 'batch',
+                 dispatch_even: bool = False,
                  global_batch_size: int = -1,
                  max_bucket_size: int = -1,
                  num_replicas: Optional[int] = None,
@@ -452,21 +453,23 @@ class DynamicBatchDistSampler(DistributedSampler):
         super().__init__(dataset, num_replicas=num_replicas, rank=rank,
                          shuffle=shuffle, seed=seed, drop_last=drop_last)
 
-        if not hasattr(dataset, 'get_seq_len'):
-            raise RuntimeError(
-                f"{type(dataset)} has not implement get_seq_len(), "
-                f"which is required for {self.__class__.__name__}.")
+        if not (dispatch_even and mode == 'batch'):
+            # get length info
+            if not hasattr(dataset, 'get_seq_len'):
+                raise RuntimeError(
+                    f"{type(dataset)} has not implement get_seq_len(), "
+                    f"which is required for {self.__class__.__name__}.")
 
-        # scan data length, this might take a while
-        if local_rank is None:
-            # using 1 node
-            local_rank = self.rank
+            # scan data length, this might take a while
+            if local_rank is None:
+                # using 1 node
+                local_rank = self.rank
 
-        if local_rank == 0:
-            # save length info into cache file
-            dataset.get_seq_len()
+            if local_rank == 0:
+                # save length info into cache file
+                dataset.get_seq_len()
 
-        dist.barrier()
+            dist.barrier()
 
         if mode == 'bucket':
             if max_bucket_size == -1:
@@ -480,7 +483,8 @@ class DynamicBatchDistSampler(DistributedSampler):
                 max_bucket_size=max_bucket_size,
                 rank=self.rank,
                 n_procs=self.num_replicas,
-                linfo=dataset.get_seq_len()
+                linfo=dataset.get_seq_len(),
+                dispatch_even=dispatch_even
             )
         elif mode == 'batch':
             assert global_batch_size > 0 and \
@@ -491,7 +495,8 @@ class DynamicBatchDistSampler(DistributedSampler):
                 g_batchsize=global_batch_size,
                 rank=self.rank,
                 n_procs=self.num_replicas,
-                linfo=dataset.get_seq_len()
+                linfo=(None if dispatch_even else dataset.get_seq_len()),
+                dispatch_even=dispatch_even
             )
         else:
             raise ValueError(
@@ -526,25 +531,29 @@ class DynamicBatchDistSampler(DistributedSampler):
 
 
 class Grouper:
-    def __init__(self, rank: int, n_procs: int, linfo: List[int]) -> None:
+    def __init__(self, rank: int, n_procs: int, linfo: List[int] = None, dispatch_even: bool = False) -> None:
         self.weight = linfo
         self.rank = rank
         self.num_procs = n_procs
+        self.dispatch_even = dispatch_even
         self._bsinfo = Queue(maxsize=4096)
 
     def _call_group(self, indices: List[int]):
         self._bsinfo.put(len(indices))
-        g_sorted = sorted(list(zip(
-            indices,
-            [self.weight[i]for i in indices]
-        )), key=lambda x: x[1], reverse=True)
-        return coreutils.weighted_group(
-            g_sorted, self.num_procs)[self.rank]
+        if self.dispatch_even:
+            g_sorted = sorted(list(zip(
+                indices,
+                [self.weight[i]for i in indices]
+            )), key=lambda x: x[1], reverse=True)
+            return coreutils.weighted_group(
+                g_sorted, self.num_procs)[self.rank]
+        else:
+            return indices[self.rank:len(indices):self.num_procs]
 
 
 class BatchGrouper(Grouper):
-    def __init__(self, g_batchsize: int, rank: int, n_procs: int, linfo: List[int]) -> None:
-        super().__init__(rank, n_procs, linfo)
+    def __init__(self, g_batchsize: int, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
         self.g_batchsize = g_batchsize
 
     def __call__(self, indices: Iterable[int]):
@@ -558,8 +567,8 @@ class BatchGrouper(Grouper):
 
 
 class BucketGrouper(Grouper):
-    def __init__(self, max_bucket_size: int, rank: int, n_procs: int, linfo: List[int]) -> None:
-        super().__init__(rank, n_procs, linfo)
+    def __init__(self, max_bucket_size: int, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
         self.max_bucket_size = max_bucket_size
 
     def __call__(self, indices: Iterable[int]):
@@ -585,31 +594,32 @@ class PipeTokenize:
 
 
 class ReadBatchDataLoader:
-    def __init__(self, dataloader: DataLoader, bs: int = -1, dynamic: bool = False):
+    """Get batch with the batch size, used with BatchDistSampler and Grouper."""
+
+    def __init__(self, dataloader: DataLoader, bs: int = -1):
         """
         Args:
             dataloader : any instances of pytorch dataloader
-            bs (int)   : global batch size, not required if `dynamic` is True
-            dynamic (bool) : tell the use of DynamicBatchDistSampler
+            bs (int)   : global batch size, not required if dataloader is BatchDistSampler
         """
-        if dynamic:
-            assert dataloader.batch_sampler is not None
-            assert isinstance(dataloader.batch_sampler,
-                              DynamicBatchDistSampler)
-            self.batch_size = None
-            self._bsinfo = dataloader.batch_sampler.index_dispatcher._bsinfo
-        else:
-            self.batch_size = bs
-            self._bsinfo = None
+        assert isinstance(bs, int)
 
-        self._isdynamic = dynamic
+        if bs > 0:
+            self.g_bs = bs
+            self._bsinfo = None
+        else:
+            assert dataloader.batch_sampler is not None
+            assert isinstance(dataloader.batch_sampler, BatchDistSampler)
+            self._bsinfo = dataloader.batch_sampler.index_dispatcher._bsinfo
+
+            self.g_bs = -1
         self.dl = dataloader
 
     def __iter__(self):
         for batch in self.dl:
-            if self._isdynamic:
+            if self.g_bs == -1:
                 bs = self._bsinfo.get()
             else:
-                bs = self.batch_size
+                bs = self.g_bs
             yield bs, batch
         return

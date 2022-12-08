@@ -258,10 +258,12 @@ def basic_trainer_parser(prog: str = '', training: bool = True,  isddp: bool = T
                             help="Location of dev data. Default: <data>/[pickle|hdf5]/cv.[pickle|hdf5]")
         parser.add_argument("--dir", type=str, default=None, metavar='PATH',
                             help="Directory to save the log and model files.")
-        parser.add_argument("--dynamic_bucket_size", type=int, default=-1,
-                            help="The approximate maximum bucket size in dynamic_batch_mode=0.")
-        parser.add_argument("--dynamic_batch_mode", type=int, choices=[-1, 0, 1], default=-1,
-                            help="Dynamic batching mode. -1: disable; 0: bucket mode; 1: batch mode. default -1.")
+        parser.add_argument('--bucket-size', default=-1, type=int, metavar='N',
+                            help="Number of seq lengths in total of a mini-batch, valid in --batching-mode='batch'")
+        parser.add_argument("--batching-mode", type=str, choices=['batch', 'bucket'], default='batch',
+                            help="Batching mode: 'batch' or 'bucker', default: 'batch'")
+        parser.add_argument("--batching-uneven-dispatch", action='store_true', default=False,
+                            help="Dispatch samples to processors 'smartly' (not always) instead evenly. Default: False")
 
         parser.add_argument("--tokenizer", type=str,
                             help="Specify tokenizer. Currently, only used with --large-dataset.")
