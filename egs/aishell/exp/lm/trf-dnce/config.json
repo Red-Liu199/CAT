@@ -1,0 +1,38 @@
+{
+    "decoder": {
+        "type": "TRFLM",
+        "kwargs": {
+            "noise_rate": 1,
+            "method": "dnce",
+            "energy_func": "sumtargetlogit",
+            "f_linfo": "exp/lm/trf-dnce/linfo.pkl",
+            "config_trf_model": "exp/lm/trf-dnce/config_trf.json",
+            "config_noise_model": "exp/lm/trf-dnce/config_noise.json",
+            "alpha": 1,
+            "with_end_mark": false,
+            "tokenizer_path": "exp/lm/trf-dnce/tokenizer.tknz",
+            "bert_tokenizer": true
+        }
+    },
+    "scheduler": {
+        "type": "SchedulerNoam",
+        "optimizer": {
+            "type": "Adam",
+            "use_zero": true,
+            "kwargs": {
+                "lr": 0.01,
+                "betas": [
+                    0.9,
+                    0.98
+                ],
+                "weight_decay": 1e-06
+            }
+        },
+        "kwargs": {
+            "dim_model": 768,
+            "stop_step": 2000,
+            "peak_factor": 0.3,
+            "warmup_step": 5000
+        }
+    }
+}

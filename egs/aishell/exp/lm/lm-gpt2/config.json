@@ -1,0 +1,26 @@
+{
+    "decoder": {
+        "type": "PretrainedTransformer",
+        "kwargs": {
+            "model_name": "GPT2LMHeadModel",
+            "config_name": "GPT2Config",
+            "path": "uer/gpt2-chinese-cluecorpussmall"
+        }
+    },
+    "scheduler": {
+        "type": "SchedulerNoam",
+        "kwargs": {
+            "dim_model": 768,
+            "peak_factor": 0.45,
+            "warmup_step": 5000,
+            "stop_step": 2000
+        },
+        "optimizer": {
+            "type": "Adam",
+            "zeroredundancy": true,
+            "kwargs": {
+                "lr": 0.001
+            }
+        }
+    }
+}

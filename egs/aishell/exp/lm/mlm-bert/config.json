@@ -1,0 +1,25 @@
+{
+    "decoder": {
+        "type": "PretrainedMLM",
+        "kwargs": {
+            "model_name": "BertForMaskedLM",
+            "model_path": "bert-base-chinese"
+        }
+    },
+    "scheduler": {
+        "type": "SchedulerNoam",
+        "kwargs": {
+            "dim_model": 768,
+            "peak_factor": 0.45,
+            "warmup_step": 5000,
+            "stop_step": 3000
+        },
+        "optimizer": {
+            "type": "Adam",
+            "zeroredundancy": true,
+            "kwargs": {
+                "lr": 0.001
+            }
+        }
+    }
+}

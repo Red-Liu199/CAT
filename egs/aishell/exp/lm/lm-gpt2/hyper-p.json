@@ -1,0 +1,43 @@
+{
+    "data": {
+        "train": "data/aishell/train.txt",
+        "dev": "data/aishell/dev.txt",
+        "test": [
+            "data/aishell/test.txt"
+        ]
+    },
+    "tokenizer": {
+        "type": "PretrainedTokenizer",
+        "option-init": {
+            "name": "BertTokenizer",
+            "path": "uer/gpt2-chinese-cluecorpussmall"
+        }
+    },
+    "env": {
+        "CUDA_VISIBLE_DEVICES": "0, 1, 2, 3"
+    },
+    "train": {
+        "bin": "cat.lm.train",
+        "option": {
+            "amp": true,
+            "batch_size": 512,
+            "check-freq": 100
+        }
+    },
+    "inference": {
+        "avgmodel": {
+            "mode": "best",
+            "num": 2
+        },
+        "infer": {
+            "bin": "cat.lm.rescore",
+            "option": {
+                "alpha": 0.2,
+                "beta": 0,
+                "nbestlist": "data/aishell/outd.nbest",
+                "save_lm_nbest": "exp/lm/lm-gpt2/rescore/score-outd.nbest"
+            }
+        }
+    },
+    "commit": "2f96e187ef3c4605ba9aaa2963aaced7e83ecf06"
+}
