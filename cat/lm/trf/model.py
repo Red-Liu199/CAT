@@ -506,8 +506,8 @@ class REBM(AbsDecoder):
         energy_func: str = 'sumtargetlogit', # 'hidden2scalar'/'logsumexplogit'/'maxlogit'/'sumtargetlogit'
         episilon: float = 1e-30,  # min of log()
         config_noise_model: str = None, # noise configuration file path
-        config_trf_model: str =None, # TRF model configuration file path
-        check_trf_model: str =None, # load energy model from this checkpoint if its not None
+        config_ebm_model: str =None, # TRF model configuration file path
+        check_ebm_model: str =None, # load energy model from this checkpoint if its not None
         check_noise_model: str = None, # load noise model from this checkpoint if its not None
         tokenizer_path: str = None,
         noise_mask_ratio: float = 0.3,
@@ -726,8 +726,8 @@ class EBM(AbsDecoder):
         energy_func: str = 'sumtargetlogit', # 'hidden2scalar'/'logsumexplogit'/'maxlogit'/'sumtargetlogit'
         episilon: float = 1e-30,  # min of log()
         config_noise_model: str = None, # noise configuration file path
-        config_trf_model: str =None, # TRF model configuration file path
-        check_trf_model: str =None, # load energy model from this checkpoint if its not None
+        config_ebm_model: str =None, # TRF model configuration file path
+        check_ebm_model: str =None, # load energy model from this checkpoint if its not None
         check_noise_model: str = None, # load noise model from this checkpoint if its not None
         linear_scale: float = 1, # only used for hidden2scalar energy function, we need a scale to match the energy and log pn
         noise_score: bool =False,
