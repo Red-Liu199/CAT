@@ -196,14 +196,14 @@ def cmp(tbevents: List[str], legends: Union[List[str], None] = None, title: str 
             accumulator = EventAccumulator(_event).Reload()
 
         for i in range(nr*nc):
-            if anno_scalars[i] not in accumulator.Tags()['scalars']:
-                continue
             r, c = (i//nc), (i % nc)
             if i >= n_plottings:
                 # rm empty plotting
                 axes[r][c].set_axis_off()
                 continue
 
+            if len(anno_scalars) <= i or anno_scalars[i] not in accumulator.Tags()['scalars']:
+                continue
             scalars = list(accumulator.Scalars(anno_scalars[i]))
             if anno_scalars[i].startswith('loss'):
                 if i not in yaxis_formatter:
