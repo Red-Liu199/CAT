@@ -45,8 +45,8 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace, **mkwar
         backend=args.dist_backend, init_method=args.dist_url,
         world_size=args.world_size, rank=args.rank)
 
-    if 'Dataset' not in mkwargs:
-        mkwargs['Dataset'] = KaldiSpeechDataset
+    if 'T_dataset' not in mkwargs:
+        mkwargs['T_dataset'] = KaldiSpeechDataset
 
     if 'collate_fn' not in mkwargs:
         mkwargs['collate_fn'] = sortedPadCollateASR()

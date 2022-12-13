@@ -262,7 +262,7 @@ def basic_trainer_parser(prog: str = '', training: bool = True,  isddp: bool = T
                             help="Number of seq lengths in total of a mini-batch, valid in --batching-mode='batch'")
         parser.add_argument("--batching-mode", type=str, choices=['batch', 'bucket'], default='batch',
                             help="Batching mode: 'batch' or 'bucker', default: 'batch'")
-        parser.add_argument("--batching-uneven-dispatch", action='store_true', default=False,
+        parser.add_argument("--batching-uneven", action='store_true', default=False,
                             help="Dispatch samples to processors 'smartly' (not always) instead evenly. Default: False")
 
         parser.add_argument("--tokenizer", type=str,

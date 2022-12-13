@@ -49,7 +49,7 @@ from torch.distributed.optim import ZeroRedundancyOptimizer
 class Manager(object):
     def __init__(
             self,
-            Dataset: torch.utils.data.Dataset,
+            T_dataset: torch.utils.data.Dataset,
             collate_fn: Callable,
             args: argparse.Namespace,
             func_build_model: Callable[[dict, argparse.Namespace], Union[nn.Module, nn.parallel.DistributedDataParallel]],
@@ -66,17 +66,17 @@ class Manager(object):
 
         coreutils.check_parser(args, [
             'rank', 'gpu', 'workers', 'trset', 'devset',
-            'batching_mode', 'batching_uneven_dispatch',
+            'batching_mode', 'batching_uneven',
             'batch_size', 'grad_accum_fold', 'config', 'dir', 'debug',
             '_logdir', '_checkdir', 'resume', 'init_model'
         ])
 
         # setup dataloader
-        val_set = Dataset(args.devset)
+        val_set = T_dataset(args.devset)
 
         setattr(args, 'n_steps', 0)
         world_size = dist.get_world_size()
-        if args.batching_mode == 'batch' and (not args.batching_uneven_dispatch):
+        if args.batching_mode == 'batch' and (not args.batching_uneven):
             args.batch_size = (args.batch_size//world_size) * world_size
 
         if args.large_dataset:
@@ -84,7 +84,7 @@ class Manager(object):
             assert os.path.isfile(args.tokenizer), \
                 f"--tokenizer={args.tokenizer} is not a valid file."
             # large dataset doesnot support dynamic dispatching
-            args.batching_uneven_dispatch = False
+            args.batching_uneven = False
             args.batching_mode = 'batch'
             args.batch_size = (args.batch_size//world_size) * world_size
 
@@ -138,7 +138,7 @@ class Manager(object):
             tr_sampler = None
             trainloader = ReadBatchDataLoader(trainloader, bs=args.batch_size)
         else:
-            tr_set = Dataset(args.trset)
+            tr_set = T_dataset(args.trset)
             if args.batching_mode == 'bucket' and args.grad_accum_fold > 1:
                 """
                 NOTE (huahuan): with dynamic batching, in batch mode, at each update, the global
@@ -157,22 +157,24 @@ class Manager(object):
             tr_sampler = BatchDistSampler(
                 dataset=tr_set,
                 mode=args.batching_mode,
-                dispatch_even=(not args.batching_uneven_dispatch),
+                dispatch_even=(not args.batching_uneven),
                 global_batch_size=args.batch_size,
                 max_bucket_size=args.bucket_size,
                 local_rank=args.gpu
             )
             trainloader = DataLoader(
-                tr_set, batch_sampler=tr_sampler,
-                num_workers=args.workers, collate_fn=collate_fn,
-                prefetch_factor=4, persistent_workers=True
+                tr_set, 
+                batch_sampler=tr_sampler,
+                num_workers=args.workers, 
+                collate_fn=collate_fn,
+                persistent_workers=True
             )
             trainloader = ReadBatchDataLoader(trainloader)
 
         val_sampler = BatchDistSampler(
             dataset=val_set,
             mode=args.batching_mode,
-            dispatch_even=(not args.batching_uneven_dispatch),
+            dispatch_even=(not args.batching_uneven),
             global_batch_size=args.batch_size,
             max_bucket_size=args.bucket_size,
             local_rank=args.gpu,
@@ -180,8 +182,11 @@ class Manager(object):
         )
         # NOTE: global batch size info is not required for evaluation.
         valloader = DataLoader(
-            val_set, batch_sampler=val_sampler,
-            num_workers=args.workers, collate_fn=collate_fn, persistent_workers=True
+            val_set,
+            batch_sampler=val_sampler,
+            num_workers=args.workers,
+            collate_fn=collate_fn,
+            persistent_workers=True
         )
 
         self.train_sampler = tr_sampler
@@ -215,10 +220,8 @@ class Manager(object):
         # Initial specaug module
         if 'specaug' not in cfg:
             specaug = None
-            coreutils.distprint("> disable SpecAug", args.gpu)
         else:
-            specaug = SpecAug(**cfg['specaug'])
-            specaug = specaug.to(f'cuda:{args.gpu}')
+            specaug = SpecAug(**cfg['specaug']).to(f'cuda:{args.gpu}')
         self.specaug = specaug
 
         # Initial scheduler and optimizer
@@ -610,14 +613,10 @@ def evaluate(testloader: DataLoader, args: argparse.Namespace, manager: Manager)
     model = manager.model
     cnt_seq = 0
     total_loss = 0.
-    if args.batch_size == -1:
-        est_len = None
-    else:
-        est_len = len(testloader) // args.batch_size * args.world_size
 
-    for i, minibatch in tqdm(
-            enumerate(testloader), desc=f'Epoch: {manager.epoch} | eval',
-            unit='batch', total=est_len, disable=(args.gpu != 0), leave=False):
+    for minibatch in tqdm(
+            testloader, desc=f'Epoch: {manager.epoch} | eval',
+            unit='batch', disable=(args.gpu != 0), leave=False):
 
         feats, ilens, labels, olens = minibatch
         feats = feats.cuda(args.gpu, non_blocking=True)

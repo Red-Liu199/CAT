@@ -473,11 +473,15 @@ class BatchDistSampler(DistributedSampler):
 
             dist.barrier()
 
+        self.g_bs = global_batch_size
+
         if mode == 'bucket':
+            linfo = dataset.get_seq_len()
+            avglen = sum(linfo)/len(linfo)
             if max_bucket_size == -1:
-                linfo = dataset.get_seq_len()
-                avglen = sum(linfo)/len(linfo)
                 max_bucket_size = int(avglen*global_batch_size)
+            else:
+                self.g_bs = int(max_bucket_size//avglen)
 
             assert max_bucket_size > 0 and max_bucket_size >= self.num_replicas, max_bucket_size
 
@@ -485,7 +489,7 @@ class BatchDistSampler(DistributedSampler):
                 max_bucket_size=max_bucket_size,
                 rank=self.rank,
                 n_procs=self.num_replicas,
-                linfo=dataset.get_seq_len(),
+                linfo=linfo,
                 dispatch_even=dispatch_even
             )
         elif mode == 'batch':
@@ -503,6 +507,10 @@ class BatchDistSampler(DistributedSampler):
         else:
             raise ValueError(
                 f"{self.__class__.__name__}: unknown mode '{mode}'")
+
+    def __len__(self) -> int:
+        """Roughly estimated value, might be incorrect."""
+        return len(self.dataset) // self.g_bs
 
     def __iter__(self):
         # DistributedSampler.__iter__()
@@ -534,25 +542,26 @@ class BatchDistSampler(DistributedSampler):
 
 class Grouper:
     def __init__(self, rank: int, n_procs: int, linfo: List[int] = None, dispatch_even: bool = False) -> None:
-        self.weight = linfo
+        if not dispatch_even:
+            assert linfo is not None, "when dispatching batches unevenly, length info is required."
+        self.linfo = linfo
         self.rank = rank
-        self.offset = rank
         self.num_procs = n_procs
         self.dispatch_even = dispatch_even
         self._bsinfo = Queue(maxsize=4096)
 
-    def _call_group(self, indices: List[int]):
+    def _call_group(self, indices: List[int]) -> List[int]:
+        assert len(indices) >= self.num_procs
         self._bsinfo.put(len(indices))
         if self.dispatch_even:
             return indices[self.rank:len(indices):self.num_procs]
         else:
-            self.offset = (self.offset+1) % self.num_procs
             g_sorted = sorted(list(zip(
                 indices,
-                [self.weight[i] for i in indices]
+                [self.linfo[i] for i in indices]
             )), key=lambda x: x[1], reverse=True)
             return coreutils.weighted_group(
-                g_sorted, self.num_procs)[self.offset]
+                g_sorted, self.num_procs)[self.rank]
 
 
 class BatchGrouper(Grouper):
@@ -580,7 +589,7 @@ class BucketGrouper(Grouper):
         cumsum = 0
         for i in indices:
             cur_batch.append(i)
-            cumsum += self.weight[i]
+            cumsum += self.linfo[i]
             if cumsum >= self.max_bucket_size and len(cur_batch) >= self.num_procs:
                 yield self._call_group(cur_batch)
                 cur_batch.clear()
@@ -618,6 +627,9 @@ class ReadBatchDataLoader:
 
             self.g_bs = -1
         self.dl = dataloader
+
+    def __len__(self) -> int:
+        return len(self.dl)
 
     def __iter__(self):
         for batch in self.dl:

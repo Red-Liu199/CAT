@@ -523,7 +523,7 @@
                                             "bucket"
                                         ]
                                     },
-                                    "batching_uneven_dispatch": {
+                                    "batching_uneven": {
                                         "description": "Dispatch samples to processors 'smartly' (not always) instead evenly. Default: False",
                                         "default": false
                                     },
@@ -663,7 +663,7 @@
                                             "bucket"
                                         ]
                                     },
-                                    "batching_uneven_dispatch": {
+                                    "batching_uneven": {
                                         "description": "Dispatch samples to processors 'smartly' (not always) instead evenly. Default: False",
                                         "default": false
                                     },
@@ -803,7 +803,7 @@
                                             "bucket"
                                         ]
                                     },
-                                    "batching_uneven_dispatch": {
+                                    "batching_uneven": {
                                         "description": "Dispatch samples to processors 'smartly' (not always) instead evenly. Default: False",
                                         "default": false
                                     },
@@ -943,7 +943,7 @@
                                             "bucket"
                                         ]
                                     },
-                                    "batching_uneven_dispatch": {
+                                    "batching_uneven": {
                                         "description": "Dispatch samples to processors 'smartly' (not always) instead evenly. Default: False",
                                         "default": false
                                     },
@@ -1083,7 +1083,7 @@
                                             "bucket"
                                         ]
                                     },
-                                    "batching_uneven_dispatch": {
+                                    "batching_uneven": {
                                         "description": "Dispatch samples to processors 'smartly' (not always) instead evenly. Default: False",
                                         "default": false
                                     },
@@ -1223,7 +1223,7 @@
                                             "bucket"
                                         ]
                                     },
-                                    "batching_uneven_dispatch": {
+                                    "batching_uneven": {
                                         "description": "Dispatch samples to processors 'smartly' (not always) instead evenly. Default: False",
                                         "default": false
                                     },
@@ -1363,7 +1363,7 @@
                                             "bucket"
                                         ]
                                     },
-                                    "batching_uneven_dispatch": {
+                                    "batching_uneven": {
                                         "description": "Dispatch samples to processors 'smartly' (not always) instead evenly. Default: False",
                                         "default": false
                                     },

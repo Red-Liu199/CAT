@@ -50,8 +50,8 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace, **mkwar
         backend=args.dist_backend, init_method=args.dist_url,
         world_size=args.world_size, rank=args.rank)
 
-    if 'Dataset' not in mkwargs:
-        mkwargs['Dataset'] = KaldiSpeechDataset
+    if 'T_dataset' not in mkwargs:
+        mkwargs['T_dataset'] = KaldiSpeechDataset
 
     if 'collate_fn' not in mkwargs:
         mkwargs['collate_fn'] = sortedPadCollateASR(flatten_target=True)
@@ -74,14 +74,17 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace, **mkwar
     #       ... the issue by `_wds_hook`; if not, we filter the unqualified utterances
     #       ... before training start.
     if not args.large_dataset:
+        coreutils.distprint(
+            f"> filter seqs by ctc restriction",
+            args.gpu
+        )
         tr_dataset = manager.trainloader.dl.dataset
         orilen = len(tr_dataset)
         tr_dataset.filt_by_len(lambda x, y: x//SUBSAMPLING > y)
-        if len(tr_dataset) < orilen:
-            coreutils.distprint(
-                f"warning: filtered {orilen-len(tr_dataset)} utterances.",
-                args.gpu
-            )
+        coreutils.distprint(
+            f"  filtered {orilen-len(tr_dataset)} utterances.",
+            args.gpu
+        )
 
     # training
     manager.run(args)
@@ -201,8 +204,9 @@ def custom_evaluate(testloader, args: argparse.Namespace, manager: Manager) -> f
     cnt_err = 0
     n_proc = dist.get_world_size()
 
-    for i, minibatch in tqdm(enumerate(testloader), desc=f'Epoch: {manager.epoch} | eval',
-                             unit='batch', total=len(testloader), disable=(args.gpu != 0), leave=False):
+    for minibatch in tqdm(
+            testloader, desc=f'Epoch: {manager.epoch} | eval',
+            unit='batch', disable=(args.gpu != 0), leave=False):
 
         feats, ilens, labels, olens = minibatch
         feats = feats.cuda(args.gpu, non_blocking=True)

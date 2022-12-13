@@ -55,18 +55,19 @@ def score_prior(model: nn.Module, in_tokens: torch.Tensor, targets: torch.Tensor
     if targets.size(1) > U:
         targets = targets[:, :U]
 
-    # logits: (N, U, K)
-    logits, _ = model(in_tokens, input_lengths=input_lengths)
     if do_normalize:
-        logits = logits.log_softmax(dim=-1)
-    # score: (N, U)
-    score = logits.gather(
-        index=targets.long().unsqueeze(2), dim=-1).squeeze(-1)
-    # True for not masked, False for masked, (N, U)
-    score *= torch.arange(in_tokens.size(1), device=in_tokens.device)[
-        None, :] < input_lengths[:, None].to(in_tokens.device)
-    # (N,)
-    score = score.sum(dim=-1)
+        score = model.score(in_tokens, targets, input_lengths=input_lengths)
+    else:
+        # logits: (N, U, K)
+        logits, _ = model(in_tokens, input_lengths=input_lengths)
+        # score: (N, U)
+        score = logits.gather(
+            index=targets.long().unsqueeze(2), dim=-1).squeeze(-1)
+        # True for not masked, False for masked, (N, U)
+        score *= torch.arange(in_tokens.size(1), device=in_tokens.device)[
+            None, :] < input_lengths[:, None].to(in_tokens.device)
+        # (N,)
+        score = score.sum(dim=-1)
     return score
 
 
