@@ -617,7 +617,6 @@ def evaluate(testloader: DataLoader, args: argparse.Namespace, manager: Manager)
     for minibatch in tqdm(
             testloader, desc=f'Epoch: {manager.epoch} | eval',
             unit='batch', disable=(args.gpu != 0), leave=False):
-
         feats, ilens, labels, olens = minibatch
         feats = feats.cuda(args.gpu, non_blocking=True)
 

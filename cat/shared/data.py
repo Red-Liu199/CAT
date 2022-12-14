@@ -7,7 +7,7 @@
 """Data loading module
 """
 
-from queue import Queue
+from queue import SimpleQueue
 from . import coreutils as coreutils
 from .tokenizer import AbsTokenizer
 
@@ -69,7 +69,7 @@ class AbsDataset(Dataset):
             with open(f_linfo, 'rb') as fi:
                 return pickle.load(fi)
         else:
-            ls = self.impl_get_len()
+            ls = np.asarray(self.impl_get_len(), dtype=np.int32)
             if not os.access(os.path.dirname(f_linfo), os.W_OK):
                 print(
                     f"No writing access to: '{f_linfo}'. "
@@ -548,7 +548,9 @@ class Grouper:
         self.rank = rank
         self.num_procs = n_procs
         self.dispatch_even = dispatch_even
-        self._bsinfo = Queue(maxsize=4096)
+        # NOTE (huahuan): use a infinite size queue,
+        # otherwise the dataloader might be blocked at put() method
+        self._bsinfo = SimpleQueue()
 
     def _call_group(self, indices: List[int]) -> List[int]:
         assert len(indices) >= self.num_procs
@@ -571,8 +573,8 @@ class BatchGrouper(Grouper):
 
     def __call__(self, indices: Iterable[int]):
         cur_batch = []
-        for idx in indices:
-            cur_batch.append(idx)
+        for i in indices:
+            cur_batch.append(i)
             if len(cur_batch) == self.g_batchsize:
                 yield self._call_group(cur_batch)
                 cur_batch.clear()

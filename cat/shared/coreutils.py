@@ -311,6 +311,33 @@ def divide_almost_equally(arr_weighted: List[Tuple[Any, Union[float, int]]], num
     return groups.values()
 
 
+def _get_bound_greedy(wghts: List[Union[float, int]], K: int, avg: float = None, upper: bool = True) -> int:
+    """Split `wghts` into `K` groups and get the upper/lower bound for first/last group.
+        check `weighted_group()` for usage.
+
+    suppose `wghts` in descending order.
+
+    if `upper=True`, return open upper bound for the groups[0];
+
+    if `upper=False`, return closed lower bound for the groups[-1]
+    """
+    l_arr = len(wghts)
+    assert l_arr >= K and K > 0
+    if K == 1:
+        return l_arr if upper else 0
+    if l_arr == K:
+        return 1 if upper else l_arr - 1
+
+    if avg is None:
+        avg = sum(wghts)/K
+    for i in range(1, l_arr-K+1):
+        bin_highest = wghts[0] if upper else wghts[l_arr-i]
+        if bin_highest * i > avg:
+            break
+
+    return i if upper else l_arr-i
+
+
 def weighted_group(weighted_list: List[Tuple[Any, Union[float, int]]], N: int, consider_padding: bool = True) -> List[List[Any]]:
     """
     weighted_list is list of (obj, weight)
@@ -332,54 +359,20 @@ def weighted_group(weighted_list: List[Tuple[Any, Union[float, int]]], N: int, c
     if not consider_padding:
         return list(divide_almost_equally(weighted_list, N))
 
-    def get_large(_wght, _K: int) -> int:
-        l_arr = len(_wght)
-        assert l_arr >= _K
-        if l_arr == _K:
-            return 1
-        if _K == 1:
-            return l_arr
-
-        _avg = sum(_wght)/_K
-        cumsum = _wght[0]
-        for i in range(l_arr-_K):
-            cumsum += _wght[i+1]
-            if cumsum > _avg:
-                break
-        # i+1 for [l_bound, u_bound)
-        # i for [l_bound, u_bound-1), keep large part smaller
-        return i+1
-
-    def get_small(_wght, _K: int) -> int:
-        l_arr = len(_wght)
-        assert l_arr >= _K
-        if l_arr == _K:
-            return l_arr-1
-        if _K == 1:
-            return 0
-
-        _avg = sum(_wght)/_K
-        cumsum = 0
-        for i in range(l_arr-1, _K-2, -1):
-            cumsum += _wght[i]
-            if cumsum > _avg:
-                break
-        return i
-
     # greedy not optimal
     src_list, weights = list(zip(*weighted_list))
     g_avg = sum(weights) / N
     indices_fwd = [0]
     indices_bwd = [len_src]
-    res_list = weights[:]
+    res_list = weights
     for res in range(N, 0, -1):
-        running_avg = sum(res_list)/res
-        if running_avg >= g_avg:
-            l_bound = get_small(res_list, res)
-            indices_bwd.append(
-                indices_bwd[-1] - (len(res_list)-l_bound))
+        res_avg = sum(res_list)/res
+        if res_avg >= g_avg:
+            l_bound = _get_bound_greedy(
+                res_list, res, avg=res_avg, upper=False)
+            indices_bwd.append(indices_bwd[-1] - (len(res_list)-l_bound))
         else:
-            u_bound = get_large(res_list, res)
+            u_bound = _get_bound_greedy(res_list, res, avg=res_avg)
             indices_fwd.append(indices_fwd[-1] + u_bound)
         res_list = weights[indices_fwd[-1]:indices_bwd[-1]]
 
