@@ -166,8 +166,7 @@ class Manager(object):
                 tr_set, 
                 batch_sampler=tr_sampler,
                 num_workers=args.workers, 
-                collate_fn=collate_fn,
-                persistent_workers=True
+                collate_fn=collate_fn
             )
             trainloader = ReadBatchDataLoader(trainloader)
 
@@ -185,8 +184,7 @@ class Manager(object):
             val_set,
             batch_sampler=val_sampler,
             num_workers=args.workers,
-            collate_fn=collate_fn,
-            persistent_workers=True
+            collate_fn=collate_fn
         )
 
         self.train_sampler = tr_sampler
