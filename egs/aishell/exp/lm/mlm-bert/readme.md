@@ -13,11 +13,12 @@ tokenizer training -> data packing -> nn training -> inference
 
 * In **stage 2 (data packing)**, if you use a `PretrainedTokenizer` of type `BertTokenizer` to tokenize the data, the start token *[CLS]* and end token *[SEP]* will be added at the beginning and end of each sentence automatically. This is incompatible with the pipeline since the pipeline will automatically add another start token *0* at the beginning. So we need to delete the duplicated start token after packing data
 ```
-python utils/reprocess.py exp/mlm-bert/lmbin exp/mlm-bert/lmbin --head_del 1
+mv exp/lm/mlm-bert/lmbin exp/lm/mlm-bert/lmbin0
+python utils/reprocess.py exp/lm/mlm-bert/lmbin0 exp/lm/mlm-bert/lmbin1 --head_del 1
 ```
 * Then, prepare masked training samples after packing data.
 ```
-python utils/reprocess.py exp/mlm-bert/lmbin exp/mlm-bert/lmbin --mlm
+python utils/reprocess.py exp/lm/mlm-bert/lmbin1 exp/lm/mlm-bert/lmbin --mlm
 ```
 ### Result
 |CER type     | BERT |  BERT after fine-tuning  |

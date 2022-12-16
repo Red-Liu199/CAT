@@ -13,7 +13,8 @@ tokenizer training -> data packing -> nn training -> inference
 
 * In **stage 2 (data packing)**, if you use a `PretrainedTokenizer` of type `BertTokenizer` to tokenize the data, the start token *[CLS]* and end token *[SEP]* will be added at the beginning and end of each sentence automatically. This is incompatible with the pipeline since the pipeline will automatically add another start token *0* at the beginning. So we need to delete the duplicated start token after packing data
 ```
-python utils/reprocess.py exp/[your_exp]/lmbin exp/[your_exp]/lmbin --head_del 1
+mv exp/lm/ebm-dnce/lmbin exp/lm/ebm-dnce/lmbin0
+python utils/reprocess.py exp/lm/ebm-dnce/lmbin0 exp/lm/ebm-dnce/lmbin --head_del 1
 ```
 * The structure of the EBM is specified in [config_ebm.json](./config_ebm.json). Besides, we need to use an additional language model to generate noise samples, whose structure is specified in [config_noise.json](./config_noise.json).
 * For other **EBM experiments with different settings**, we follow the same training framework above with only some details different.
