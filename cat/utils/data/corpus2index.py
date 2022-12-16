@@ -93,6 +93,7 @@ class BinLoader:
                 continue
             if i == _cnt:
                 break
+
             yield data[i][0].tolist()
         return
 
@@ -140,9 +141,7 @@ if __name__ == "__main__":
                         "     map 0 to whitespace and map 1 to <unk> '--map 0: \"1:<unk>\"'")
     args = parser.parse_args()
 
-    for _in in args.input:
-        assert _in != '/dev/stdin', f"redirect /dev/stdin would cause unexpected behavior."
-
+    stdin = (len(args.input) == 1 and args.input[0] == '/dev/stdin')
     mapping = {}
     if args.map is not None:
         for _m in args.map:
@@ -157,16 +156,28 @@ if __name__ == "__main__":
 
     from cat.shared.data import CorpusDataset
     from cat.shared import tokenizer as tknz
-    if args.istext:
-        tot_size = sum(os.path.getsize(f) for f in args.input)
-        num_process = max(min(os.cpu_count()//2, tot_size//(1024*1024)), 1)
-        workerloads = chunkize_file(args.input, num_process)
-    else:
-        tot_lines = sum(len(CorpusDataset(dataset))
-                        for dataset in args.input)
-        num_process = max(min(os.cpu_count()//2, tot_lines//1000), 1)
-        workerloads = dispatch_jobs(tot_lines, num_process)
+    if not stdin:
+        if args.istext:
+            tot_size = sum(os.path.getsize(f) for f in args.input)
+            num_process = max(min(os.cpu_count()//2, tot_size//(1024*1024)), 1)
+            workerloads = chunkize_file(args.input, num_process)
+        else:
+            tot_lines = sum(len(CorpusDataset(dataset))
+                            for dataset in args.input)
+            num_process = max(min(os.cpu_count()//2, tot_lines//1000), 1)
+            workerloads = dispatch_jobs(tot_lines, num_process)
 
+    if stdin:
+        try:
+            assert args.tokenizer is not None
+            tokenizer = tknz.load(args.tokenizer)
+            for line in sys.stdin:
+                sys.stdout.write(' '.join(mapping.get(i, str(i))
+                                 for i in tokenizer.encode(line)))
+                sys.stdout.write('\n')
+        except IOError:
+            sys.exit(0)
+        sys.exit(0)
     try:
         q = Queue(maxsize=1)
         p = []

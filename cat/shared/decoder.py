@@ -69,9 +69,12 @@ class AbsDecoder(nn.Module):
 
     def score(self, input_ids: torch.LongTensor, targets: torch.LongTensor, input_lengths: Optional[torch.LongTensor] = None, *args):
 
-        U = input_lengths.max()
         if input_lengths is None:
-            input_lengths = input_ids.new_full(input_ids.size(0), U)
+            input_lengths = input_ids.new_full(
+                input_ids.size(0), input_ids.size(1))
+            U = input_ids.size(1)
+        else:
+            U = input_lengths.max()
 
         if input_ids.size(1) > U:
             input_ids = input_ids[:, :U]
@@ -273,6 +276,56 @@ class Embedding(AbsDecoder):
         return AbsStates(None, Embedding)
 
 
+class EmbConv1D(AbsDecoder):
+    """Decoder layer with 1-layer conv1d (for limiting the context length."""
+
+    def __init__(
+            self,
+            num_classes: int,
+            edim: int,
+            conv_dim: int,
+            kernel_size: int = 3,
+            act: Literal['relu', 'tanh'] = 'relu',
+            with_head: bool = True) -> None:
+        super().__init__(num_classes, dim_emb=edim, dim_hidden=conv_dim, with_head=with_head)
+        if act == 'relu':
+            self.act = nn.ReLU()
+        elif act == 'tanh':
+            self.act = nn.Tanh()
+        else:
+            raise ValueError(
+                f"activation type: '{act}' is not support, expect one of ['relu', 'tanh']")
+
+        self.conv = nn.Sequential(
+            nn.ConstantPad1d((kernel_size-1, 0), 0),
+            nn.Conv1d(edim, conv_dim, kernel_size=kernel_size)
+        )
+
+    def forward(self, x: torch.Tensor, *args, **kwargs):
+        """
+        x: (N, T)
+        -> embedded (N, T, H1)
+        -> transpose (N, H1, T)
+        -> act & conv (N, H2, T)
+        -> transpose (N, T, H2)
+        -> linear (N, H3, T)
+        """
+        x = self.embedding(x)
+        x = self.conv(self.act(x).transpose(1, 2)).transpose(1, 2)
+        return self.classifier(x), None
+
+    @staticmethod
+    def batching_states(states: List[AbsStates]) -> AbsStates:
+        return AbsStates(None, EmbConv1D)
+
+    @staticmethod
+    def get_state_from_batch(raw_batched_states, index: int) -> AbsStates:
+        return AbsStates(None, EmbConv1D)
+
+    def init_states(self, N: int = 1) -> AbsStates:
+        return AbsStates(None, EmbConv1D)
+
+
 class CausalTransformer(AbsDecoder):
     def __init__(self,
                  num_classes: int,
@@ -282,8 +335,7 @@ class CausalTransformer(AbsDecoder):
                  attn_dropout: float = 0.1,
                  with_head: bool = True,
                  padding_idx: int = -1,
-                 use_cache: bool = True,
-                 linfo_path = None) -> None:
+                 use_cache: bool = False) -> None:
         super().__init__(num_classes=num_classes, dim_emb=dim_hid,
                          padding_idx=padding_idx, with_head=with_head)
         cfg = GPT2Config(
@@ -303,13 +355,6 @@ class CausalTransformer(AbsDecoder):
         self.n_layers = num_layers
         self.d_head = dim_hid//num_head
         self.use_cache = use_cache
-        if linfo_path is not None:
-            with open(linfo_path, 'rb') as fib:
-                linfo = pickle.load(fib)
-                self.pi = torch.tensor(linfo['pi'])
-        else:
-            self.pi=None
-
 
     def forward(self, src_ids: torch.Tensor, cache: torch.Tensor = None, input_lengths: Optional[torch.Tensor] = None, *args, **kwargs):
         # (N, S) -> (N, S, D])
@@ -687,6 +732,11 @@ class ILM(AbsDecoder):
 
 
 class MultiDecoder(AbsDecoder):
+    """A wrapper for combining multiple LMs.
+    
+    NOTE: all sub-decoders should share the same encoder!
+    """
+
     def __init__(self, weights: List[float], f_configs: List[str], f_checks: Optional[List[Union[str, None]]] = None) -> None:
         super().__init__()
 
@@ -715,6 +765,12 @@ class MultiDecoder(AbsDecoder):
         for i in zeroweight[::-1]:
             self._weights.pop(i)
         self._num_decs -= len(zeroweight)
+
+    def score(self, *args, **kwargs):
+        out = 0.
+        for i in range(self._num_decs):
+            out += self._weights[i] * self._decs[i].score(*args, **kwargs)
+        return out
 
     def forward(self, *args, **kwargs):
         raise NotImplementedError

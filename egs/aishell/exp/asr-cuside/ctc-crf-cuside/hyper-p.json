@@ -1,0 +1,59 @@
+{
+    "data": {
+        "train": [
+            "train-sp0.9",
+            "train",
+            "train-sp1.1"
+        ],
+        "dev": [
+            "dev"
+        ],
+        "test": [
+            "test"
+        ],
+        "filter": ":2000",
+        "lang": "zh-cn"
+    },
+    "tokenizer": {
+        "type": "JiebaComposeLexiconTokenizer",
+        "option-init": {
+            "lexicon": "/mnt/workspace/liziwei/Transducer-dev/egs/aishell/lexicon.txt",
+            "add_special_token": true,
+            "userdict": "/mnt/workspace/liziwei/Transducer-dev/egs/aishell/usedict"
+        },
+        "|V|": 217,
+        "file": "exp/asr-crf-cuside/tokenizer.tknz"
+    },
+    "train": {
+        "bin": "cat.ctc.train_unified",
+        "option": {
+            "amp": true,
+            "batch_size": 128,
+            "check-freq": 1000,
+            "grad-norm": 5.0,
+            "dynamic_batch_mode": 1,
+            "dynamic_bucket_size": 200000,
+            "verbose": true
+        }
+    },
+    "inference": {
+        "avgmodel": {
+            "mode": "last",
+            "num": 5
+        },
+        "infer": {
+            "bin": "cat.ctc.cal_logit",
+            "option": {
+                "cpu": true,
+                "beam_size": 16,
+                "unified": true,
+                "nj": 20,
+                "resume": "exp/asr-crf-cuside/check/last-5.pt"
+            }
+        },
+        "er": {
+            "cer": true
+        }
+    },
+    "commit": "f12b31db1208dd22d7c559f9d9a6145488be7740"
+}

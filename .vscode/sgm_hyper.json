@@ -36,32 +36,52 @@
                     "type": "string",
                     "default": ":2000"
                 },
-                "text_processing": {
-                    "description": "Configuration of text processing. See utils/transText2Bin.py for details",
+                "packing-text-lm": {
                     "type": "object",
                     "properties": {
+                        "intext": {
+                            "type": "string",
+                            "description": "Input text files."
+                        },
+                        "output": {
+                            "type": "string",
+                            "description": "Ouput file."
+                        },
+                        "tokenizer": {
+                            "type": "string",
+                            "description": "Tokenizer model file. See cat/shared/tokenizer.py for details."
+                        },
+                        "nj": {
+                            "type": "number",
+                            "description": "Number of threads. Default: 1",
+                            "default": 1
+                        },
                         "concat": {
                             "type": "number",
+                            "description": "Use concat mode instead valid mode with given length. Default: -1 (disable)",
                             "default": -1
                         },
                         "truncate": {
                             "type": "number",
+                            "description": "Truncate the seq longer than trunc and take res of it as new seq. Default: -1 (disable)",
                             "default": -1
                         },
                         "bos_id": {
                             "type": "number",
+                            "description": "Begin of sequence index, used when concat > 1. Default: 0",
                             "default": 0
+                        },
+                        "eos_id": {
+                            "type": "number",
+                            "description": "End of sequence index, used when concat > 1. Default: -1 (same as --bos_id)",
+                            "default": -1
+                        },
+                        "quiet": {
+                            "description": "Supress hint messages",
+                            "default": false
                         }
-                    }
-                },
-                "lang": {
-                    "description": "Language of data. Refer to https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes",
-                    "type": "string",
-                    "examples": [
-                        "zh",
-                        "en"
-                    ],
-                    "default": "en"
+                    },
+                    "description": "Convert pure text into pickle data with multi-processing"
                 }
             }
         },
@@ -77,7 +97,8 @@
                         "JiebaTokenizer",
                         "LexiconTokenizer",
                         "RawTokenizer",
-                        "SentencePieceTokenizer"
+                        "SentencePieceTokenizer",
+                        "SimpleTokenizer"
                     ]
                 }
             },
@@ -120,141 +141,6 @@
                                 "type": "object",
                                 "properties": {
                                     "lexicon": {
-                                        "type": "string"
-                                    },
-                                    "add_special_token": {
-                                        "type": "boolean",
-                                        "default": true
-                                    },
-                                    "bos_interface": {
-                                        "type": "string",
-                                        "default": "<s>"
-                                    },
-                                    "unk_interface": {
-                                        "type": "string",
-                                        "default": "<unk>"
-                                    },
-                                    "userdict": {}
-                                },
-                                "description": "options for initializing the tokenizer."
-                            },
-                            "option-train": {
-                                "type": "object",
-                                "properties": {},
-                                "description": "options for traininig tokenizer."
-                            }
-                        }
-                    }
-                },
-                {
-                    "if": {
-                        "properties": {
-                            "type": {
-                                "const": "JiebaTokenizer"
-                            }
-                        }
-                    },
-                    "then": {
-                        "properties": {
-                            "option-init": {
-                                "type": "object",
-                                "properties": {
-                                    "userdict": {},
-                                    "bos_id": {
-                                        "type": "number",
-                                        "default": 0
-                                    }
-                                },
-                                "description": "options for initializing the tokenizer."
-                            },
-                            "option-train": {
-                                "type": "object",
-                                "properties": {},
-                                "description": "options for traininig tokenizer."
-                            }
-                        }
-                    }
-                },
-                {
-                    "if": {
-                        "properties": {
-                            "type": {
-                                "const": "LexiconTokenizer"
-                            }
-                        }
-                    },
-                    "then": {
-                        "properties": {
-                            "option-init": {
-                                "type": "object",
-                                "properties": {
-                                    "lexicon": {
-                                        "type": "string"
-                                    },
-                                    "add_special_token": {
-                                        "type": "boolean",
-                                        "default": true
-                                    },
-                                    "bos_interface": {
-                                        "type": "string",
-                                        "default": "<s>"
-                                    },
-                                    "unk_interface": {
-                                        "type": "string",
-                                        "default": "<unk>"
-                                    }
-                                },
-                                "description": "options for initializing the tokenizer."
-                            },
-                            "option-train": {
-                                "type": "object",
-                                "properties": {},
-                                "description": "options for traininig tokenizer."
-                            }
-                        }
-                    }
-                },
-                {
-                    "if": {
-                        "properties": {
-                            "type": {
-                                "const": "RawTokenizer"
-                            }
-                        }
-                    },
-                    "then": {
-                        "properties": {
-                            "option-init": {
-                                "type": "object",
-                                "properties": {
-                                    "num_units": {
-                                        "type": "number"
-                                    }
-                                },
-                                "description": "options for initializing the tokenizer."
-                            },
-                            "option-train": {
-                                "type": "object",
-                                "properties": {},
-                                "description": "options for traininig tokenizer."
-                            }
-                        }
-                    }
-                },
-                {
-                    "if": {
-                        "properties": {
-                            "type": {
-                                "const": "SentencePieceTokenizer"
-                            }
-                        }
-                    },
-                    "then": {
-                        "properties": {
-                            "option-init": {
-                                "type": "object",
-                                "properties": {
-                                    "model_file": {
                                         "type": "string"
                                     }
                                 },
@@ -589,15 +475,45 @@
                                         "type": "string",
                                         "description": "Location of training data. Default: <data>/[pickle|hdf5]/tr.[pickle|hdf5]"
                                     },
-                                    "devset": {
-                                        "type": "string",
-                                        "description": "Location of dev data. Default: <data>/[pickle|hdf5]/cv.[pickle|hdf5]"
+                                    "add_special_token": {
+                                        "type": "boolean",
+                                        "default": true
                                     },
-                                    "dir": {
+                                    "bos_interface": {
                                         "type": "string",
-                                        "description": "Directory to save the log and model files."
+                                        "default": "<s>"
                                     },
-                                    "dynamic_bucket_size": {
+                                    "unk_interface": {
+                                        "type": "string",
+                                        "default": "<unk>"
+                                    },
+                                    "userdict": {}
+                                },
+                                "description": "options for initializing the tokenizer."
+                            },
+                            "option-train": {
+                                "type": "object",
+                                "properties": {},
+                                "description": "options for traininig tokenizer."
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "type": {
+                                "const": "JiebaTokenizer"
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "option-init": {
+                                "type": "object",
+                                "properties": {
+                                    "userdict": {},
+                                    "bos_id": {
                                         "type": "number",
                                         "description": "The approximate maximum bucket size in dynamic_batch_mode=0.",
                                         "default": -1
@@ -632,7 +548,13 @@
                                         "type": "string",
                                         "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself (w/o optimizer)"
                                     }
-                                }
+                                },
+                                "description": "options for initializing the tokenizer."
+                            },
+                            "option-train": {
+                                "type": "object",
+                                "properties": {},
+                                "description": "options for traininig tokenizer."
                             }
                         }
                     }
@@ -640,8 +562,236 @@
                 {
                     "if": {
                         "properties": {
+                            "type": {
+                                "const": "LexiconTokenizer"
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "option-init": {
+                                "type": "object",
+                                "description": "NCE Transducer Training options",
+                                "properties": {
+                                    "lexicon": {
+                                        "type": "string"
+                                    },
+                                    "add_special_token": {
+                                        "type": "boolean",
+                                        "default": true
+                                    },
+                                    "bos_interface": {
+                                        "type": "string",
+                                        "default": "<s>"
+                                    },
+                                    "unk_interface": {
+                                        "type": "string",
+                                        "default": "<unk>"
+                                    }
+                                },
+                                "description": "options for initializing the tokenizer."
+                            },
+                            "option-train": {
+                                "type": "object",
+                                "properties": {},
+                                "description": "options for traininig tokenizer."
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "type": {
+                                "const": "RawTokenizer"
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "option-init": {
+                                "type": "object",
+                                "properties": {
+                                    "num_units": {
+                                        "type": "number"
+                                    }
+                                },
+                                "description": "options for initializing the tokenizer."
+                            },
+                            "option-train": {
+                                "type": "object",
+                                "properties": {},
+                                "description": "options for traininig tokenizer."
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "type": {
+                                "const": "SentencePieceTokenizer"
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "option-init": {
+                                "type": "object",
+                                "properties": {
+                                    "model_file": {
+                                        "type": "string"
+                                    }
+                                },
+                                "description": "options for initializing the tokenizer."
+                            },
+                            "option-train": {
+                                "type": "object",
+                                "properties": {
+                                    "f_text": {
+                                        "type": "string"
+                                    },
+                                    "model_prefix": {
+                                        "type": "string"
+                                    },
+                                    "vocab_size": {
+                                        "type": "number"
+                                    },
+                                    "add_dummy_prefix": {
+                                        "type": "boolean",
+                                        "default": true
+                                    },
+                                    "gpu": {
+                                        "type": "number",
+                                        "description": "GPU id to use."
+                                    },
+                                    "model_type": {
+                                        "default": "unigram"
+                                    },
+                                    "use_all_vocab": {
+                                        "type": "boolean",
+                                        "default": false
+                                    },
+                                    "bos_id": {
+                                        "type": "number",
+                                        "description": "Interval of checkpoints by steps (# of minibatches). Default: -1 (by epoch).",
+                                        "default": -1
+                                    },
+                                    "unk_id": {
+                                        "type": "number",
+                                        "default": 1
+                                    },
+                                    "eos_id": {
+                                        "type": "number",
+                                        "default": -1
+                                    },
+                                    "dynamic_batch_mode": {
+                                        "type": "number",
+                                        "description": "Dynamic batching mode. -1: disable; 0: bucket mode; 1: batch mode. default -1.",
+                                        "default": -1,
+                                        "examples": [
+                                            -1,
+                                            0,
+                                            1
+                                        ]
+                                    },
+                                    "tokenizer": {
+                                        "type": "string",
+                                        "default": "<unk>"
+                                    },
+                                    "minloglevel": {
+                                        "type": "number",
+                                        "default": 1
+                                    },
+                                    "user_defined_symbols": {
+                                        "type": "string",
+                                        "default": ""
+                                    },
+                                    "large_dataset": {
+                                        "description": "Use webdataset to load data in POSIX tar format. Be careful with this option, it would change many things than you might think.",
+                                        "default": false
+                                    }
+                                },
+                                "description": "options for traininig tokenizer."
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "type": {
+                                "const": "SimpleTokenizer"
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "option-init": {
+                                "type": "object",
+                                "properties": {
+                                    "dmap": {},
+                                    "read_index_from_file": {
+                                        "type": "boolean",
+                                        "default": false
+                                    }
+                                },
+                                "description": "options for initializing the tokenizer."
+                            },
+                            "option-train": {
+                                "type": "object",
+                                "properties": {},
+                                "description": "options for traininig tokenizer."
+                            }
+                        }
+                    }
+                }
+            ],
+            "required": "type"
+        },
+        "env": {
+            "description": "Configure any environment variable if needed.",
+            "type": "object",
+            "properties": {
+                "CUDA_VISIBLE_DEVICES": {
+                    "description": "Configure which GPU(s) to be used.",
+                    "type": "string",
+                    "default": "0,1,2,3"
+                },
+                "NCCL_SOCKET_IFNAME": {
+                    "description": "Configure which network interface to be used.",
+                    "type": "string"
+                }
+            }
+        },
+        "train": {
+            "type": "object",
+            "properties": {
+                "bin": {
+                    "type": "string",
+                    "description": "Modules that provides training interface.",
+                    "examples": [
+                        "cat.rnnt.train_unified",
+                        "cat.rnnt.train_mwer",
+                        "cat.rnnt.train_nce",
+                        "cat.rnnt.train",
+                        "cat.lm.train",
+                        "cat.ctc.train",
+                        "cat.ctc.train_scrf"
+                    ]
+                }
+            },
+            "description": "Configuration of NN training",
+            "required": [
+                "bin",
+                "option"
+            ],
+            "allOf": [
+                {
+                    "if": {
+                        "properties": {
                             "bin": {
-                                "const": "cat.rnnt.train_nce"
+                                "const": "cat.rnnt.train_unified"
                             }
                         }
                     },
@@ -649,7 +799,7 @@
                         "properties": {
                             "option": {
                                 "type": "object",
-                                "description": "NCE Transducer Training options",
+                                "description": "Unified streaming/offline Transducer training options",
                                 "properties": {
                                     "workers": {
                                         "type": "number",
@@ -734,20 +884,23 @@
                                         "type": "string",
                                         "description": "Directory to save the log and model files."
                                     },
-                                    "dynamic_bucket_size": {
+                                    "bucket_size": {
                                         "type": "number",
-                                        "description": "The approximate maximum bucket size in dynamic_batch_mode=0.",
+                                        "description": "Number of seq lengths in total of a mini-batch, valid in --batching-mode='batch'",
                                         "default": -1
                                     },
-                                    "dynamic_batch_mode": {
-                                        "type": "number",
-                                        "description": "Dynamic batching mode. -1: disable; 0: bucket mode; 1: batch mode. default -1.",
-                                        "default": -1,
+                                    "batching_mode": {
+                                        "type": "string",
+                                        "description": "Batching mode: 'batch' or 'bucker', default: 'batch'",
+                                        "default": "batch",
                                         "examples": [
-                                            -1,
-                                            0,
-                                            1
+                                            "batch",
+                                            "bucket"
                                         ]
+                                    },
+                                    "batching_uneven": {
+                                        "description": "Dispatch samples to processors 'smartly' (not always) instead evenly. Default: False",
+                                        "default": false
                                     },
                                     "tokenizer": {
                                         "type": "string",
@@ -767,7 +920,7 @@
                                     },
                                     "init_model": {
                                         "type": "string",
-                                        "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself (w/o optimizer)"
+                                        "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself."
                                     }
                                 }
                             }
@@ -778,7 +931,7 @@
                     "if": {
                         "properties": {
                             "bin": {
-                                "const": "cat.rnnt.train"
+                                "const": "cat.rnnt.train_mwer"
                             }
                         }
                     },
@@ -871,20 +1024,23 @@
                                         "type": "string",
                                         "description": "Directory to save the log and model files."
                                     },
-                                    "dynamic_bucket_size": {
+                                    "bucket_size": {
                                         "type": "number",
-                                        "description": "The approximate maximum bucket size in dynamic_batch_mode=0.",
+                                        "description": "Number of seq lengths in total of a mini-batch, valid in --batching-mode='batch'",
                                         "default": -1
                                     },
-                                    "dynamic_batch_mode": {
-                                        "type": "number",
-                                        "description": "Dynamic batching mode. -1: disable; 0: bucket mode; 1: batch mode. default -1.",
-                                        "default": -1,
+                                    "batching_mode": {
+                                        "type": "string",
+                                        "description": "Batching mode: 'batch' or 'bucker', default: 'batch'",
+                                        "default": "batch",
                                         "examples": [
-                                            -1,
-                                            0,
-                                            1
+                                            "batch",
+                                            "bucket"
                                         ]
+                                    },
+                                    "batching_uneven": {
+                                        "description": "Dispatch samples to processors 'smartly' (not always) instead evenly. Default: False",
+                                        "default": false
                                     },
                                     "tokenizer": {
                                         "type": "string",
@@ -904,7 +1060,7 @@
                                     },
                                     "init_model": {
                                         "type": "string",
-                                        "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself (w/o optimizer)"
+                                        "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself."
                                     }
                                 }
                             }
@@ -1008,20 +1164,23 @@
                                         "type": "string",
                                         "description": "Directory to save the log and model files."
                                     },
-                                    "dynamic_bucket_size": {
+                                    "bucket_size": {
                                         "type": "number",
-                                        "description": "The approximate maximum bucket size in dynamic_batch_mode=0.",
+                                        "description": "Number of seq lengths in total of a mini-batch, valid in --batching-mode='batch'",
                                         "default": -1
                                     },
-                                    "dynamic_batch_mode": {
-                                        "type": "number",
-                                        "description": "Dynamic batching mode. -1: disable; 0: bucket mode; 1: batch mode. default -1.",
-                                        "default": -1,
+                                    "batching_mode": {
+                                        "type": "string",
+                                        "description": "Batching mode: 'batch' or 'bucker', default: 'batch'",
+                                        "default": "batch",
                                         "examples": [
-                                            -1,
-                                            0,
-                                            1
+                                            "batch",
+                                            "bucket"
                                         ]
+                                    },
+                                    "batching_uneven": {
+                                        "description": "Dispatch samples to processors 'smartly' (not always) instead evenly. Default: False",
+                                        "default": false
                                     },
                                     "tokenizer": {
                                         "type": "string",
@@ -1041,7 +1200,7 @@
                                     },
                                     "init_model": {
                                         "type": "string",
-                                        "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself (w/o optimizer)"
+                                        "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself."
                                     }
                                 }
                             }
@@ -1145,20 +1304,23 @@
                                         "type": "string",
                                         "description": "Directory to save the log and model files."
                                     },
-                                    "dynamic_bucket_size": {
+                                    "bucket_size": {
                                         "type": "number",
-                                        "description": "The approximate maximum bucket size in dynamic_batch_mode=0.",
+                                        "description": "Number of seq lengths in total of a mini-batch, valid in --batching-mode='batch'",
                                         "default": -1
                                     },
-                                    "dynamic_batch_mode": {
-                                        "type": "number",
-                                        "description": "Dynamic batching mode. -1: disable; 0: bucket mode; 1: batch mode. default -1.",
-                                        "default": -1,
+                                    "batching_mode": {
+                                        "type": "string",
+                                        "description": "Batching mode: 'batch' or 'bucker', default: 'batch'",
+                                        "default": "batch",
                                         "examples": [
-                                            -1,
-                                            0,
-                                            1
+                                            "batch",
+                                            "bucket"
                                         ]
+                                    },
+                                    "batching_uneven": {
+                                        "description": "Dispatch samples to processors 'smartly' (not always) instead evenly. Default: False",
+                                        "default": false
                                     },
                                     "tokenizer": {
                                         "type": "string",
@@ -1178,7 +1340,7 @@
                                     },
                                     "init_model": {
                                         "type": "string",
-                                        "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself (w/o optimizer)"
+                                        "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself."
                                     }
                                 }
                             }
@@ -1282,20 +1444,23 @@
                                         "type": "string",
                                         "description": "Directory to save the log and model files."
                                     },
-                                    "dynamic_bucket_size": {
+                                    "bucket_size": {
                                         "type": "number",
-                                        "description": "The approximate maximum bucket size in dynamic_batch_mode=0.",
+                                        "description": "Number of seq lengths in total of a mini-batch, valid in --batching-mode='batch'",
                                         "default": -1
                                     },
-                                    "dynamic_batch_mode": {
-                                        "type": "number",
-                                        "description": "Dynamic batching mode. -1: disable; 0: bucket mode; 1: batch mode. default -1.",
-                                        "default": -1,
+                                    "batching_mode": {
+                                        "type": "string",
+                                        "description": "Batching mode: 'batch' or 'bucker', default: 'batch'",
+                                        "default": "batch",
                                         "examples": [
-                                            -1,
-                                            0,
-                                            1
+                                            "batch",
+                                            "bucket"
                                         ]
+                                    },
+                                    "batching_uneven": {
+                                        "description": "Dispatch samples to processors 'smartly' (not always) instead evenly. Default: False",
+                                        "default": false
                                     },
                                     "tokenizer": {
                                         "type": "string",
@@ -1315,7 +1480,7 @@
                                     },
                                     "init_model": {
                                         "type": "string",
-                                        "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself (w/o optimizer)"
+                                        "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself."
                                     }
                                 }
                             }
@@ -1419,20 +1584,23 @@
                                         "type": "string",
                                         "description": "Directory to save the log and model files."
                                     },
-                                    "dynamic_bucket_size": {
+                                    "bucket_size": {
                                         "type": "number",
-                                        "description": "The approximate maximum bucket size in dynamic_batch_mode=0.",
+                                        "description": "Number of seq lengths in total of a mini-batch, valid in --batching-mode='batch'",
                                         "default": -1
                                     },
-                                    "dynamic_batch_mode": {
-                                        "type": "number",
-                                        "description": "Dynamic batching mode. -1: disable; 0: bucket mode; 1: batch mode. default -1.",
-                                        "default": -1,
+                                    "batching_mode": {
+                                        "type": "string",
+                                        "description": "Batching mode: 'batch' or 'bucker', default: 'batch'",
+                                        "default": "batch",
                                         "examples": [
-                                            -1,
-                                            0,
-                                            1
+                                            "batch",
+                                            "bucket"
                                         ]
+                                    },
+                                    "batching_uneven": {
+                                        "description": "Dispatch samples to processors 'smartly' (not always) instead evenly. Default: False",
+                                        "default": false
                                     },
                                     "tokenizer": {
                                         "type": "string",
@@ -1452,7 +1620,147 @@
                                     },
                                     "init_model": {
                                         "type": "string",
-                                        "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself (w/o optimizer)"
+                                        "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself."
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "bin": {
+                                "const": "cat.ctc.train_scrf"
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "option": {
+                                "type": "object",
+                                "description": "Sampling-base CTC-CRF Trainer options",
+                                "properties": {
+                                    "workers": {
+                                        "type": "number",
+                                        "description": "number of data loading workers (default: 1)",
+                                        "default": 1
+                                    },
+                                    "rank": {
+                                        "type": "number",
+                                        "description": "node rank for distributed training",
+                                        "default": 0
+                                    },
+                                    "dist_url": {
+                                        "type": "string",
+                                        "description": "url used to set up distributed training",
+                                        "default": "tcp://localhost:13457"
+                                    },
+                                    "dist_backend": {
+                                        "type": "string",
+                                        "description": "distributed backend",
+                                        "default": "nccl"
+                                    },
+                                    "world_size": {
+                                        "type": "number",
+                                        "description": "number of nodes for distributed training",
+                                        "default": 1
+                                    },
+                                    "gpu": {
+                                        "type": "number",
+                                        "description": "GPU id to use."
+                                    },
+                                    "print_freq": {
+                                        "type": "number",
+                                        "description": "print frequency (default: 10)",
+                                        "default": 10
+                                    },
+                                    "batch_size": {
+                                        "type": "number",
+                                        "description": "mini-batch size (default: 256), this is the total batch size of all GPUs on the current node when using Distributed Data Parallel",
+                                        "default": 256
+                                    },
+                                    "seed": {
+                                        "type": "number",
+                                        "description": "Manual seed.",
+                                        "default": 0
+                                    },
+                                    "amp": {
+                                        "description": "Enable automatic mixed precision training.",
+                                        "default": false
+                                    },
+                                    "grad_accum_fold": {
+                                        "type": "number",
+                                        "description": "Utilize gradient accumulation for K times. Default: K=1",
+                                        "default": 1
+                                    },
+                                    "grad_norm": {
+                                        "type": "number",
+                                        "description": "Max norm of the gradients. Default: 0.0 (Disable grad-norm).",
+                                        "default": 0.0
+                                    },
+                                    "debug": {
+                                        "description": "Configure to debug settings, would overwrite most of the options.",
+                                        "default": false
+                                    },
+                                    "verbose": {
+                                        "description": "Configure to print out more detailed info.",
+                                        "default": false
+                                    },
+                                    "check_freq": {
+                                        "type": "number",
+                                        "description": "Interval of checkpoints by steps (# of minibatches). Default: -1 (by epoch).",
+                                        "default": -1
+                                    },
+                                    "trset": {
+                                        "type": "string",
+                                        "description": "Location of training data. Default: <data>/[pickle|hdf5]/tr.[pickle|hdf5]"
+                                    },
+                                    "devset": {
+                                        "type": "string",
+                                        "description": "Location of dev data. Default: <data>/[pickle|hdf5]/cv.[pickle|hdf5]"
+                                    },
+                                    "dir": {
+                                        "type": "string",
+                                        "description": "Directory to save the log and model files."
+                                    },
+                                    "bucket_size": {
+                                        "type": "number",
+                                        "description": "Number of seq lengths in total of a mini-batch, valid in --batching-mode='batch'",
+                                        "default": -1
+                                    },
+                                    "batching_mode": {
+                                        "type": "string",
+                                        "description": "Batching mode: 'batch' or 'bucker', default: 'batch'",
+                                        "default": "batch",
+                                        "examples": [
+                                            "batch",
+                                            "bucket"
+                                        ]
+                                    },
+                                    "batching_uneven": {
+                                        "description": "Dispatch samples to processors 'smartly' (not always) instead evenly. Default: False",
+                                        "default": false
+                                    },
+                                    "tokenizer": {
+                                        "type": "string",
+                                        "description": "Specify tokenizer. Currently, only used with --large-dataset."
+                                    },
+                                    "large_dataset": {
+                                        "description": "Use webdataset to load data in POSIX tar format. Be careful with this option, it would change many things than you might think.",
+                                        "default": false
+                                    },
+                                    "config": {
+                                        "type": "string",
+                                        "description": "Path to configuration file of backbone."
+                                    },
+                                    "resume": {
+                                        "type": "string",
+                                        "description": "Path to location of checkpoint."
+                                    },
+                                    "init_model": {
+                                        "type": "string",
+                                        "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself."
                                     }
                                 }
                             }
@@ -1560,7 +1868,7 @@
                                             },
                                             "init_model": {
                                                 "type": "string",
-                                                "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself (w/o optimizer)"
+                                                "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself."
                                             },
                                             "lm_config": {
                                                 "type": "string",
@@ -1692,7 +2000,7 @@
                                             },
                                             "init_model": {
                                                 "type": "string",
-                                                "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself (w/o optimizer)"
+                                                "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself."
                                             },
                                             "nbestlist": {
                                                 "type": "string",
@@ -1759,7 +2067,7 @@
                                             },
                                             "init_model": {
                                                 "type": "string",
-                                                "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself (w/o optimizer)"
+                                                "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself."
                                             },
                                             "input_scp": {
                                                 "type": "string"
@@ -1771,6 +2079,14 @@
                                             "nj": {
                                                 "type": "number",
                                                 "default": -1
+                                            },
+                                            "built_model_by": {
+                                                "type": "string",
+                                                "description": "Tell where to import build_model() function. defautl: cat.ctc.train",
+                                                "default": "cat.ctc.train"
+                                            },
+                                            "streaming": {
+                                                "default": false
                                             }
                                         }
                                     }
@@ -1801,7 +2117,7 @@
                                             },
                                             "init_model": {
                                                 "type": "string",
-                                                "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself (w/o optimizer)"
+                                                "description": "Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself."
                                             },
                                             "input_scp": {
                                                 "type": "string"
@@ -1828,9 +2144,17 @@
                                                 "type": "number",
                                                 "default": 3
                                             },
+                                            "do_normalize": {
+                                                "description": "Do the log-softmax normalization before beam search.",
+                                                "default": false
+                                            },
                                             "tokenizer": {
                                                 "type": "string",
                                                 "description": "Tokenizer model file. See cat/shared/tokenizer.py for details."
+                                            },
+                                            "gpu": {
+                                                "description": "Use GPU to do inference. Default: False.",
+                                                "default": false
                                             },
                                             "nj": {
                                                 "type": "number",
@@ -1839,6 +2163,14 @@
                                             "thread_per_woker": {
                                                 "type": "number",
                                                 "default": 1
+                                            },
+                                            "built_model_by": {
+                                                "type": "string",
+                                                "description": "Tell where to import build_model() function. defautl: cat.ctc.train",
+                                                "default": "cat.ctc.train"
+                                            },
+                                            "streaming": {
+                                                "default": false
                                             }
                                         }
                                     }

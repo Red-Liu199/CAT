@@ -154,7 +154,7 @@ def gen_readme(path: str, model: nn.Module, gpu_info: list = []) -> str:
         "",
         "|     training process    |",
         "|:-----------------------:|",
-        f"|![monitor](./{F_MONITOR_FIG})|",
+        f"|![tb-plot](./{F_MONITOR_FIG})|",
         ""
     ]
     with open(path, 'w') as fo:
@@ -258,10 +258,12 @@ def basic_trainer_parser(prog: str = '', training: bool = True,  isddp: bool = T
                             help="Location of dev data. Default: <data>/[pickle|hdf5]/cv.[pickle|hdf5]")
         parser.add_argument("--dir", type=str, default=None, metavar='PATH',
                             help="Directory to save the log and model files.")
-        parser.add_argument("--dynamic_bucket_size", type=int, default=-1,
-                            help="The approximate maximum bucket size in dynamic_batch_mode=0.")
-        parser.add_argument("--dynamic_batch_mode", type=int, choices=[-1, 0, 1], default=-1,
-                            help="Dynamic batching mode. -1: disable; 0: bucket mode; 1: batch mode. default -1.")
+        parser.add_argument('--bucket-size', default=-1, type=int, metavar='N',
+                            help="Number of seq lengths in total of a mini-batch, valid in --batching-mode='batch'")
+        parser.add_argument("--batching-mode", type=str, choices=['batch', 'bucket'], default='batch',
+                            help="Batching mode: 'batch' or 'bucker', default: 'batch'")
+        parser.add_argument("--batching-uneven", action='store_true', default=False,
+                            help="Dispatch samples to processors 'smartly' (not always) instead evenly. Default: False")
 
         parser.add_argument("--tokenizer", type=str,
                             help="Specify tokenizer. Currently, only used with --large-dataset.")
@@ -273,7 +275,7 @@ def basic_trainer_parser(prog: str = '', training: bool = True,  isddp: bool = T
     parser.add_argument("--resume", type=str, default=None,
                         help="Path to location of checkpoint.")
     parser.add_argument("--init-model", type=str, default=None,
-                        help="Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself (w/o optimizer)")
+                        help="Path to location of checkpoint. This is different from --resume and would only load the parameters of model itself.")
 
     return parser
 
@@ -309,7 +311,34 @@ def divide_almost_equally(arr_weighted: List[Tuple[Any, Union[float, int]]], num
     return groups.values()
 
 
-def weighted_group(weighted_list: List[Tuple[Any, Union[float, int]]], N: int, consider_padding: bool = False) -> List[List[Any]]:
+def _get_bound_greedy(wghts: List[Union[float, int]], K: int, avg: float = None, upper: bool = True) -> int:
+    """Split `wghts` into `K` groups and get the upper/lower bound for first/last group.
+        check `weighted_group()` for usage.
+
+    suppose `wghts` in descending order.
+
+    if `upper=True`, return open upper bound for the groups[0];
+
+    if `upper=False`, return closed lower bound for the groups[-1]
+    """
+    l_arr = len(wghts)
+    assert l_arr >= K and K > 0
+    if K == 1:
+        return l_arr if upper else 0
+    if l_arr == K:
+        return 1 if upper else l_arr - 1
+
+    if avg is None:
+        avg = sum(wghts)/K
+    for i in range(1, l_arr-K+1):
+        bin_highest = wghts[0] if upper else wghts[l_arr-i]
+        if bin_highest * i > avg:
+            break
+
+    return i if upper else l_arr-i
+
+
+def weighted_group(weighted_list: List[Tuple[Any, Union[float, int]]], N: int, consider_padding: bool = True) -> List[List[Any]]:
     """
     weighted_list is list of (obj, weight)
     Split `weighted_list` by weight into `N` parts and return the indices.
@@ -330,54 +359,20 @@ def weighted_group(weighted_list: List[Tuple[Any, Union[float, int]]], N: int, c
     if not consider_padding:
         return list(divide_almost_equally(weighted_list, N))
 
-    def get_large(_wght, _K: int) -> int:
-        l_arr = len(_wght)
-        assert l_arr >= _K
-        if l_arr == _K:
-            return 1
-        if _K == 1:
-            return l_arr
-
-        _avg = sum(_wght)/_K
-        cumsum = _wght[0]
-        for i in range(l_arr-_K):
-            cumsum += _wght[i+1]
-            if cumsum > _avg:
-                break
-        # i+1 for [l_bound, u_bound)
-        # i for [l_bound, u_bound-1), keep large part smaller
-        return i+1
-
-    def get_small(_wght, _K: int) -> int:
-        l_arr = len(_wght)
-        assert l_arr >= _K
-        if l_arr == _K:
-            return l_arr-1
-        if _K == 1:
-            return 0
-
-        _avg = sum(_wght)/_K
-        cumsum = 0
-        for i in range(l_arr-1, _K-2, -1):
-            cumsum += _wght[i]
-            if cumsum > _avg:
-                break
-        return i
-
     # greedy not optimal
     src_list, weights = list(zip(*weighted_list))
     g_avg = sum(weights) / N
     indices_fwd = [0]
     indices_bwd = [len_src]
-    res_list = weights[:]
+    res_list = weights
     for res in range(N, 0, -1):
-        running_avg = sum(res_list)/res
-        if running_avg >= g_avg:
-            l_bound = get_small(res_list, res)
-            indices_bwd.append(
-                indices_bwd[-1] - (len(res_list)-l_bound))
+        res_avg = sum(res_list)/res
+        if res_avg >= g_avg:
+            l_bound = _get_bound_greedy(
+                res_list, res, avg=res_avg, upper=False)
+            indices_bwd.append(indices_bwd[-1] - (len(res_list)-l_bound))
         else:
-            u_bound = get_large(res_list, res)
+            u_bound = _get_bound_greedy(res_list, res, avg=res_avg)
             indices_fwd.append(indices_fwd[-1] + u_bound)
         res_list = weights[indices_fwd[-1]:indices_bwd[-1]]
 
@@ -405,8 +400,7 @@ def setup_path(args: argparse.Namespace):
         D_TMP,
         D_CHECKPOINT,
         D_LOG,
-        F_NN_CONFIG,
-        F_MONITOR_SUMMARY
+        F_NN_CONFIG
     )
     # set checkpoint path and log files path
     if not args.debug:
@@ -420,7 +414,7 @@ def setup_path(args: argparse.Namespace):
         os.makedirs(checkdir, exist_ok=True)
         os.makedirs(logdir, exist_ok=True)
     else:
-        highlight_msg("Debugging")
+        highlight_msg("debugging")
         # This is a hack, we won't read/write anything in debug mode.
         logdir = os.path.join(args.dir, D_TMP)
         checkdir = logdir
@@ -437,17 +431,14 @@ def setup_path(args: argparse.Namespace):
                 f"{args._checkdir} is not empty!"
             )
 
-        logfile = os.path.join(logdir, F_MONITOR_SUMMARY)
-        if os.path.isfile(logfile):
-            raise FileExistsError(
-                f"{logfile} exists!"
-            )
 
-
-def load_checkpoint(model: Union[torch.nn.Module, torch.nn.parallel.DistributedDataParallel], path_ckpt: str) -> torch.nn.Module:
+def load_checkpoint(model: Union[torch.nn.Module, torch.nn.parallel.DistributedDataParallel], path_ckpt: Union[str, OrderedDict]) -> torch.nn.Module:
     """Load parameters across distributed model and its checkpoint, resolve the prefix 'module.'"""
-    checkpoint = torch.load(
-        path_ckpt, map_location=next(model.parameters()).device)
+    if isinstance(path_ckpt, str):
+        checkpoint = torch.load(
+            path_ckpt, map_location=next(model.parameters()).device)
+    else:
+        checkpoint = path_ckpt
     if isinstance(model, torch.nn.parallel.DistributedDataParallel):
         state_dict = checkpoint['model']
     else:

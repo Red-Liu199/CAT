@@ -32,7 +32,7 @@ fi
 cd $KALDI_ROOT/egs/wsj/s5 && . ./path.sh
 cd - >/dev/null
 
-python utils/tool/trans_text2id.py $tokenizer $r_specifier |
+python utils/data/corpus2index.py $r_specifier -t --tokenizer=$tokenizer |
     chain-est-phone-lm \
         --no-prune-ngram-order=$no_prune_ngram_order \
         --ngram-order=$ngram_order \
@@ -42,7 +42,8 @@ vocab_size=$(python -c "import cat; print(cat.shared.tokenizer.load('$tokenizer'
 python utils/tool/build_ctc_topo.py $vocab_size |
     fstcompile | fstarcsort --sort_type=olabel >T.fst.tmp || exit 1
 
-fstcompose T.fst.tmp token_lm.fst.tmp >$w_specifier
+fstcompose T.fst.tmp token_lm.fst.tmp |
+    fstdeterminizestar --use-log=true >$w_specifier
 
 rm {T,token_lm}.fst.tmp
 echo "$0 done."

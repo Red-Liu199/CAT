@@ -4,22 +4,19 @@
 
 __all__ = ["NCETransducerTrainer", "build_model", "_parser", "main"]
 
-from . import rnnt_builder
-from .train import TransducerTrainer
-from .joiner import AbsJointNet
+from .train import (
+    TransducerTrainer,
+    build_model as rnnt_builder,
+    main_worker as basic_worker
+)
 from .beam_search import BeamSearcher as RNNTDecoder
+from ..ctc.train import cal_wer, custom_evaluate
 from ..lm import lm_builder
 from ..shared import coreutils
-from ..shared.monitor import ANNOTATION
-from ..shared.encoder import AbsEncoder
 from ..shared.decoder import AbsDecoder, ILM
 from ..shared.manager import (
     Manager,
     train as default_train_func
-)
-from ..shared.data import (
-    KaldiSpeechDataset,
-    sortedPadCollateASR
 )
 
 
@@ -28,45 +25,20 @@ import math
 import argparse
 import Levenshtein
 from typing import *
-from tqdm import tqdm
 from warp_rnnt import rnnt_loss as RNNTLoss
 
 import torch
 import torch.nn as nn
-import torch.distributed as dist
-from torch.cuda.amp import autocast
 
 
 def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
-    coreutils.set_random_seed(args.seed)
-    args.gpu = gpu
-    args.rank = args.rank * ngpus_per_node + gpu
-    torch.cuda.set_device(args.gpu)
 
-    dist.init_process_group(
-        backend=args.dist_backend, init_method=args.dist_url,
-        world_size=args.world_size, rank=args.rank)
-
-    manager = Manager(
-        KaldiSpeechDataset,
-        sortedPadCollateASR(),
-        args, build_model,
+    return basic_worker(
+        gpu, ngpus_per_node, args,
+        func_build_model=build_model,
         func_train=custom_train,
-        func_eval=custom_evaluate,
-        extra_tracks=[
-            'loss/ml',
-            'loss/nce',
-            'loss/nce-data',
-            'loss/nce-noise',
-            'acc/data',
-            'acc/noise',
-            'weight/ilm',
-            'weight/elm'
-        ]
+        func_eval=custom_evaluate
     )
-
-    # training
-    manager.run(args)
 
 
 class NCETransducerTrainer(TransducerTrainer):
@@ -79,7 +51,7 @@ class NCETransducerTrainer(TransducerTrainer):
             mle_weight: Optional[float] = 0.,
             trainable_weight: bool = False,
             **kwargs) -> None:
-        super().__init__(*args, **kwargs)
+        super().__init__(**kwargs)
 
         assert isinstance(ext_lm, AbsDecoder)
         assert isinstance(beamdecoder, RNNTDecoder)
@@ -269,6 +241,17 @@ class NCETransducerTrainer(TransducerTrainer):
     @torch.no_grad()
     def get_wer(self, inputs: torch.FloatTensor, targets: torch.LongTensor, in_lens: torch.LongTensor, target_lens: torch.LongTensor) -> torch.FloatTensor:
 
+        if self.attach['_eval_beam_searcher'] is None:
+            # register beam searcher
+            self.attach['_eval_beam_searcher'] = RNNTDecoder(
+                self.predictor,
+                self.joiner,
+                beam_size=self.attach['searcher'].beam_size,
+                lm_module=self.attach['elm'],
+                alpha=self.weights['elm'],
+                est_ilm=True,
+                ilm_weight=self.weights['ilm']
+            )
         enc_out, lx = self.encoder(inputs, in_lens)
         lx = lx.to(torch.int32)
         bs = enc_out.size(0)
@@ -305,18 +288,6 @@ def custom_hook(
         pos_acc = ((p_c_0.exp() > 0.5).sum() / p_c_0.size(0)).item()
         noise_acc = ((p_c_1.exp() > 0.5).sum() / p_c_1.size(0)).item()
         step_cur = manager.step_by_last_epoch + n_step
-        manager.monitor.update(
-            {
-                'loss/ml': (l_ml, step_cur),
-                'loss/nce': ((l_data+l_noise), step_cur),
-                'loss/nce-data': (l_data, step_cur),
-                'loss/nce-noise': (l_noise, step_cur),
-                'acc/data': (pos_acc, step_cur),
-                'acc/noise': (noise_acc, step_cur),
-                'weight/ilm': (float(ilm_w), step_cur),
-                'weight/elm': (float(elm_w), step_cur)
-            }
-        )
         manager.writer.add_scalar(
             'loss/ml', l_ml, step_cur)
         manager.writer.add_scalar(
@@ -338,73 +309,6 @@ def custom_hook(
 
 def custom_train(*args):
     return default_train_func(*args, hook_func=custom_hook)
-
-
-def cal_wer(gt: List[List[int]], hy: List[List[int]]) -> Tuple[int, int]:
-    """compute error count for list of tokens"""
-    assert len(gt) == len(hy)
-    err = 0
-    cnt = 0
-    for i in range(len(gt)):
-        err += Levenshtein.distance(
-            ''.join(chr(n) for n in hy[i]),
-            ''.join(chr(n) for n in gt[i])
-        )
-        cnt += len(gt[i])
-    return (err, cnt)
-
-
-@torch.no_grad()
-def custom_evaluate(testloader, args: argparse.Namespace, manager: Manager) -> float:
-
-    model = manager.model       # type: NCETransducerTrainer
-    cnt_tokens = 0
-    cnt_err = 0
-    n_proc = dist.get_world_size()
-    if isinstance(model.module, NCETransducerTrainer):
-        # register beam searcher
-        model.module.attach['_eval_beam_searcher'] = RNNTDecoder(
-            model.module.predictor,
-            model.module.joiner,
-            beam_size=model.module.attach['searcher'].beam_size,
-            lm_module=model.module.attach['elm'],
-            alpha=model.module.weights['elm'],
-            est_ilm=True,
-            ilm_weight=model.module.weights['ilm']
-        )
-
-    for i, minibatch in tqdm(enumerate(testloader), desc=f'Epoch: {manager.epoch} | eval',
-                             unit='batch', total=len(testloader), disable=(args.gpu != 0), leave=False):
-
-        feats, ilens, labels, olens = minibatch
-        feats = feats.cuda(args.gpu, non_blocking=True)
-
-        '''
-        Suppose the loss is reduced by mean
-        '''
-        part_cnt_err, part_cnt_sum = model.module.get_wer(
-            feats, labels, ilens, olens)
-        cnt_err += part_cnt_err
-        cnt_tokens += part_cnt_sum
-
-    gather_obj = [None for _ in range(n_proc)]
-    dist.gather_object(
-        (cnt_err, cnt_tokens),
-        gather_obj if args.rank == 0 else None,
-        dst=0
-    )
-    if args.rank == 0:
-        l_err, l_sum = list(zip(*gather_obj))
-        wer = sum(l_err) / sum(l_sum)
-        manager.writer.add_scalar('loss/dev-wer', wer, manager.step)
-        manager.monitor.update(ANNOTATION['dev-metric'], (wer, manager.step))
-
-        scatter_list = [wer]
-    else:
-        scatter_list = [None]
-
-    dist.broadcast_object_list(scatter_list, src=0)
-    return scatter_list[0]
 
 
 def build_model(cfg: dict, args: argparse.Namespace, dist: bool = True) -> NCETransducerTrainer:

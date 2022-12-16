@@ -16,20 +16,14 @@
                         "BLSTMN",
                         "ConformerLSTM",
                         "ConformerNet",
+                        "EmbeddingEncoder",
                         "LSTM",
                         "LSTMrowCONV",
                         "TDNN_LSTM",
                         "TDNN_NAS",
-                        "VGGLSTM"
+                        "VGGLSTM",
+                        "Wav2Vec2Encoder"
                     ]
-                },
-                "freeze": {
-                    "type": "boolean",
-                    "default": false
-                },
-                "pretrained": {
-                    "type": "string",
-                    "default": false
                 }
             },
             "description": "Configuration of Transducer transcription network / encoder.",
@@ -59,7 +53,7 @@
                                         "type": "number",
                                         "default": -1
                                     },
-                                    "n_hid": {
+                                    "dim_last_hid": {
                                         "type": "number",
                                         "default": -1
                                     }
@@ -127,6 +121,14 @@
                                     },
                                     "dropout_lstm": {
                                         "type": "number"
+                                    },
+                                    "bidirectional": {
+                                        "type": "boolean",
+                                        "default": false
+                                    },
+                                    "proj_size": {
+                                        "type": "number",
+                                        "default": 0
                                     }
                                 }
                             }
@@ -181,9 +183,9 @@
                                         "type": "number",
                                         "default": 4
                                     },
-                                    "kernel_size": {
+                                    "d_head": {
                                         "type": "number",
-                                        "default": 32
+                                        "default": -1
                                     },
                                     "multiplier": {
                                         "type": "number",
@@ -226,6 +228,34 @@
                     "if": {
                         "properties": {
                             "type": {
+                                "const": "EmbeddingEncoder"
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "kwargs": {
+                                "type": "object",
+                                "properties": {
+                                    "edim": {
+                                        "type": "number"
+                                    },
+                                    "num_classes": {
+                                        "type": "number"
+                                    },
+                                    "enc_head_type": {
+                                        "type": "string",
+                                        "default": "ConformerNet"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "type": {
                                 "const": "LSTM"
                             }
                         }
@@ -241,11 +271,15 @@
                                     "hdim": {
                                         "type": "number"
                                     },
-                                    "n_layers": {
+                                    "num_layers": {
                                         "type": "number"
                                     },
-                                    "dropout": {
+                                    "hdim": {
                                         "type": "number"
+                                    },
+                                    "proj_size": {
+                                        "type": "number",
+                                        "default": 0
                                     },
                                     "num_classes": {
                                         "type": "number",
@@ -405,9 +439,11 @@
                                         "type": "number",
                                         "default": -1
                                     },
-                                    "with_head": {
-                                        "type": "boolean",
-                                        "default": true
+                                    "n_layers": {
+                                        "type": "number"
+                                    },
+                                    "dropout": {
+                                        "type": "number"
                                     },
                                     "in_channel": {
                                         "type": "number",
@@ -416,6 +452,39 @@
                                     "bidirectional": {
                                         "type": "number",
                                         "default": false
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "type": {
+                                "const": "Wav2Vec2Encoder"
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "kwargs": {
+                                "type": "object",
+                                "properties": {
+                                    "pretrained_model": {
+                                        "type": "string"
+                                    },
+                                    "use_wav2vec2_encoder": {
+                                        "type": "boolean",
+                                        "default": false
+                                    },
+                                    "tune_wav2vec2": {
+                                        "type": "boolean",
+                                        "default": false
+                                    },
+                                    "enc_head_type": {
+                                        "type": "string",
+                                        "default": "ConformerNet"
                                     }
                                 }
                             }
@@ -432,6 +501,7 @@
                     "examples": [
                         "AbsDecoder",
                         "CausalTransformer",
+                        "EmbConv1D",
                         "Embedding",
                         "ILM",
                         "LSTM",
@@ -440,14 +510,6 @@
                         "SyllableEnhancedLSTM",
                         "ZeroDecoder"
                     ]
-                },
-                "freeze": {
-                    "type": "boolean",
-                    "default": false
-                },
-                "pretrained": {
-                    "type": "string",
-                    "default": false
                 }
             },
             "description": "Configuration of Transducer prediction network / LM.",
@@ -538,11 +600,45 @@
                                     "use_cache": {
                                         "type": "boolean",
                                         "default": false
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "type": {
+                                "const": "EmbConv1D"
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "kwargs": {
+                                "type": "object",
+                                "properties": {
+                                    "num_classes": {
+                                        "type": "number"
                                     },
-                                    "with_end_mark": {
+                                    "edim": {
+                                        "type": "number"
+                                    },
+                                    "conv_dim": {
+                                        "type": "number"
+                                    },
+                                    "kernel_size": {
+                                        "type": "number",
+                                        "default": 3
+                                    },
+                                    "act": {
+                                        "default": "relu"
+                                    },
+                                    "with_head": {
+                                        "type": "boolean",
                                         "default": true
-                                    },
-                                    "linfo_path": {}
+                                    }
                                 }
                             }
                         }
@@ -826,8 +922,10 @@
                     "type": "string",
                     "examples": [
                         "AbsJointNet",
+                        "ConvJoiner",
                         "HAT",
-                        "JointNet"
+                        "JointNet",
+                        "LogAdd"
                     ]
                 }
             },
@@ -850,6 +948,36 @@
                             "kwargs": {
                                 "type": "object",
                                 "properties": {}
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "type": {
+                                "const": "ConvJoiner"
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "kwargs": {
+                                "type": "object",
+                                "properties": {
+                                    "odim_enc": {
+                                        "type": "number"
+                                    },
+                                    "odim_pred": {
+                                        "type": "number"
+                                    },
+                                    "num_classes": {
+                                        "type": "number"
+                                    },
+                                    "hdim": {
+                                        "type": "number"
+                                    }
+                                }
                             }
                         }
                     }
@@ -923,6 +1051,32 @@
                                     "act": {
                                         "default": "tanh"
                                     },
+                                    "compact": {
+                                        "type": "boolean",
+                                        "default": false
+                                    },
+                                    "pre_project": {
+                                        "type": "boolean",
+                                        "default": true
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "type": {
+                                "const": "LogAdd"
+                            }
+                        }
+                    },
+                    "then": {
+                        "properties": {
+                            "kwargs": {
+                                "type": "object",
+                                "properties": {
                                     "compact": {
                                         "type": "boolean",
                                         "default": false

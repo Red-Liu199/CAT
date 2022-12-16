@@ -1,6 +1,10 @@
 """
 Implementation of tokenizer
 """
+from ..shared.coreutils import randstr
+from typing import *
+from collections import OrderedDict
+
 import os
 import io
 import re
@@ -13,6 +17,7 @@ import transformers
 from collections import OrderedDict
 from typing import *
 from ..shared.coreutils import randstr
+jieba.default_logger.setLevel(jieba.logging.ERROR)
 
 
 def gen_cache_path() -> str:
@@ -122,6 +127,75 @@ class AbsTokenizer:
 
     def __setstate__(self, state: dict):
         self.load_state_dict(state)
+
+
+class SimpleTokenizer(AbsTokenizer):
+    """Passing a file, a list of words, or a word-to-index mapping to build a simple tokenizer.
+
+    When passed a file, assume one word per line, 
+    if `read_index_from_file=False`, use the first one as word, and the lineid+1 as token id;
+    if `read_index_from_file=True`, take first column as words, second column as token id.
+    """
+
+    def __init__(self, dmap: Union[str, List[str], Dict[str, int]], read_index_from_file: bool = False) -> None:
+        super().__init__()
+        self._r_vocab = OrderedDict([('<s>', 0), ('<unk>', 1)])
+        if isinstance(dmap, str) and os.path.isfile(dmap):
+            if read_index_from_file:
+                consturctd = {}
+                with open(dmap, 'r') as fi:
+                    for line in fi:
+                        line = line.strip()
+                        if line == '':
+                            continue
+                        w, i = line.split(maxsplit=2)[:2]
+                        consturctd[w] = i
+            else:
+                consturctd = []
+                with open(dmap, 'r') as fi:
+                    for line in fi:
+                        line = line.strip()
+                        if line == '':
+                            continue
+                        consturctd.append(line.split(maxsplit=1)[0])
+            dmap = consturctd
+
+        if isinstance(dmap, list):
+            offset = 2
+            for c in dmap:
+                if c in self._r_vocab:
+                    continue
+                self._r_vocab[c] = offset
+                offset += 1
+        elif isinstance(dmap, dict):
+            if '<s>' in dmap:
+                del dmap['<s>']
+            if '<unk>' in dmap:
+                del dmap['<unk>']
+            self._r_vocab.update(dmap)
+        else:
+            raise ValueError(str(type(dmap)))
+        self._i_vocab = [c for c in self._r_vocab.keys()]
+
+    @property
+    def vocab_size(self) -> int:
+        return len(self._r_vocab)
+
+    def _enc(self, s: str) -> List[int]:
+        return [self._r_vocab.get(c, 1) for c in s.split()]
+
+    def _dec(self, indices: Iterable[int]) -> str:
+        return ' '.join(self._i_vocab[i] for i in indices)
+
+    def _vocab_to_dict(self) -> Dict[int, str]:
+        return {i: c for i, c in enumerate(self._i_vocab)}
+
+    def state_dict(self) -> OrderedDict:
+        return self._r_vocab
+
+    def load_state_dict(self, state_dict: OrderedDict):
+        self._r_vocab = state_dict
+        self._i_vocab = [c for c in self._r_vocab.keys()]
 
 
 class JiebaTokenizer(AbsTokenizer):
@@ -315,34 +389,35 @@ class LexiconTokenizer(AbsTokenizer):
 
     def init_lexicon(self, f_mapping: str, add_special_token: bool):
         p_rm_consecutive_space = re.compile(r"\s+")
-        lexicon = []
+
+        lexicon = {}
         with open(f_mapping, 'r') as fi:
             for line in fi:
                 if line == '':
                     continue
                 utt = re.sub(p_rm_consecutive_space, ' ', line).strip().split()
-                lexicon.append(
-                    (utt[0], utt[1:])
-                )
+                if utt[0] not in lexicon:
+                    # for words with multiple pronounciations, keep the first.
+                    lexicon[utt[0]] = utt[1:]
 
         units = {}
-        word2phn = OrderedDict()
+        word2unitid = OrderedDict()
         if add_special_token:
             units[self._bos_token] = 0
             units[self._unk_token] = 1
-            word2phn[self._bos_token] = (0,)
-            word2phn[self._unk_token] = (1,)
+            word2unitid[self._bos_token] = (0,)
+            word2unitid[self._unk_token] = (1,)
 
-        raw_units = set().union(*(utt for _, utt in lexicon))
+        raw_units = set().union(*(lexicon.values()))
         lu = len(units)
         units.update({
             _unit: id+lu
             for id, _unit in enumerate(raw_units)
         })
-        for word, utt in lexicon:
-            word2phn[word] = tuple(units[x] for x in utt)
+        for word, utt in lexicon.items():
+            word2unitid[word] = tuple(units[x] for x in utt)
 
-        self._w2pid = word2phn
+        self._w2pid = word2unitid
         if not add_special_token and (self._bos_token not in self._w2pid or self._unk_token not in self._w2pid):
             raise RuntimeError(
                 f"{self._bos_token} and(or) {self._unk_token} are not found in '{f_mapping}', "
@@ -487,7 +562,7 @@ class SentencePieceTokenizer(AbsTokenizer):
         """
         assert os.path.isfile(f_text), f"Given text file '{f_text}' not found."
         if user_defined_symbols != "":
-            if os.path.isfile(user_defined_symbols):
+            if isinstance(user_defined_symbols, str) and os.path.isfile(user_defined_symbols):
                 user_defined_symbols = [x.strip() for x in open(
                     user_defined_symbols, 'r').readlines()]
 

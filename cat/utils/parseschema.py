@@ -2,7 +2,6 @@
 This script is used for parsing the json schema for experiment settings.
 '''
 
-
 import importlib
 from cat.shared import decoder as pn_zoo
 from cat.shared import encoder as tn_zoo
@@ -17,7 +16,7 @@ from cat.shared._constants import (
     F_NN_CONFIG,
     F_HYPER_CONFIG
 )
-from cat.utils.pipeline.asr import (
+from cat.utils.pipeline.common_utils import (
     readjson,
     dumpjson
 )
@@ -211,10 +210,6 @@ for m in dir(tn_zoo):
         modules.append(_m)
 
 module_processing(processing, modules)
-add_property(processing, {
-    'freeze': gen_object(bool, default=False),
-    'pretrained': gen_object(str, default=False)
-})
 add_property(schema, {'encoder': processing})
 
 
@@ -228,10 +223,6 @@ for m in dir(pn_zoo):
         modules.append(_m)
 
 module_processing(processing, modules)
-add_property(processing, {
-    'freeze': gen_object(bool, default=False),
-    'pretrained': gen_object(str, default=False)
-})
 add_property(schema, {'decoder': processing})
 
 
@@ -285,13 +276,28 @@ modify_vsc_schema(f"exp/**/{F_NN_CONFIG}", f_schema)
 
 
 # hyper-parameter schema
-# most of the settings in this schema is handcrafted
-# except the fields 'train', 'inference':'infer' and 'inference':'er'
+# part of the settings in this schema is handcrafted
 f_schema = f".vscode/{SCHEMA_HYPER_CONFIG}"
 if os.path.isfile(f_schema):
     hyper_schema = readjson(f_schema)
 else:
     hyper_schema = gen_object(dict, desc="Settings of Hyper-parameters.")
+
+# lm corpus packing
+# fmt:off
+from cat.utils.data.pack_corpus import _parser as corpus_parser
+parser = corpus_parser()
+add_property(
+    hyper_schema['properties']['data'],
+    {
+        'packing-text-lm': add_property(
+            gen_object(dict, desc=parser.prog),
+            parser_processing(parser)
+        )
+    }
+)
+del parser
+# fmt:on
 
 # schema for tokenizer
 # setting according to cat.shared.tokenizer.initialize()
@@ -348,8 +354,7 @@ binlist = [
     'cat.rnnt.train',
     'cat.lm.train',
     'cat.ctc.train',
-    'cat.ctc.train_sa_crf',
-    'cat.ctc.train_smbr'
+    'cat.ctc.train_scrf'
 ]
 
 add_property(hyper_schema, {

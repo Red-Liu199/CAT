@@ -1,151 +1,100 @@
-"""
-Extract the meta info.
-Author: Zheng Huahuan
-"""
+# Copyright 2021  Xiaomi Corporation (Author: Yongqing Wang)
+#                 Mobvoi Inc (Author: Di Wu, Binbin Zhang)
+#                 ASLP@NWPU (Author: Hang Lyu)
 
+import sys
 import os
-import json
 import argparse
-import pickle
-from typing import List, Dict, Any, Tuple
-
-import torchaudio
+import json
 
 
-def touch(fname):
-    if os.path.exists(fname):
-        os.utime(fname, None)
-    else:
-        open(fname, 'a').close()
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+def get_args():
+    parser = argparse.ArgumentParser(description="""
+      This script is used to process raw json dataset of WenetSpeech,
+      where the long wav is splitinto segments and
+      data of wenet format is generated.
+      """)
     parser.add_argument(
-        "data", type=str, help="Directory to the WenetSpeech data.")
-    parser.add_argument("meta_json", type=str,
-                        help="The JSON file contains meta information.")
-    parser.add_argument("-o", type=str, dest='output_dir', default='data/thaudio',
-                        help="Ouput directory. default: 'data/thaudio'")
+        'input_json', help="""Input json file of WenetSpeech""")
+    parser.add_argument('output_dir', help="""Output dir for prepared data""")
+    parser.add_argument('--pipe-format', action='store_true', default='False',
+                        help="""If true, wav.scp is generated with pipeline format""")
+
     args = parser.parse_args()
-    assert os.path.isfile(args.meta_json), args.meta_json
-    assert os.access(args.meta_json, os.R_OK), args.meta_json
-    assert os.path.isdir(args.data), args.data
-    assert os.access(args.data, os.R_OK), args.data
+    return args
 
-    os.makedirs(args.output_dir, exist_ok=True)
 
-    if not os.path.exists(f'{args.output_dir}/.done'):
-        with open(args.meta_json, 'r') as injson:
+def meta_analysis(input_json, output_dir, pipe):
+    input_dir = os.path.dirname(input_json)
+
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    try:
+        with open(input_json, 'r') as injson:
             json_data = json.load(injson)
-
-        with open(f'{args.output_dir}/text', 'w') as utt2text, \
-                open(f'{args.output_dir}/segments', 'w') as segments, \
-                open(f'{args.output_dir}/utt2subsets', 'w') as utt2subsets, \
-                open(f'{args.output_dir}/wav', 'w') as wavscp:
-            for long_audio in json_data['audios']:
-                try:
-                    long_audio_path = os.path.realpath(
-                        os.path.join(args.data, long_audio['path']))
-                    aid = long_audio['aid']
-                    segments_lists = long_audio['segments']
-                    duration = long_audio['duration']
-                    assert (os.path.exists(long_audio_path))
-                except AssertionError:
-                    print(f'''Warning: {aid} something is wrong,
-                                maybe AssertionError, skipped''')
-                    continue
-                except Exception:
-                    print(f'''Warning: {aid} something is wrong, maybe the
-                                error path: {long_audio_path}, skipped''')
-                    continue
-                else:
-                    wavscp.write(f'{aid}\t{long_audio_path}\n')
-                    for segment_file in segments_lists:
-                        try:
-                            sid = segment_file['sid']
-                            start_time = segment_file['begin_time']
-                            end_time = segment_file['end_time']
-                            dur = end_time - start_time
-                            text = segment_file['text']
-                            segment_subsets = segment_file["subsets"]
-                        except Exception:
-                            print(f'''Warning: {segment_file} something
-                                        is wrong, skipped''')
-                            continue
+    except Exception:
+        sys.exit(f'Failed to load input json file: {input_json}')
+    else:
+        if json_data['audios'] is not None:
+            with open(f'{output_dir}/text', 'w') as utt2text, \
+                    open(f'{output_dir}/segments', 'w') as segments, \
+                    open(f'{output_dir}/utt2dur', 'w') as utt2dur, \
+                    open(f'{output_dir}/wav.scp', 'w') as wavscp, \
+                    open(f'{output_dir}/utt2subsets', 'w') as utt2subsets, \
+                    open(f'{output_dir}/reco2dur', 'w') as reco2dur:
+                for long_audio in json_data['audios']:
+                    try:
+                        long_audio_path = os.path.realpath(
+                            os.path.join(input_dir, long_audio['path']))
+                        aid = long_audio['aid']
+                        segments_lists = long_audio['segments']
+                        duration = long_audio['duration']
+                        assert (os.path.exists(long_audio_path))
+                    except AssertionError:
+                        print(f'''Warning: {aid} something is wrong,
+                                  maybe AssertionError, skipped''')
+                        continue
+                    except Exception:
+                        print(f'''Warning: {aid} something is wrong, maybe the
+                                  error path: {long_audio_path}, skipped''')
+                        continue
+                    else:
+                        if pipe is True:
+                            # pipe:1 means that write to memory
+                            wavscp.write(f'{aid}\tffmpeg -i {long_audio_path}'
+                                         ' -ar 16000 -f wav pipe:1 |\n')
                         else:
-                            utt2text.write(f'{sid}\t{text}\n')
-                            segments.write(
-                                f'{sid}\t{aid}\t{start_time}\t{end_time}\n'
-                            )
-                            segment_sub_names = " ".join(segment_subsets)
-                            utt2subsets.write(
-                                f'{sid}\t{segment_sub_names}\n')
-        touch(f'{args.output_dir}/.done')
+                            wavscp.write(f'{aid}\t{long_audio_path}\n')
+                        reco2dur.write(f'{aid}\t{duration}\n')
+                        for segment_file in segments_lists:
+                            try:
+                                sid = segment_file['sid']
+                                start_time = segment_file['begin_time']
+                                end_time = segment_file['end_time']
+                                dur = end_time - start_time
+                                text = segment_file['text']
+                                segment_subsets = segment_file["subsets"]
+                            except Exception:
+                                print(f'''Warning: {segment_file} something
+                                          is wrong, skipped''')
+                                continue
+                            else:
+                                utt2text.write(f'{sid}\t{text}\n')
+                                segments.write(
+                                    f'{sid}\t{aid}\t{start_time}\t{end_time}\n'
+                                )
+                                utt2dur.write(f'{sid}\t{dur}\n')
+                                segment_sub_names = " ".join(segment_subsets)
+                                utt2subsets.write(
+                                    f'{sid}\t{segment_sub_names}\n')
 
-    if not os.path.exists(f"{args.output_dir}/subsetlist.pkl"):
-        subset = [
-            'DEV',
-            'L',
-            'M',
-            'S',
-            'TEST_MEETING',
-            'TEST_NET',
-            'W'
-        ]
-        utt_in_subset = {_s: [] for _s in subset}
-        print("> getting subset info...")
-        with open(os.path.join(args.output_dir, 'utt2subsets'), 'r') as utt2subset:
-            for line in utt2subset:
-                uid, _sets = line.strip().split(maxsplit=1)
-                _sets = set(_sets.split())
-                for _s, _utt in utt_in_subset.items():
-                    if _s in _sets:
-                        _utt.append(uid)
 
-        with open(f"{args.output_dir}/subsetlist.pkl", 'wb') as fob:
-            pickle.dump(utt_in_subset, fob)
-        print("> subset info got:")
-        print(
-            '\n'.join(
-                f"  {_s}: # of utt {len(_utt)}"
-                for _s,  _utt in utt_in_subset.items())
-        )
-        del utt_in_subset
+def main():
+    args = get_args()
 
-    if not os.path.exists(f"{args.output_dir}/utt2dur.pkl"):
-        print("> map audio files to durations...")
-        utt2audio = {}      # type: Dict[str, Tuple[str, int, int]]
-        audiopath = {}
-        with open(os.path.join(args.output_dir, 'wav'), 'r') as fit_wav:
-            for line in fit_wav:
-                aid, path = line.strip().split()
-                audiopath[aid] = path
+    meta_analysis(args.input_json, args.output_dir, args.pipe_format)
 
-        with open(os.path.join(args.output_dir, 'segments'), 'r') as fit_seg:
-            for line in fit_seg:
-                # e.g. Y0000000000_--5llN02F84_S00000  Y0000000000_--5llN02F84 20.08   24.4
-                uid, aid, s_beg, s_end = line.strip().split()
-                s_beg = float(s_beg)
-                s_end = float(s_end)
-                utt2audio[uid] = (audiopath[aid], s_beg, s_end)
 
-        with open(f"{args.output_dir}/utt2dur.pkl", 'wb') as fob:
-            pickle.dump(utt2audio, fob)
-        print(
-            "> mapping done."
-        )
-        del utt2audio
-        del audiopath
-
-    if not os.path.exists(f"{args.output_dir}/corpus.pkl"):
-        print("> Prepare text corpus...")
-        text_corpus = {}
-        with open(f"{args.output_dir}/text", 'r') as fi:
-            for line in fi:
-                uid, utt = line.split(maxsplit=1)
-                text_corpus[uid] = utt
-        with open(f'{args.output_dir}/corpus.pkl', 'wb') as fob:
-            pickle.dump(text_corpus, fob)
-        print("> done.")
-        del text_corpus
+if __name__ == '__main__':
+    main()

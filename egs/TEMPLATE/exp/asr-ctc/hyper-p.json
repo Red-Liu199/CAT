@@ -3,8 +3,7 @@
         "train": "yesno",
         "dev": "yesno",
         "test": "yesno",
-        "filter": "10:2000",
-        "lang": "en"
+        "filter": "10:2000"
     },
     "tokenizer": {
         "type": "SentencePieceTokenizer",
@@ -15,9 +14,7 @@
             "unk_id": 1,
             "vocab_size": 4,
             "model_prefix": "sentencepiece/yesno_word/spm"
-        },
-        "|V|": 4,
-        "file": "exp/asr-ctc/tokenizer.tknz"
+        }
     },
     "train": {
         "bin": "cat.ctc.train",

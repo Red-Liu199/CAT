@@ -14,22 +14,13 @@ from ._constants import (
     F_TRAINING_INFO
 )
 from .data import (
-    DynamicBatchDistSampler,
+    BatchDistSampler,
     ReadBatchDataLoader,
     PipeTokenize
 )
 from .scheduler import (
     State,
     build_scheduler
-)
-from .monitor import (
-    MonitorWriter,
-    ANNOTATION as monitor_anno
-)
-from ..shared.tokenizer import (
-    gen_cache_path,
-    file2bin,
-    bin2file
 )
 
 import os
@@ -57,13 +48,12 @@ from torch.distributed.optim import ZeroRedundancyOptimizer
 class Manager(object):
     def __init__(
             self,
-            Dataset: torch.utils.data.Dataset,
+            T_dataset: torch.utils.data.Dataset,
             collate_fn: Callable,
             args: argparse.Namespace,
             func_build_model: Callable[[dict, argparse.Namespace], Union[nn.Module, nn.parallel.DistributedDataParallel]],
             func_train: Optional[Callable] = None,
             func_eval: Optional[Callable] = None,
-            extra_tracks: Union[str, List[str], None] = None,
             _wds_hook: Callable[[wds.WebDataset], wds.WebDataset] = None):
         """Initialize the manager for training.
 
@@ -74,22 +64,28 @@ class Manager(object):
         super().__init__()
 
         coreutils.check_parser(args, [
-            'rank', 'gpu', 'workers', 'trset', 'devset', 'dynamic_batch_mode',
+            'rank', 'gpu', 'workers', 'trset', 'devset',
+            'batching_mode', 'batching_uneven',
             'batch_size', 'grad_accum_fold', 'config', 'dir', 'debug',
             '_logdir', '_checkdir', 'resume', 'init_model'
         ])
 
         # setup dataloader
-        val_set = Dataset(args.devset)
+        val_set = T_dataset(args.devset)
 
         setattr(args, 'n_steps', 0)
         world_size = dist.get_world_size()
+        if args.batching_mode == 'batch' and (not args.batching_uneven):
+            args.batch_size = (args.batch_size//world_size) * world_size
+
         if args.large_dataset:
             assert args.tokenizer is not None, f"--tokenizer is required for --large-dataset"
             assert os.path.isfile(args.tokenizer), \
                 f"--tokenizer={args.tokenizer} is not a valid file."
-            # large dataset doesnot support dynamic batching
-            args.dynamic_batch_mode = -1
+            # large dataset doesnot support dynamic dispatching
+            args.batching_uneven = False
+            args.batching_mode = 'batch'
+            args.batch_size = (args.batch_size//world_size) * world_size
 
             '''
             NOTE (Huahuan):
@@ -138,59 +134,59 @@ class Manager(object):
                 tr_set, num_workers=1, shuffle=False,
                 # batching is done by webdataset
                 batch_size=None)
-            train_sampler = None
-        else:
-            tr_set = Dataset(args.trset)
-            if args.dynamic_batch_mode != -1 and world_size > 1:
-                coreutils.distprint(
-                    "> enable dynamic batching", args.gpu)
-                if args.dynamic_batch_mode == 0 and args.grad_accum_fold > 1:
-                    """
-                    NOTE (huahuan): with dynamic batching, in batch mode, at each update, the global
-                    ... batch size (g_bs) is always `args.batch_size`. However, with bucket mode,
-                    ... the g_bs could be different at steps, so the
-                    ... grad_accum_fold would introduce grad bias. I think this won't
-                    ... affect much, because the g_bs would only vary in a small range.
-                    ... That's why here is a WARNING instead of an ERROR.
-                    """
-                    coreutils.distprint(
-                        "warning: bucket dynamic batching with --grad_accum_fold > 1 "
-                        "would probably produce inconsistent results.",
-                        args.gpu
-                    )
-                train_sampler = DynamicBatchDistSampler(
-                    dataset=tr_set,
-                    mode=['bucket', 'batch'][args.dynamic_batch_mode],
-                    global_batch_size=args.batch_size,
-                    max_bucket_size=args.dynamic_bucket_size,
-                    local_rank=args.gpu
-                )
-                trainloader = DataLoader(
-                    tr_set, batch_sampler=train_sampler,
-                    num_workers=args.workers, collate_fn=collate_fn,
-                    prefetch_factor=4, persistent_workers=True
-                )
-            else:
-                args.dynamic_batch_mode = -1
-                train_sampler = DistributedSampler(tr_set)
-                trainloader = DataLoader(
-                    tr_set, batch_size=args.batch_size//world_size,
-                    num_workers=args.workers, sampler=train_sampler, collate_fn=collate_fn,
-                    prefetch_factor=4, persistent_workers=True)
-
-        if args.dynamic_batch_mode == -1:
-            args.batch_size = (args.batch_size // world_size) * world_size
+            tr_sampler = None
             trainloader = ReadBatchDataLoader(trainloader, bs=args.batch_size)
         else:
-            trainloader = ReadBatchDataLoader(trainloader, dynamic=True)
+            tr_set = T_dataset(args.trset)
+            if args.batching_mode == 'bucket' and args.grad_accum_fold > 1:
+                """
+                NOTE (huahuan): with dynamic batching, in batch mode, at each update, the global
+                ... batch size (g_bs) is always `args.batch_size`. However, with bucket mode,
+                ... the g_bs could be different at steps, so the
+                ... grad_accum_fold would introduce grad bias. I think this won't
+                ... affect much, because the g_bs would only vary in a small range.
+                ... That's why here is a WARNING instead of an ERROR.
+                """
+                coreutils.distprint(
+                    "warning: bucket dynamic batching with --grad_accum_fold > 1 "
+                    "would probably produce inconsistent results.",
+                    args.gpu
+                )
 
-        val_sampler = DistributedSampler(val_set, shuffle=False)
+            tr_sampler = BatchDistSampler(
+                dataset=tr_set,
+                mode=args.batching_mode,
+                dispatch_even=(not args.batching_uneven),
+                global_batch_size=args.batch_size,
+                max_bucket_size=args.bucket_size,
+                local_rank=args.gpu
+            )
+            trainloader = DataLoader(
+                tr_set, 
+                batch_sampler=tr_sampler,
+                num_workers=args.workers, 
+                collate_fn=collate_fn
+            )
+            trainloader = ReadBatchDataLoader(trainloader)
+
+        val_sampler = BatchDistSampler(
+            dataset=val_set,
+            mode=args.batching_mode,
+            dispatch_even=(not args.batching_uneven),
+            global_batch_size=args.batch_size,
+            max_bucket_size=args.bucket_size,
+            local_rank=args.gpu,
+            shuffle=False
+        )
+        # NOTE: global batch size info is not required for evaluation.
         valloader = DataLoader(
-            val_set, batch_size=args.batch_size//world_size, shuffle=False,
-            num_workers=args.workers, sampler=val_sampler, collate_fn=collate_fn
+            val_set,
+            batch_sampler=val_sampler,
+            num_workers=args.workers,
+            collate_fn=collate_fn
         )
 
-        self.train_sampler = train_sampler
+        self.train_sampler = tr_sampler
         self.trainloader = trainloader
         self.valloader = valloader
 
@@ -219,30 +215,16 @@ class Manager(object):
         self.evaluate = evaluate if func_eval is None else func_eval
 
         # Initial specaug module
-        # FIXME: deprecate the error once it's stable
-        if 'specaug_config' in cfg:
-            raise ValueError(
-                "'specaug_config' has been deprecated, use 'specaug' instead. "
-                f"check that in {args.config}"
-            )
         if 'specaug' not in cfg:
             specaug = None
-            coreutils.distprint("> disable SpecAug", args.gpu)
         else:
-            specaug = SpecAug(**cfg['specaug'])
-            specaug = specaug.to(f'cuda:{args.gpu}')
+            specaug = SpecAug(**cfg['specaug']).to(f'cuda:{args.gpu}')
         self.specaug = specaug
 
         # Initial scheduler and optimizer
         assert 'scheduler' in cfg
-        if hasattr(self.model, "requires_slice") and self.model.requires_slice:
-            self.scheduler = build_scheduler(
-                cfg['scheduler'],
-                filter(lambda x: x.requires_grad, self.model.parameters())
-            )
-        else:
-            self.scheduler = build_scheduler(
-                cfg['scheduler'], self.model.parameters())
+        self.scheduler = build_scheduler(
+            cfg['scheduler'], self.model.parameters())
 
         # Initialize the grad scaler
         self.scaler = GradScaler(enabled=args.amp)
@@ -271,10 +253,7 @@ class Manager(object):
                 f"> initialize model from: {args.init_model}", args.gpu)
             checkpoint = torch.load(
                 args.init_model, map_location=f'cuda:{args.gpu}')  # type: OrderedDict
-            if 'scheduler' in checkpoint:
-                # load the optimizer params
-                self.scheduler.load_state_dict(
-                    checkpoint['scheduler'], optim_only=True)
+
             try:
                 self.model.load_state_dict(checkpoint['model'])
             except RuntimeError as re:
@@ -288,17 +267,17 @@ class Manager(object):
             del checkpoint
 
         # Initialize the checkpoint manager
+        try:
+            user = os.getlogin()
+        except OSError:
+            user = "defaultUser"
+
         self.cm = CheckManager(
             os.path.join(args._checkdir, F_CHECKPOINT_LIST),
-            header=f"created at {datetime.today().strftime('%Y-%m-%d %H:%M:%S')}"
+            header=f"created by {user} at {datetime.today().strftime('%Y-%m-%d %H:%M:%S')}"
         )
 
-        # Initialize the monitor
-        self.monitor = MonitorWriter(args._logdir)
-        self.monitor.addWriter(tuple(monitor_anno.values()))
-        if extra_tracks is not None:
-            self.monitor.addWriter(extra_tracks)
-
+        # Initialize the tensorboard
         if args.rank == 0:
             self.writer = SummaryWriter(os.path.join(
                 args._logdir, "{0:%Y%m%d-%H%M%S/}".format(datetime.now())))
@@ -316,7 +295,7 @@ class Manager(object):
                 pass
             else:
                 self.train_sampler.set_epoch(self.epoch)
-            if self.step == -1 and not self.DEBUG:
+            if self.step == 0 and not self.DEBUG:
                 # get the initialized perf. before training start
                 self.model.eval()
                 metrics = self.evaluate(self.valloader, args, self)
@@ -339,15 +318,11 @@ class Manager(object):
                     f"checkpoint.{self.epoch}e{self.step}s.pt"
                 )
                 # inside self.save(), there is an all_reduce OP, don't put it in rank==0 block.
-                # we should save the checkpoint before monitor.export(), otherwise the monitor is dumped
-                # ... into file and empty.
                 self.save(checkpoint)
                 if self.rank == 0 and not self.DEBUG:
                     self.cm.appendinfo(
                         self.epoch, self.step,
                         metrics, self.scheduler.lr_cur, checkpoint)
-                    self.monitor.visualize(args.dir)
-                    self.monitor.export()
 
                 coreutils.distprint(
                     f"Epoch: {self.epoch:<3} | Step: {self.step} | Eval metric: {metrics:.3e} | LR: {self.scheduler.lr_cur:.3e}",
@@ -392,8 +367,6 @@ class Manager(object):
         states = OrderedDict({
             'model': self.model.state_dict(),
             'scheduler': self.scheduler.state_dict(),
-            # monitor is only for backup, never load it in manager.load()
-            'monitor': self.monitor.state_dict(),
             'epoch': self.epoch,
             'scaler': self.scaler.state_dict(),
             'step': self.step,
@@ -424,7 +397,6 @@ class Manager(object):
         if 'scaler' in checkpoint:
             self.scaler.load_state_dict(checkpoint['scaler'])
 
-        # monitor is not required to load
         self.epoch = checkpoint['epoch']
         self.step = checkpoint['step']
         self.step_by_last_epoch = checkpoint.get(
@@ -436,12 +408,13 @@ class Manager(object):
             return None
 
 
-'''
+"""
 NOTE (Huahuan):
     with --dynamic_batch_mode, batch size on each device might be different,
-    however, torch DDP automatically makes the allreduce on gradients
+    however, torch DDP automatically makes the allreduce on gradients,
     then averages them by world size during backward.
-    which assumes the batch sizes across devices are the same.
+
+    That assumes the batch sizes across devices are the same.
     To address this, we re-calculate the loss in a hack way:
         local_loss_new = sum_over_local_batches(local_loss) / global_batch_size * world_size
 
@@ -456,9 +429,9 @@ NOTE (Huahuan):
         loss_normalized_new' = sum_over_devices(sum_over_local_batches(local_loss) / global_batch_size)
                              = loss_normalized
 
-    such that the gradient is properly computed. Be aware that this
+    In this way, the gradient is properly computed. Also, be aware that this
     might cause numerical difference given the fact that probably: (f * N) / N != f
-'''
+"""
 
 
 def train(trainloader: ReadBatchDataLoader, args: argparse.Namespace, manager: Manager, hook_func: Callable = None):
@@ -520,7 +493,10 @@ def train(trainloader: ReadBatchDataLoader, args: argparse.Namespace, manager: M
     t_last_step = time.time()
     t_last_batch = time.time()
     cnt_step_update = 0
-    is_quit = torch.tensor(0, dtype=torch.bool, device=args.gpu)
+    is_wds_dl = args.large_dataset
+    is_quit = None
+    if is_wds_dl:
+        is_quit = torch.tensor(0, dtype=torch.bool, device=args.gpu)
 
     def get_progress_bar():
         return tqdm(
@@ -548,9 +524,10 @@ def train(trainloader: ReadBatchDataLoader, args: argparse.Namespace, manager: M
                     sys.stderr.flush()
             continue
 
-        dist.all_reduce(is_quit, op=dist.ReduceOp.MAX)
-        if is_quit:
-            break
+        if is_wds_dl:
+            dist.all_reduce(is_quit, op=dist.ReduceOp.MAX)
+            if is_quit:
+                break
 
         # update every fold times and drop the last few batches (number of which <= fold)
         if fold == 1 or (i+1) % fold == 0:
@@ -588,12 +565,6 @@ def train(trainloader: ReadBatchDataLoader, args: argparse.Namespace, manager: M
                 manager.writer.add_scalar(
                     'lr', tolog['lr'], manager.step)
 
-                # update monitor
-                manager.monitor.update({
-                    monitor_anno['tr-metric']: (tolog['loss'], manager.step),
-                    monitor_anno['tr-lr']: (tolog['lr'], manager.step)
-                })
-
             if args.verbose:
                 coreutils.distprint(
                     f"[{manager.epoch} - {cnt_step_update}/{args.n_steps}] | data {t_data:6.3f} | time {time.time()-t_last_step:6.3f} | "
@@ -620,7 +591,7 @@ def train(trainloader: ReadBatchDataLoader, args: argparse.Namespace, manager: M
         if args.verbose:
             t_last_batch = time.time()
 
-    if not is_quit:
+    if is_wds_dl and (not is_quit):
         # set quit flag to True
         is_quit = ~is_quit
         # wait until other processes quit
@@ -629,9 +600,9 @@ def train(trainloader: ReadBatchDataLoader, args: argparse.Namespace, manager: M
     manager.step_by_last_epoch += cnt_step_update
     # update n_steps, since we don't know how many steps there are with large dataset mode.
     args.n_steps = cnt_step_update
+    p_bar.close()
     if args.check_freq == -1:
         yield
-    p_bar.close()
     return
 
 
@@ -642,21 +613,22 @@ def evaluate(testloader: DataLoader, args: argparse.Namespace, manager: Manager)
     cnt_seq = 0
     total_loss = 0.
 
-    for i, minibatch in tqdm(enumerate(testloader), desc=f'Epoch: {manager.epoch} | eval',
-                             unit='batch', total=len(testloader), disable=(args.gpu != 0), leave=False):
-
+    for minibatch in tqdm(
+            testloader, desc=f'Epoch: {manager.epoch} | eval',
+            unit='batch', disable=(args.gpu != 0), leave=False):
         feats, ilens, labels, olens = minibatch
         feats = feats.cuda(args.gpu, non_blocking=True)
 
         '''
         Suppose the loss is reduced by mean
         '''
-        loss = model(feats, labels, ilens, olens)
+        with autocast(enabled=args.amp):
+            loss = model(feats, labels, ilens, olens)
         if isinstance(loss, tuple):
             loss = loss[0]
 
         cnt_seq += feats.size(0)
-        total_loss += loss * feats.size(0)
+        total_loss += loss.float() * feats.size(0)
 
     cnt_seq = total_loss.new_tensor(cnt_seq)
 
@@ -668,8 +640,6 @@ def evaluate(testloader: DataLoader, args: argparse.Namespace, manager: Manager)
 
     if args.rank == 0:
         manager.writer.add_scalar('loss/dev', avg_loss, manager.step)
-        manager.monitor.update(
-            monitor_anno['dev-metric'], (avg_loss, manager.step))
     return avg_loss
 
 

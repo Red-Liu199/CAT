@@ -31,6 +31,12 @@ to refresh the information. Manually modifying is also OK.
 
 ## Result
 
+Data prepare with command:
+
+```bash
+bash local/data.sh -sp 1.1 0.9
+```
+
 Summarize experiments here.
 
 NOTE: some of the experiments are conduct on previous code base, therefore, the settings might not be compatible to the latest. In that case, you could:
@@ -44,10 +50,10 @@ NOTE: some of the experiments are conduct on previous code base, therefore, the 
 
 Evaluated by CER (%)
 
-| EXP ID                               | dev  | test | notes                                           |
-| ------------------------------------ |:----:|:----:| ----------------------------------------------- |
-| [rnnt](exp/rnnt/rnnt-v19-torchaudio) | 4.25 | 4.47 | best result, rescored with word lm              |
-| [ctc](exp/ctc-v1)                    | 4.63 | 5.08 | ctc rescored with word lm, lm weights not tuned |
+| EXP ID                               | dev  | test | notes                                     |
+| ------------------------------------ |:----:|:----:| ----------------------------------------- |
+| [rnnt](exp/rnnt/rnnt-v19-torchaudio) | 3.93 | 4.22 | best result, rescored with word lm + lodr |
+| [ctc](exp/ctc-v1)                    | 4.25 | 4.75 | ctc rescored with word lm                 |
 
 ### Ablation study
 
@@ -57,19 +63,19 @@ CTC model: [LINK](exp/ctc-v1)
 
 The acoustic model is based on Chinese characters. The char-based lm is integrated with shallow fusion, while the word-based one with rescoring.
 
-| Setting                                     | dev  | test |
-| ------------------------------------------- |:----:|:----:|
-| no lm                                       | 5.13 | 5.78 |
-| 5-gram char lm [LINK](exp/lm/lm-v5-updated) | 4.89 | 5.39 |
-| 3-gram word lm [LINK](exp/lm/lm-v6)         | 4.63 | 5.08 |
+| Setting                             | dev  | test |
+| ----------------------------------- |:----:|:----:|
+| no lm                               | 4.65 | 5.21 |
+| 5-gram char lm [LINK](exp/lm/lm-v5) | 4.49 | 4.95 |
+| 3-gram word lm [LINK](exp/lm/lm-v6) | 4.25 | 4.75 |
 
 RNN-T model: [LINK](exp/rnnt/rnnt-v19-torchaudio)
 
-| Setting                                     | dev  | test |
-| ------------------------------------------- |:----:|:----:|
-| no lm                                       | 4.43 | 4.76 |
-| 5-gram char lm [LINK](exp/lm/lm-v5-updated) | 4.25 | 4.69 |
-| 3-gram word lm [LINK](exp/lm/lm-v6)         | 4.25 | 4.47 | 
+| Setting                             | dev  | test |
+| ----------------------------------- |:----:|:----:|
+| no lm                               | 4.43 | 4.76 |
+| 5-gram char lm [LINK](exp/lm/lm-v5) | 4.35 | 4.69 |
+| 3-gram word lm [LINK](exp/lm/lm-v6) | 4.25 | 4.47 | 
 
 
 **Feature extraction backends and CMVN**

@@ -26,6 +26,7 @@ from ..shared.data import (
 )
 
 import os
+import sys
 import time
 import pickle
 import argparse
@@ -93,11 +94,9 @@ def dataserver(args, q: mp.Queue):
     testset = NbestListDataset(args.nbestlist)
     tokenizer = tknz.load(args.tokenizer)
     testloader = DataLoader(
-        testset, batch_size=4,
+        testset, batch_size=1,
         shuffle=False,
-        # FIXME (huahuan): num_workers cannot be set >= 1,
-        # possibly pytorch-related bug, see https://github.com/pytorch/pytorch/issues/72782
-        num_workers=0,  # (args.world_size // 8),
+        num_workers=1,
         collate_fn=NbestListCollate(tokenizer))
 
     t_beg = time.time()

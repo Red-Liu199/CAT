@@ -35,7 +35,7 @@ export vocab="/tmp/$(
     tr -dc A-Za-z0-9 </dev/urandom | head -c 13
     echo ''
 ).corpus.tmp"
-python utils/data/corpus2index.py $dir/lmbin/train.pkl --map 0: 1: |
+python utils/data/corpus2index.py $dir/pkl/train.pkl --map 0: 1: |
     count_ngrams -o $order -S 20% --write_vocab_list $vocab \
         >$corpus_count
 read -r prunearg realtopk <<<$(python utils/tool/get_prune_args.py $corpus_count $order $topk)

@@ -21,9 +21,9 @@ egs/[task]/exp/template
         "test": ...,
         // "filter" is for ASR task only, filter out utterances shorter than 10 and longer than 2000 (frames)
         "filter": "10:2000",
-        // "text_processing" is for LM task only. code: cat/utils/data/corpus2index.py
-        "text_processing": {
-            // truncate the utterances by 128 (tokens)
+        // "packing-text-lm" is for LM task only. code: cat/utils/data/pack_corpus.py
+        "packing-text-lm": {
+            // e.g. truncate the utterances by 128 (tokens)
             "truncate": 128
         }
     },

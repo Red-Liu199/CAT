@@ -16,8 +16,10 @@ from ..rnnt.train_nce import cal_wer, custom_evaluate
 
 import os
 import argparse
+import Levenshtein
 from typing import *
 from ctcdecode import CTCBeamDecoder
+from tqdm import tqdm
 
 import torch
 import torch.nn as nn
@@ -50,21 +52,41 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace, **mkwar
         backend=args.dist_backend, init_method=args.dist_url,
         world_size=args.world_size, rank=args.rank)
 
+    if 'T_dataset' not in mkwargs:
+        mkwargs['T_dataset'] = KaldiSpeechDataset
+
+    if 'collate_fn' not in mkwargs:
+        mkwargs['collate_fn'] = sortedPadCollateASR(flatten_target=True)
+
     if 'func_build_model' not in mkwargs:
         mkwargs['func_build_model'] = build_model
+
     if '_wds_hook' not in mkwargs:
         mkwargs['_wds_hook'] = filter_hook
-    
+
     # NOTE: uncomment following lines to enable wer evaluation.
     # if 'func_eval' not in mkwargs:
     #     mkwargs['func_eval'] = custom_evaluate
 
-    manager = Manager(
-        KaldiSpeechDataset,
-        sortedPadCollateASR(flatten_target=True),
-        args,
-        **mkwargs
-    )
+    mkwargs['args'] = args
+    manager = Manager(**mkwargs)
+
+    # NOTE: for CTC training, the input feat len must be longer than the label len
+    #       ... when using webdataset (--largedataset) to load the data, we deal with
+    #       ... the issue by `_wds_hook`; if not, we filter the unqualified utterances
+    #       ... before training start.
+    if not args.large_dataset:
+        coreutils.distprint(
+            f"> filter seqs by ctc restriction",
+            args.gpu
+        )
+        tr_dataset = manager.trainloader.dl.dataset
+        orilen = len(tr_dataset)
+        tr_dataset.filt_by_len(lambda x, y: x//SUBSAMPLING > y)
+        coreutils.distprint(
+            f"  filtered {orilen-len(tr_dataset)} utterances.",
+            args.gpu
+        )
 
     # NOTE: for CTC training, the input feat len must be longer than the label len
     #       ... when using webdataset (--largedataset) to load the data, we deal with
@@ -89,24 +111,32 @@ class AMTrainer(nn.Module):
             self,
             am: model_zoo.AbsEncoder,
             use_crf: bool = False,
+            den_lm: Optional[str] = None,
             lamb: Optional[float] = 0.01,
-            decoder: CTCBeamDecoder = None,
-            **kwargs):
+            decoder: CTCBeamDecoder = None):
         super().__init__()
 
         self.am = am
         self.is_crf = use_crf
         if use_crf:
-            from ctc_crf import CTC_CRF_LOSS as CRFLoss
+            self.den_lm = den_lm
+            assert den_lm is not None and os.path.isfile(den_lm)
 
-            self._crf_ctx = None
+            from ctc_crf import CTC_CRF_LOSS as CRFLoss
             self.criterion = CRFLoss(lamb=lamb)
+            self._crf_ctx = None
         else:
+            self.den_lm = None
             self.criterion = nn.CTCLoss()
 
         self.attach = {
             'decoder': decoder
         }
+
+    def clean_unpickable_objs(self):
+        # CTCBeamDecoder is unpickable,
+        # So, this is required for inference.
+        self.attach['decoder'] = None
 
     def register_crf_ctx(self, den_lm: Optional[str] = None):
         """Register the CRF context on model device."""
@@ -124,8 +154,6 @@ class AMTrainer(nn.Module):
 
         bs = xs.size(0)
         logits, lx = self.am(xs, lx)
-        # NOTE: the beam decoder conduct softmax internally
-        # logits = logits.log_softmax(dim=-1)
 
         # y_samples: (N, k, L), ly_samples: (N, k)
         y_samples, _, _, ly_samples = self.attach['decoder'].decode(
@@ -135,7 +163,11 @@ class AMTrainer(nn.Module):
             for CTC training, we flatten the label seqs to 1-dim,
             so here we need to deal with that
         """
-        ground_truth = [t.cpu().tolist() for t in torch.split(ys, ly.tolist())]
+        if ys.dim() == 1:
+            ground_truth = [t.cpu().tolist()
+                            for t in torch.split(ys, ly.tolist())]
+        else:
+            ground_truth = [ys[i, :ly[i]] for i in range(ys.size(0))]
         hypos = [y_samples[n, 0, :ly_samples[n, 0]].tolist()
                  for n in range(bs)]
 
@@ -150,7 +182,10 @@ class AMTrainer(nn.Module):
         lx = lx.cpu()
         ly = ly.cpu()
         if self.is_crf:
-            assert self._crf_ctx is not None
+            if self._crf_ctx is None:
+                # lazy init
+                self.register_crf_ctx(self.den_lm)
+
             with autocast(enabled=False):
                 loss = self.criterion(
                     logits.float(), labels.to(torch.int),
@@ -161,6 +196,59 @@ class AMTrainer(nn.Module):
             loss = self.criterion(logits, labels.to(torch.int), lx.to(
                 torch.int), ly.to(torch.int))
         return loss
+
+
+def cal_wer(gt: List[List[int]], hy: List[List[int]]) -> Tuple[int, int]:
+    """compute error count for list of tokens"""
+    assert len(gt) == len(hy)
+    err = 0
+    cnt = 0
+    for i in range(len(gt)):
+        err += Levenshtein.distance(
+            ''.join(chr(n) for n in hy[i]),
+            ''.join(chr(n) for n in gt[i])
+        )
+        cnt += len(gt[i])
+    return (err, cnt)
+
+
+@torch.no_grad()
+def custom_evaluate(testloader, args: argparse.Namespace, manager: Manager) -> float:
+
+    model = manager.model
+    cnt_tokens = 0
+    cnt_err = 0
+    n_proc = dist.get_world_size()
+
+    for minibatch in tqdm(
+            testloader, desc=f'Epoch: {manager.epoch} | eval',
+            unit='batch', disable=(args.gpu != 0), leave=False):
+
+        feats, ilens, labels, olens = minibatch
+        feats = feats.cuda(args.gpu, non_blocking=True)
+
+        part_cnt_err, part_cnt_sum = model.module.get_wer(
+            feats, labels, ilens, olens)
+        cnt_err += part_cnt_err
+        cnt_tokens += part_cnt_sum
+
+    gather_obj = [None for _ in range(n_proc)]
+    dist.gather_object(
+        (cnt_err, cnt_tokens),
+        gather_obj if args.rank == 0 else None,
+        dst=0
+    )
+    if args.rank == 0:
+        l_err, l_sum = list(zip(*gather_obj))
+        wer = sum(l_err) / sum(l_sum)
+        manager.writer.add_scalar(
+            'loss/dev-token-error-rate', wer, manager.step)
+        scatter_list = [wer]
+    else:
+        scatter_list = [None]
+
+    dist.broadcast_object_list(scatter_list, src=0)
+    return scatter_list[0]
 
 
 def build_beamdecoder(cfg: dict) -> CTCBeamDecoder:
@@ -188,7 +276,7 @@ def build_beamdecoder(cfg: dict) -> CTCBeamDecoder:
         beam_width=cfg.get('beam_size', 16),
         alpha=cfg.get('alpha', 1.),
         beta=cfg.get('beta', 0.),
-        num_processes=6,
+        num_processes=cfg.get('num_processes', 6),
         log_probs_input=True,
         is_token_based=('kenlm' in cfg)
     )
@@ -205,7 +293,7 @@ def build_model(
         trainer:
             use_crf: true/false,
             lamb: 0.01,
-            den-lm: xxx
+            den_lm: xxx
 
             decoder:
                 beam_size: 
@@ -258,9 +346,6 @@ def build_model(
     model = coreutils.convert_syncBatchNorm(model)
 
     model.cuda(args['gpu'])
-    if 'use_crf' in cfg['trainer'] and cfg['trainer']['use_crf']:
-        assert 'den-lm' in cfg['trainer']
-        model.register_crf_ctx(cfg['trainer']['den-lm'])
     model = torch.nn.parallel.DistributedDataParallel(
         model, device_ids=[args['gpu']])
     return model

@@ -6,7 +6,7 @@
             "data/local-lm/ptb.test.txt",
             "data/local-lm/ptb.valid.txt"
         ],
-        "text_processing": {
+        "packing-text-lm": {
             "truncate": 32
         }
     },

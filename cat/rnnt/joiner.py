@@ -55,8 +55,27 @@ class JointNet(AbsJointNet):
             hdim: int = -1,
             join_mode: Literal['add', 'cat'] = 'add',
             act: Literal['tanh', 'relu'] = 'tanh',
-            compact: bool = False):
+            compact: bool = False,
+            pre_project: bool = True):
         super().__init__()
+
+        if join_mode == 'add':
+            if hdim == -1:
+                hdim = max(odim_pred, odim_enc)
+
+            if pre_project:
+                self.fc_enc = nn.Linear(odim_enc, hdim)
+                self.fc_dec = nn.Linear(odim_pred, hdim)
+            else:
+                assert odim_enc == odim_pred
+                self.fc_enc = nn.Identity()
+                self.fc_dec = nn.Identity()
+        elif join_mode == 'cat':
+            self.fc_enc = None
+            self.fc_dec = None
+            hdim = odim_enc+odim_pred
+        else:
+            raise RuntimeError(f"Unknown mode for joint net: {join_mode}")
 
         if act == 'tanh':
             act_layer = nn.Tanh()
@@ -64,26 +83,10 @@ class JointNet(AbsJointNet):
             act_layer = nn.ReLU()
         else:
             raise NotImplementedError(f"Unknown activation layer type: {act}")
-
-        if join_mode == 'add':
-            if hdim == -1:
-                hdim = max(odim_pred, odim_enc)
-            self.fc_enc = nn.Linear(odim_enc, hdim)
-            self.fc_dec = nn.Linear(odim_pred, hdim)
-            self.fc = nn.Sequential(
-                act_layer,
-                nn.Linear(hdim, num_classes)
-            )
-        elif join_mode == 'cat':
-            self.fc_enc = None
-            self.fc_dec = None
-            self.fc = nn.Sequential(
-                act_layer,
-                nn.Linear(odim_enc + odim_pred, num_classes)
-            )
-        else:
-            raise RuntimeError(f"Unknown mode for joint net: {join_mode}")
-
+        self.fc = nn.Sequential(
+            act_layer,
+            nn.Linear(hdim, num_classes)
+        )
         self._mode = join_mode
         self.iscompact = compact
 
@@ -195,3 +198,60 @@ class HAT(JointNet):
         log_prob_label = logits[..., 1:].log_softmax(
             dim=-1) + self._dist_blank(-logit_blank)
         return torch.cat([log_prob_blank, log_prob_label], dim=-1)
+
+
+class LogAdd(AbsJointNet):
+    def __init__(self, compact: bool = False) -> None:
+        super().__init__()
+        self.iscompact = compact
+
+    def impl_forward(self, f: torch.Tensor, g: torch.Tensor, lf: torch.Tensor = None, lg: torch.Tensor = None):
+        assert f.dim() == g.dim()
+        dim_f = f.dim()
+        assert dim_f == 1 or dim_f == 3, f"only support input dimension is 1 or 3, instead {dim_f}"
+
+        # the preditor doesn't straightly involve in blank prob computation.
+        # g[..., 0] = 0.
+        if dim_f == 3 and self.iscompact and lf is not None and lg is not None:
+            return torch.cat([
+                (f[i:i+1, :lf[i]].unsqueeze(2) +
+                 g[i:i+1, :lg[i]].unsqueeze(1)).view(-1, f.size(-1))
+                for i in range(f.size(0))
+            ], dim=0)
+        if dim_f == 1:
+            # streaming inference mode
+            return f + g
+        else:
+            # normal padding mode
+            return f.unsqueeze(2) + g.unsqueeze(1)
+
+
+class ConvJoiner(AbsJointNet):
+    def __init__(self,
+                 odim_enc: int,
+                 odim_pred: int,
+                 num_classes: int,
+                 hdim: int) -> None:
+        super().__init__()
+        self.linear_f = nn.Linear(odim_enc, hdim)
+        self.linear_g = nn.Linear(odim_pred, hdim)
+
+        self.conv = nn.Sequential(
+            nn.ReLU(),
+            nn.ConstantPad2d((2, 0, 0, 2), 0.),
+            # seperate convlution
+            nn.Conv2d(hdim, hdim, kernel_size=3, groups=hdim),
+            nn.Conv2d(hdim, num_classes, kernel_size=1)
+            # nn.Conv2D(hdim, num_classes, 3, 1)
+        )
+
+    def impl_forward(self, f: torch.Tensor, g: torch.Tensor, lf=None, lg=None):
+        # f: (N, T, H)
+        # g: (N, U, H)
+        emb_f = self.linear_f(f)
+        emb_g = self.linear_g(g)
+
+        # (N, V, T, U)
+        logits = self.conv(emb_f.transpose(1, 2).unsqueeze(
+            3)+emb_g.transpose(1, 2).unsqueeze(2))
+        return logits.permute(0, 2, 3, 1)

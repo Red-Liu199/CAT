@@ -35,7 +35,7 @@ import torch.distributed as dist
 from torch.cuda.amp import autocast
 
 
-def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
+def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace, **mkwargs):
     coreutils.set_random_seed(args.seed)
     args.gpu = gpu
     args.rank = args.rank * ngpus_per_node + gpu
@@ -45,12 +45,17 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         backend=args.dist_backend, init_method=args.dist_url,
         world_size=args.world_size, rank=args.rank)
 
-    manager = Manager(
-        KaldiSpeechDataset,
-        sortedPadCollateASR(),
-        args,
-        build_model
-    )
+    if 'T_dataset' not in mkwargs:
+        mkwargs['T_dataset'] = KaldiSpeechDataset
+
+    if 'collate_fn' not in mkwargs:
+        mkwargs['collate_fn'] = sortedPadCollateASR()
+
+    if 'func_build_model' not in mkwargs:
+        mkwargs['func_build_model'] = build_model
+
+    mkwargs['args'] = args
+    manager = Manager(**mkwargs)
 
     # training
     manager.run(args)
@@ -101,11 +106,12 @@ class TransducerTrainer(nn.Module):
         self.predictor = predictor
         self.joiner = joiner
 
-        if not hasattr(self.joiner, 'iscompact') and compact:
-            print(
-                "warning: it seems the joiner network might not be compatible with 'compact=Ture'.")
-        else:
-            assert self.joiner.iscompact == compact
+        if compact:
+            if not hasattr(self.joiner, 'iscompact'):
+                print(
+                    "warning: it seems the joiner network might not be compatible with 'compact=Ture'.")
+            else:
+                assert self.joiner.iscompact == compact
 
         if num_predictor_mask != -1:
             self._pn_mask = SpecAug(
@@ -118,14 +124,6 @@ class TransducerTrainer(nn.Module):
             self._pn_mask = None
 
         self.bos_id = bos_id
-
-    def train(self: 'TransducerTrainer', mode: bool = True) -> 'TransducerTrainer':
-        super().train(mode=mode)
-        if self.encoder.freeze:
-            self.encoder.eval()
-        if self.predictor.freeze:
-            self.predictor.eval()
-        return self
 
     def compute_join(self, enc_out: torch.Tensor, pred_out: torch.Tensor, targets: torch.Tensor, enc_out_lens: torch.Tensor, target_lens: torch.Tensor) -> torch.FloatTensor:
         device = enc_out.device
@@ -258,9 +256,6 @@ def build_model(
 
         if c_cfg.get('freeze', False):
             _model.requires_grad_(False)
-            setattr(_model, 'freeze', True)
-        else:
-            setattr(_model, 'freeze', False)
         return _model
 
     assert 'encoder' in cfg
@@ -270,11 +265,6 @@ def build_model(
     encoder = _build(cfg['encoder'], 'encoder')
     predictor = _build(cfg['decoder'], 'predictor')
     joiner = _build(cfg['joiner'], 'joiner')
-    if all(_model.freeze for _model in [encoder, predictor, joiner]):
-        raise RuntimeError("It's illegal to freeze all parts of Transducer.")
-
-    is_part_freeze = not all(not _model.freeze for _model in [
-                             encoder, predictor, joiner])
 
     if not wrapped:
         return encoder, predictor, joiner
@@ -290,8 +280,6 @@ def build_model(
     )
 
     if not dist:
-        if is_part_freeze:
-            setattr(model, 'requires_slice', True)
         return model
 
     assert args is not None, f"You must tell the GPU id to build a DDP model."
@@ -302,8 +290,6 @@ def build_model(
     model.cuda(args['gpu'])
     model = torch.nn.parallel.DistributedDataParallel(
         model, device_ids=[args['gpu']])
-    if is_part_freeze:
-        setattr(model, 'requires_slice', True)
     return model
 
 

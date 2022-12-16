@@ -48,8 +48,7 @@ fi
     zcat $wsj1/13-32.1/wsj1/doc/lng_modl/lm_train/np_data/{87,88,89}/*.z |
     grep -v "<" |
         tr "[:lower:]" "[:upper:]" |
-        awk '{ printf("wsj1_lng_%07d %s\n",NR,$0) } ' \
-            >data/extra.corpus
+        >data/extra.corpus
 
 # compute fbank feat
 # by default, we use 80-dim raw fbank and do not apply
@@ -57,34 +56,3 @@ fi
 bash utils/data/data_prep_kaldi.sh \
     data/src/{train_si284,test_dev93,test_eval92} \
     --feat-dir=data/fbank \
-    --nj=48 \
-    --not-apply-cmvn \
-    $opt_3way_sp
-
-# do some text normalize
-for dset in $(ls data/src); do
-    dir="data/src/$dset"
-    [[ $dset != "test_*" ]] && [[ -f $dir/text ]] && {
-        sed <$dir/text \
-            -e 's/[(]BRACE//g; s/[(]PAREN//g; s/[(]IN-PARENTHESIS//g; s/[(]BEGIN-PARENS//g' \
-            -e 's/[(]PARENTHESES//g; s/[(]LEFT-PAREN//g; s/[(]PARENTHETICALLY//g' \
-            -e 's/[)]PAREN//g; s/[)]RIGHT-PAREN//g; s/[)]END-OF-PAREN//g; s/[)]END-PARENS//g;' \
-            -e 's/[)]END-THE-PAREN//g; s/[)]CLOSE-BRACE//g; s/[)]CLOSE_PAREN//g; s/[)]CLOSE-PAREN//g; s/[)]UN-PARENTHESES//g' \
-            -e 's/"CLOSE-QUOTE//g; s/"DOUBLE-QUOTE//g; s/"END-OF-QUOTE//g; s/"END-QUOTE//g; s/"IN-QUOTES//g; s/"QUOTE//g; s/"UNQUOTE//g' \
-            -e 's/{LEFT-BRACE//g; s/}RIGHT-BRACE//g; s/\~//g' \
-            -e 's/;SEMI-COLON//g; s/\/SLASH//g; s/&AMPERSAND/AND/g' \
-            -e 's/<\*IN\*>//g; s/<\*MR\.\*>//g; s/<NOISE>//g' \
-            -e 's/[.]PERIOD//g; s/[.]DOT//g; s/\.\.\.ELLIPSIS//g;' \
-            -e 's/[*]//g; s/:COLON/:/g; s/?QUESTION-MARK//g' \
-            -e "s/'SINGLE-QUOTE//g; " \
-            -e 's/[(]//g; s/[)]//g; s/-//g; s/;//g; s/[.]//g; s/!//g; ' \
-            -e 's/://g; s/`//g; s/[.]//g; s/,COMMA//g; s/?//g' \
-            >$dir/text.filt
-    }
-done
-
-# refresh the data/metainfo.json file
-python utils/data/resolvedata.py
-
-echo "$0 done."
-exit 0

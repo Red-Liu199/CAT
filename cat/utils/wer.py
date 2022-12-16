@@ -188,7 +188,7 @@ def main(args: argparse.Namespace = None):
         l_gt = [seq for _, seq in l_gt]
 
     # multi-processing compute
-    num_threads = max(min(num_lines//16, int(os.cpu_count())), 1)
+    num_threads = max(min(num_lines//10000, int(os.cpu_count())), 1)
 
     interval = num_lines // num_threads
     indices = [interval * i for i in range(num_threads+1)]

@@ -1,39 +1,15 @@
 """Process of LM training
 """
 
-try:
-    from _constants import (
-        F_NN_CONFIG,
-        F_HYPER_CONFIG
-    )
-except ModuleNotFoundError:
-    from cat.shared._constants import (
-        F_NN_CONFIG,
-        F_HYPER_CONFIG
-    )
+import argparse
 
-from _constants import (
-    F_NN_CONFIG,
-    F_HYPER_CONFIG
-)
-
-import asr as pipeutil
-from asr import (
-    readjson,
-    checkExist,
-    tcolors,
-    udl,
-    _fmtstr,
-    fmtstr_error,
-    fmtstr_header,
-    fmtstr_set,
-    fmtstr_warn,
-    fmtstr_missing
-)
-
+# fmt:off
 import os
 import sys
-import argparse
+# after import common_utils, parent path of utils/ in in sys.path
+sys.path.append(os.path.abspath(os.path.dirname(__file__)+'/../..'))
+from utils.pipeline.common_utils import *
+# fmt:on
 
 
 if __name__ == "__main__":
@@ -69,105 +45,86 @@ if __name__ == "__main__":
             os.environ[k] = v
 
     if 'commit' not in hyper_cfg:
-        pipeutil.log_commit(f_hyper)
+        log_commit(f_hyper)
 
     if args.ngpu > -1:
-        pipeutil.set_visible_gpus(args.ngpu)
+        set_visible_gpus(args.ngpu)
 
-    pipeutil.initial_datainfo()
+    initial_datainfo()
 
     ############ Stage 1 Tokenizer training ############
     if s_beg <= 1 and s_end >= 1:
         if not args.silent:
-            print(fmtstr_header("Stage 1 Tokenizer training"))
-            fmt = _fmtstr(_fmtstr("Tokenizer training: ",
-                          tcolors.BOLD), tcolors.OKCYAN) + "{}\n"
+            print(sfmt.header("Stage 1 Tokenizer training"))
+            fmt = sfmt(sfmt("Tokenizer training: ",
+                            sfmt.BOLD), sfmt.OKCYAN) + "{}\n"
         else:
             fmt = ''
 
         hyper_cfg = readjson(f_hyper)
         if 'tokenizer' not in hyper_cfg:
             sys.stderr.write(
-                fmtstr_missing('tokenizer', raiseerror=False) +
+                sfmt.missing('tokenizer', raiseerror=False) +
                 ", skip tokenizer training.\n"
             )
         else:
-            pipeutil.train_tokenizer(f_hyper)
+            train_tokenizer(f_hyper)
 
     ############ Stage 2  Pickle data ############
     if s_beg <= 2 and s_end >= 2:
         if not args.silent:
-            print(fmtstr_header("Stage 2 Pickle data"))
-            fmt = _fmtstr(_fmtstr("Pickle data: ",
-                          tcolors.BOLD), tcolors.OKCYAN) + "{}\n"
+            print(sfmt.header("Stage 2 Pickle data"))
+            fmt = sfmt(sfmt("Pickle data: ",
+                            sfmt.BOLD), sfmt.OKCYAN) + "{}\n"
         else:
             fmt = ''
-        from cat.utils.data import pack_corpus as t2b
+        from utils.data import pack_corpus as t2b
 
         hyper_cfg = readjson(f_hyper)
-        assert 'data' in hyper_cfg, fmtstr_missing('data', udl(f_hyper))
+        assert 'data' in hyper_cfg, sfmt.missing('data', sfmt.udl(f_hyper))
 
         data_settings = hyper_cfg['data']
-        if 'text_processing' not in data_settings:
-            cfg_text_process = {}
-        else:
-            cfg_text_process = data_settings['text_processing']
-        if 'nj' not in cfg_text_process:
-            cfg_text_process['nj'] = max(1, os.cpu_count() // 2)
-            sys.stdout.write(fmt.format(fmtstr_set(
-                'nj', cfg_text_process['nj'], False
-            )))
+        cfg_packing = data_settings.get('packing-text-lm', {})
 
-        assert 'tokenizer' in hyper_cfg, fmtstr_missing(
-            'tokenizer', udl(f_hyper))
-        cfg_text_process['tokenizer'] = hyper_cfg['tokenizer']['file']
+        assert 'tokenizer' in hyper_cfg, sfmt.missing(
+            'tokenizer', sfmt.udl(f_hyper))
+        cfg_packing['tokenizer'] = hyper_cfg['tokenizer']['file']
 
-        pkldir = os.path.join(working_dir, 'lmbin')
+        pkldir = os.path.join(working_dir, 'pkl')
         os.makedirs(pkldir, exist_ok=True)
         # 'train' and 'dev' datasets would be merged into ones,
-        # 'test' datasets would be processed individually in stage 4s
-        for part in ['train', 'dev', 'test']:
+        # 'test' datasets would be processed individually in stage 4
+        sys.stderr.write(sfmt.warn(
+            "text is normalized with single thread. This might take a while.\n"
+        ))
+        for part in ['train', 'dev']:
             if part not in data_settings:
-                sys.stderr.write(fmtstr_missing(
-                    part, (udl(f_hyper), 'data'), False) +
+                sys.stderr.write(sfmt.missing(
+                    part, (sfmt.udl(f_hyper), 'data'), False) +
                     ", skip.\n"
                 )
                 continue
-            part_text = pipeutil.combine_text(data_settings[part])
-            if part != 'train':
-                setting = cfg_text_process.copy()
-                if 'concat' in setting:
-                    del setting['concat']
-                if 'truncate' in setting:
-                    del setting['truncate']
-            else:
-                setting = cfg_text_process
-
             f_pkl = os.path.join(pkldir, part+'.pkl')
             if os.path.isfile(f_pkl):
-                sys.stderr.write(fmtstr_warn(
-                    f"{udl(f_pkl)} exists, skip.\n"
+                sys.stderr.write(sfmt.warn(
+                    f"{sfmt.udl(f_pkl)} exists, skip.\n"
                 ))
             else:
-                pipeutil.mp_spawn(t2b.main, pipeutil.get_args(
-                    setting, t2b.TextProcessingParser(), [part_text, f_pkl]))
-            os.remove(part_text)
+                part_text = list(get_corpus(f_hyper, part, merge=True))[0]
+                spawn(t2b.main, parse_args_from_var(
+                    t2b._parser(), cfg_packing,  [part_text, f_pkl]))
+                os.remove(part_text)
 
     ############ Stage 3  NN training ############
     if s_beg <= 3 and s_end >= 3:
         if not args.silent:
-            print(fmtstr_header("Stage 3 NN training"))
-            fmt = _fmtstr(_fmtstr("NN training: ",
-                          tcolors.BOLD), tcolors.OKCYAN) + "{}\n"
+            print(sfmt.header("Stage 3 NN training"))
+            fmt = sfmt(sfmt("NN training: ",
+                            sfmt.BOLD), sfmt.OKCYAN) + "{}\n"
         else:
             fmt = ''
 
-        pipeutil.train_nn_model(
-            working_dir,
-            f_hyper,
-            f'{working_dir}'+'/lmbin/{}.pkl',
-            fmt
-        )
+        train_nn(working_dir, fmt)
 
     ############ Stage 4  Evaluate ############
     if s_beg <= 4 and s_end >= 4:
@@ -184,25 +141,22 @@ if __name__ == "__main__":
             ]))
             sys.exit(0)
 
-        from cat.shared._constants import (
-            D_CHECKPOINT
-        )
         if not args.silent:
-            print(fmtstr_header("Stage 4 Evaluate"))
-            fmt = _fmtstr(_fmtstr("Evaluate: ",
-                          tcolors.BOLD), tcolors.OKCYAN) + "{}\n"
+            print(sfmt.header("Stage 4 Evaluate"))
+            fmt = sfmt(sfmt("Evaluate: ",
+                            sfmt.BOLD), sfmt.OKCYAN) + "{}\n"
         else:
             fmt = ''
 
         hyper_cfg = readjson(f_hyper)
-        assert 'inference' in hyper_cfg, fmtstr_missing(
-            'inference', udl(f_hyper))
+        assert 'inference' in hyper_cfg, sfmt.missing(
+            'inference', sfmt.udl(f_hyper))
 
         cfg_infr = hyper_cfg['inference']
         checkdir = os.path.join(working_dir, D_CHECKPOINT)
         # do model averaging
         if 'avgmodel' in cfg_infr:
-            checkpoint = pipeutil.model_average(
+            checkpoint = model_average(
                 setting=cfg_infr['avgmodel'],
                 checkdir=checkdir,
                 returnifexist=True
@@ -210,9 +164,9 @@ if __name__ == "__main__":
         else:
             checkpoint = None
 
-        assert 'data' in hyper_cfg, fmtstr_missing('data', udl(f_hyper))
-        assert 'test' in hyper_cfg['data'], fmtstr_missing(
-            'test', (udl(f_hyper), 'data'))
+        assert 'data' in hyper_cfg, sfmt.missing('data', sfmt.udl(f_hyper))
+        assert 'test' in hyper_cfg['data'], sfmt.missing(
+            'test', (sfmt.udl(f_hyper), 'data'))
 
         if 'inference' not in hyper_cfg:
             hyper_cfg['inference'] = {}
@@ -220,7 +174,7 @@ if __name__ == "__main__":
         infer_setting = hyper_cfg['inference']
         if 'avgmodel' in infer_setting:
             # do model averaging
-            checkpoint = pipeutil.model_average(
+            checkpoint = model_average(
                 setting=infer_setting['avgmodel'],
                 checkdir=checkdir,
                 returnifexist=True
@@ -253,7 +207,7 @@ if __name__ == "__main__":
                 f"2. set inference:infer:option:tokenizer \n"
             )
             infr_option['tokenizer'] = hyper_cfg['tokenizer']['file']
-            sys.stdout.write(fmt.format(fmtstr_set(
+            sys.stdout.write(fmt.format(sfmt.set(
                 'tokenizer', infr_option['tokenizer']
             )))
 
@@ -262,7 +216,7 @@ if __name__ == "__main__":
         # since the lm is likely to be n-gram one. checkpoint is None is ok.
         if 'resume' not in infr_option and checkpoint is not None:
             infr_option['resume'] = checkpoint
-            sys.stdout.write(fmt.format(fmtstr_set(
+            sys.stdout.write(fmt.format(sfmt.set(
                 'inference:infer:option:resume',
                 checkpoint
             )))
@@ -270,31 +224,29 @@ if __name__ == "__main__":
         if intfname == 'cat.lm.ppl_compute':
             # we need to remove the uid in the transcript text
             # but for text resovled from local path, we assume it's raw text w/o uid.
-            if isinstance(hyper_cfg['data']['test'], str):
-                hyper_cfg['data']['test'] = [hyper_cfg['data']['test']]
-            text_local, _ = pipeutil.resolve_in_priority(
-                hyper_cfg['data']['test'])
-            # use combine_text() to remove the uid
-            text_trans = [
-                pipeutil.combine_text(t_r, f"/tmp/{t_r}.tmp")
-                for t_r in set(hyper_cfg['data']['test']) - set(text_local)
-            ]
 
-            if 'evaluate' not in infr_option:
-                infr_option['evaluate'] = text_local+sorted(text_trans)
-            interface.main(pipeutil.get_args(
-                infr_option,
+            testsets = hyper_cfg['data']['test']
+            if isinstance(testsets, str):
+                sys.stdout.write('data: ' + testsets+'\n')
+            else:
+                sys.stdout.write('data: ' + '   '.join(testsets)+'\n')
+
+            files_woid = list(get_corpus(f_hyper, 'test'))
+            infr_option['evaluate'] = files_woid
+            interface.main(parse_args_from_var(
                 interface._parser(),
+                infr_option,
                 [infr_option['config']]
             ))
+            for f in files_woid:
+                os.remove(f)
 
-            for t_r in text_trans:
-                os.remove(t_r)
         elif intfname == 'cat.lm.rescore':
             # if the input is a format string like rnnt-16_{}.nbest
             # we use it to format the test sets.
-            assert 'nbestlist' in infr_option, fmtstr_missing(
-                'nbestlist', (udl(f_hyper), 'inference', 'infer', 'option')
+            assert 'nbestlist' in infr_option, sfmt.missing(
+                'nbestlist', (sfmt.udl(f_hyper),
+                              'inference', 'infer', 'option')
             )
             if infr_option.get('output', None) is None:
                 suffix = os.path.basename(
@@ -311,7 +263,7 @@ if __name__ == "__main__":
                 os.makedirs(os.path.dirname(
                     infr_option['output']), exist_ok=True)
                 if '{}' not in suffix:
-                    sys.stdout.write(fmt.format(fmtstr_set(
+                    sys.stdout.write(fmt.format(sfmt.set(
                         'inference:infer:option:output',
                         infr_option['output']
                     )))
@@ -325,8 +277,8 @@ if __name__ == "__main__":
                 if infr_option.get('save_lm_nbest', None) is not None and '{}' not in infr_option['save_lm_nbest']:
                     sys.stderr.write(
                         "Error:\n"
-                        f"    you set 'nbestlist' as format string: {udl(infr_option['nbestlist'])}\n"
-                        f"    ... but the 'save_lm_nbest' is not: {udl(infr_option['save_lm_nbest'])}\n"
+                        f"    you set 'nbestlist' as format string: {sfmt.udl(infr_option['nbestlist'])}\n"
+                        f"    ... but the 'save_lm_nbest' is not: {sfmt.udl(infr_option['save_lm_nbest'])}\n"
                     )
                     sys.exit(1)
             else:
@@ -342,37 +294,32 @@ if __name__ == "__main__":
                     for k in infr_option:
                         if isinstance(infr_option[k], str) and '{}' in infr_option[k]:
                             running_option[k] = infr_option[k].format(_set)
-                            sys.stdout.write(fmt.format(f"{_set}: " + fmtstr_set(
+                            sys.stdout.write(fmt.format(f"{_set}: " + sfmt.set(
                                 k, running_option[k]
                             )))
                     if os.path.isfile(running_option['output']):
-                        sys.stderr.write(fmtstr_warn(
-                            f"{_set}: {udl(running_option['output'])} exists, skip.\n"
+                        sys.stderr.write(sfmt.warn(
+                            f"{_set}: {sfmt.udl(running_option['output'])} exists, skip.\n"
                         ))
                         continue
-                    interface.main(pipeutil.get_args(
-                        running_option,
+                    interface.main(parse_args_from_var(
                         interface._parser(),
+                        running_option,
                         [running_option['nbestlist'], running_option['output']]
                     ))
             else:
                 if os.path.isfile(infr_option['output']):
-                    sys.stderr.write(fmtstr_warn(
-                        f"{udl(infr_option['output'])} exists, skip.\n"
-                    ))
-                    interface.main(pipeutil.get_args(
-                        infr_option,
-                        interface._parser(),
-                        [infr_option['nbestlist'], infr_option['output']]
+                    sys.stderr.write(sfmt.warn(
+                        f"{sfmt.udl(infr_option['output'])} exists, skip.\n"
                     ))
                 else:
-                    interface.main(pipeutil.get_args(
-                        infr_option,
+                    interface.main(parse_args_from_var(
                         interface._parser(),
+                        infr_option,
                         [infr_option['nbestlist'], infr_option['output']]
                     ))
         else:
-            sys.stderr.write(fmtstr_warn(
+            sys.stderr.write(sfmt.warn(
                 f"'{intfname}' only support handcrafted execution.\n"
             ))
 
@@ -386,7 +333,7 @@ if __name__ == "__main__":
                 del new_cfg['inference']['infer']
 
             try:
-                pipeutil.dumpjson(new_cfg, f_hyper)
+                dumpjson(new_cfg, f_hyper)
                 os.system(" ".join([
                     sys.executable,     # python interpreter
                     os.path.join(
@@ -405,4 +352,4 @@ if __name__ == "__main__":
             except Exception as e:
                 raise RuntimeError(str(e))
             finally:
-                pipeutil.dumpjson(backup, f_hyper)
+                dumpjson(backup, f_hyper)

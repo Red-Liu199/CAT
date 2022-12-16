@@ -5,7 +5,7 @@ Author: Hongyu Xiang, Keyu An, Huahuan Zheng
 """
 
 
-from . import ctc_builder
+from .decode import build_model
 from ..shared import coreutils
 from ..shared.encoder import AbsEncoder
 from ..shared.data import (
@@ -91,24 +91,16 @@ def worker(pid: int, args: argparse.Namespace, q: mp.Queue, model: AbsEncoder):
                 break
             key, x, x_lens = batch
             assert len(key) == 1, "Batch size > 1 is not currently support."
-            logits, _ = model(x, x_lens)
-            log_probs = logits.log_softmax(dim=-1).data.numpy()
-            log_probs[log_probs == -np.inf] = -1e16
-            results[key[0]] = log_probs[0]
+            if args.streaming:
+                logits = model.chunk_infer(x, x_lens)[0].data.numpy()
+            else:
+                logits = model.am(x, x_lens)[0].data.numpy()
+            logits[logits == -np.inf] = -1e16
+            results[key[0]] = logits[0]
             del batch
 
     kaldiio.save_ark(os.path.join(
         args.output_dir, f"decode.{pid+1}.ark"), results)
-
-
-def build_model(args: argparse.Namespace):
-    assert args.resume is not None, "Trying to decode with uninitialized parameters. Add --resume"
-
-    model = ctc_builder(coreutils.readjson(args.config), dist=False)
-    model = coreutils.load_checkpoint(model, args.resume)
-    model = model.am
-    model.eval()
-    return model
 
 
 def _parser():
@@ -121,6 +113,9 @@ def _parser():
     parser.add_argument("--input_scp", type=str, default=None)
     parser.add_argument("--output-dir", type=str, help="Ouput directory.")
     parser.add_argument("--nj", type=int, default=-1)
+    parser.add_argument("--built-model-by", type=str, default="cat.ctc.train",
+                        help="Tell where to import build_model() function. defautl: cat.ctc.train")
+    parser.add_argument("--streaming", action='store_true', default=False)
     return parser
 
 

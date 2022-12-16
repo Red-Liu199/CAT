@@ -9,20 +9,16 @@ Transducer trainer.
 import os
 __all__ = ["UnifiedTTrainer", "build_model", "_parser", "main"]
 
-from . import rnnt_builder
-from .train import TransducerTrainer
-from .joiner import AbsJointNet
+from .train import (
+    TransducerTrainer,
+    build_model as rnnt_builder,
+    main_worker as basic_worker
+)
 from ..shared import coreutils
-from ..shared.encoder import AbsEncoder
-from ..shared.decoder import AbsDecoder
 from ..shared.simu_net import SimuNet
 from ..shared.manager import (
     Manager,
     train as default_train_func
-)
-from ..shared.data import (
-    KaldiSpeechDataset,
-    sortedPadCollateASR
 )
 
 import gather
@@ -35,35 +31,15 @@ from warp_rnnt import rnnt_loss as RNNTLoss
 
 import torch
 import torch.nn as nn
-import torch.distributed as dist
-from torch.cuda.amp import autocast
 
 
 def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
-    coreutils.set_random_seed(args.seed)
-    args.gpu = gpu
-    args.rank = args.rank * ngpus_per_node + gpu
-    torch.cuda.set_device(args.gpu)
 
-    dist.init_process_group(
-        backend=args.dist_backend, init_method=args.dist_url,
-        world_size=args.world_size, rank=args.rank)
-
-    manager = Manager(
-        KaldiSpeechDataset,
-        sortedPadCollateASR(),
-        args,
-        build_model,
-        func_train=custom_train,
-        extra_tracks=[
-            'loss/streaming',
-            'loss/full_utt',
-            'loss/simulate'
-        ]
+    return basic_worker(
+        gpu, ngpus_per_node, args,
+        func_build_model=build_model,
+        func_train=custom_train
     )
-
-    # training
-    manager.run(args)
 
 
 class UnifiedTTrainer(TransducerTrainer):
@@ -319,13 +295,6 @@ def custom_hook(
         l_full_utt = loss_utt.item()
         l_simu = loss_simu.item()
         step_cur = manager.step_by_last_epoch + n_step
-        manager.monitor.update(
-            {
-                'loss/streaming': (l_streaming, step_cur),
-                'loss/full_utt': (l_full_utt, step_cur),
-                'loss/simulate': (l_simu, step_cur)
-            }
-        )
         manager.writer.add_scalar(
             'loss/streaming', l_streaming, step_cur)
         manager.writer.add_scalar(

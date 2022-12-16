@@ -22,7 +22,7 @@ function check_py_package() {
 
     cd /tmp
     python -c "import $name" >/dev/null 2>&1
-    return $?
+    echo "$?"
 }
 
 function exc_install() {
@@ -37,7 +37,7 @@ function exc_install() {
         # install ctcdecode is annoying...
         [[ $force == "False" && $(check_py_package ctcdecode) -eq 0 ]] || {
             if [ ! -d src/ctcdecode ]; then
-                git clone --recursive git@github.com:maxwellzh/ctcdecode.git src/ctcdecode
+                git clone --recursive https://github.com/maxwellzh/ctcdecode.git src/ctcdecode
             else
                 cd src/ctcdecode
                 git pull --recurse-submodules
@@ -53,7 +53,7 @@ function exc_install() {
         # install kenlm
         # kenlm is a denpendency of cat, so we first check the python package installation
         [[ $force == "False" && $(check_py_package kenlm) -eq 0 && -x src/bin/lmplz && -x src/bin/build_binary ]] || {
-            python -m pip install -e git+ssh://git@github.com/kpu/kenlm.git#egg=kenlm
+            python -m pip install -e git+https://github.com/kpu/kenlm.git#egg=kenlm
 
             cd src/kenlm
             mkdir -p build && cd build
@@ -94,7 +94,7 @@ function exc_install() {
         # change dir to a different one to test whether cat module has been installed.
         [[ $force == "False" && $(check_py_package cat) -eq 0 ]] || {
             python -m pip install -r requirements.txt || return 1
-
+            python -m pip install -e . || return 1
             # check installation
             $(cd egs && python -c "import cat") >/dev/null || return 1
         }
@@ -134,9 +134,9 @@ function exc_rm() {
 
     case $name in
     cat | all)
+        # FIXME: maybe we should clean building dependencies?
         python -m pip uninstall -y cat
         python setup.py clean --all
-        # FIXME: maybe we should clean building dependencies ?
         ;;&
     ctcdecode | all)
         python -m pip uninstall -y ctcdecode
@@ -191,31 +191,23 @@ done
 
 ## python>3
 [ "$(python -V 2>&1 | awk '{print $2}' | cut -d '.' -f 1)" -ne 3 ] && {
-    echo "Require python3+, instead $(python --version)"
+    echo "Require python3+, instead $(python -V 2>&1)"
     exit 1
 }
 
-log_dir="logs"
-mkdir -p $log_dir
 if [ $remove == "False" ]; then
     # install packages
     for p in $package; do
-        f_log="$log_dir/$p.log"
-        touch $f_log
-        echo "logging at $f_log" 1>&2
-        exc_install $p >$f_log 2>&1 || {
-            echo "failed to install $p, check the log at $f_log" 1>&2
+        exc_install $p || {
+            echo "failed to install $p." 1>&2
             exit 1
         }
     done
 elif [ $remove == "True" ]; then
     # remove packages
     for p in $package; do
-        f_log="$log_dir/remove.$p.log"
-        touch $f_log
-        echo "logging at $f_log" 1>&2
-        exc_rm $p >$f_log 2>&1 || {
-            echo "failed to remove $p, check the log at $f_log" 1>&2
+        exc_rm $p || {
+            echo "failed to remove $p." 1>&2
             exit 1
         }
     done
