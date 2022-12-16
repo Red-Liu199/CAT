@@ -11,7 +11,7 @@ __all__ = ["TRFLMTrainer", "build_model", "_parser", "main"]
 
 from ...shared import coreutils
 from ...shared.decoder import AbsDecoder
-from ...shared.manager import (
+from .manager import (
     Manager,
     TRFManager,
     train_ebm as origin_train_func,
