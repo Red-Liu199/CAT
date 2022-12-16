@@ -12,7 +12,6 @@ from ..shared.data import (
     KaldiSpeechDataset,
     sortedPadCollateASR
 )
-from ..rnnt.train_nce import cal_wer, custom_evaluate
 
 import os
 import argparse

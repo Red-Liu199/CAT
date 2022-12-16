@@ -3,7 +3,6 @@
 # Author: Zheng Huahuan (maxwellzh@outlook.com)
 
 """training/evaluating manager of ebm"""
-
 from ...shared import (
     coreutils,
     tokenizer as tknz
@@ -14,17 +13,13 @@ from ...shared._constants import (
     F_TRAINING_INFO
 )
 from ...shared.data import (
-    DynamicBatchDistSampler,
+    BatchDistSampler,
     ReadBatchDataLoader,
     PipeTokenize
 )
 from ...shared.scheduler import (
     State,
     build_scheduler
-)
-from ...shared.monitor import (
-    MonitorWriter,
-    ANNOTATION as monitor_anno
 )
 from ...shared.tokenizer import (
     gen_cache_path,
@@ -58,13 +53,12 @@ from ...shared.manager import *
 class TRFManager(Manager):
     def __init__(
             self,
-            Dataset: torch.utils.data.Dataset,
+            T_dataset: torch.utils.data.Dataset,
             collate_fn: Callable,
             args: argparse.Namespace,
             func_build_model: Callable[[dict, argparse.Namespace], Union[nn.Module, nn.parallel.DistributedDataParallel]],
             func_train: Optional[Callable] = None,
             func_eval: Optional[Callable] = None,
-            extra_tracks: Union[str, List[str], None] = None,
             _wds_hook: Callable[[wds.WebDataset], wds.WebDataset] = None):
         """Initialize the manager for training.
 
@@ -72,24 +66,31 @@ class TRFManager(Manager):
             >>> # dataset is an instance of WebDataset
             >>> dataset = _wds_hook(dataset)
         """
+        super().__init__()
 
         coreutils.check_parser(args, [
-            'rank', 'gpu', 'workers', 'trset', 'devset', 'dynamic_batch_mode',
+            'rank', 'gpu', 'workers', 'trset', 'devset',
+            'batching_mode', 'batching_uneven',
             'batch_size', 'grad_accum_fold', 'config', 'dir', 'debug',
             '_logdir', '_checkdir', 'resume', 'init_model'
         ])
 
         # setup dataloader
-        val_set = Dataset(args.devset)
+        val_set = T_dataset(args.devset)
 
         setattr(args, 'n_steps', 0)
         world_size = dist.get_world_size()
+        if args.batching_mode == 'batch' and (not args.batching_uneven):
+            args.batch_size = (args.batch_size//world_size) * world_size
+
         if args.large_dataset:
             assert args.tokenizer is not None, f"--tokenizer is required for --large-dataset"
             assert os.path.isfile(args.tokenizer), \
                 f"--tokenizer={args.tokenizer} is not a valid file."
-            # large dataset doesnot support dynamic batching
-            args.dynamic_batch_mode = -1
+            # large dataset doesnot support dynamic dispatching
+            args.batching_uneven = False
+            args.batching_mode = 'batch'
+            args.batch_size = (args.batch_size//world_size) * world_size
 
             '''
             NOTE (Huahuan):
@@ -138,60 +139,59 @@ class TRFManager(Manager):
                 tr_set, num_workers=1, shuffle=False,
                 # batching is done by webdataset
                 batch_size=None)
-            train_sampler = None
-        else:
-            tr_set = Dataset(args.trset)
-            if args.dynamic_batch_mode != -1 and world_size > 1:
-                coreutils.distprint(
-                    "> enable dynamic batching", args.gpu)
-                if args.dynamic_batch_mode == 0 and args.grad_accum_fold > 1:
-                    """
-                    NOTE (huahuan): with dynamic batching, in batch mode, at each update, the global
-                    ... batch size (g_bs) is always `args.batch_size`. However, with bucket mode,
-                    ... the g_bs could be different at steps, so the
-                    ... grad_accum_fold would introduce grad bias. I think this won't
-                    ... affect much, because the g_bs would only vary in a small range.
-                    ... That's why here is a WARNING instead of an ERROR.
-                    """
-                    coreutils.distprint(
-                        "warning: bucket dynamic batching with --grad_accum_fold > 1 "
-                        "would probably produce inconsistent results.",
-                        args.gpu
-                    )
-                train_sampler = DynamicBatchDistSampler(
-                    dataset=tr_set,
-                    mode=['bucket', 'batch'][args.dynamic_batch_mode],
-                    global_batch_size=args.batch_size,
-                    max_bucket_size=args.dynamic_bucket_size,
-                    local_rank=args.gpu
-                )
-                trainloader = DataLoader(
-                    tr_set, batch_sampler=train_sampler,
-                    num_workers=args.workers, collate_fn=collate_fn,
-                    prefetch_factor=4, persistent_workers=True
-                )
-            else:
-                args.dynamic_batch_mode = -1
-                train_sampler = DistributedSampler(tr_set)
-                trainloader = DataLoader(
-                    tr_set, batch_size=args.batch_size//world_size,
-                    num_workers=args.workers, sampler=train_sampler, collate_fn=collate_fn,
-                    prefetch_factor=4, persistent_workers=True)
-
-        if args.dynamic_batch_mode == -1:
-            args.batch_size = (args.batch_size // world_size) * world_size
+            tr_sampler = None
             trainloader = ReadBatchDataLoader(trainloader, bs=args.batch_size)
         else:
-            trainloader = ReadBatchDataLoader(trainloader, dynamic=True)
+            tr_set = T_dataset(args.trset)
+            if args.batching_mode == 'bucket' and args.grad_accum_fold > 1:
+                """
+                NOTE (huahuan): with dynamic batching, in batch mode, at each update, the global
+                ... batch size (g_bs) is always `args.batch_size`. However, with bucket mode,
+                ... the g_bs could be different at steps, so the
+                ... grad_accum_fold would introduce grad bias. I think this won't
+                ... affect much, because the g_bs would only vary in a small range.
+                ... That's why here is a WARNING instead of an ERROR.
+                """
+                coreutils.distprint(
+                    "warning: bucket dynamic batching with --grad_accum_fold > 1 "
+                    "would probably produce inconsistent results.",
+                    args.gpu
+                )
 
-        val_sampler = DistributedSampler(val_set, shuffle=False)
+            tr_sampler = BatchDistSampler(
+                dataset=tr_set,
+                mode=args.batching_mode,
+                dispatch_even=(not args.batching_uneven),
+                global_batch_size=args.batch_size,
+                max_bucket_size=args.bucket_size,
+                local_rank=args.gpu
+            )
+            trainloader = DataLoader(
+                tr_set, 
+                batch_sampler=tr_sampler,
+                num_workers=args.workers, 
+                collate_fn=collate_fn
+            )
+            trainloader = ReadBatchDataLoader(trainloader)
+
+        val_sampler = BatchDistSampler(
+            dataset=val_set,
+            mode=args.batching_mode,
+            dispatch_even=(not args.batching_uneven),
+            global_batch_size=args.batch_size,
+            max_bucket_size=args.bucket_size,
+            local_rank=args.gpu,
+            shuffle=False
+        )
+        # NOTE: global batch size info is not required for evaluation.
         valloader = DataLoader(
-            val_set, batch_size=args.batch_size//world_size, shuffle=False,
-            num_workers=args.workers, sampler=val_sampler, collate_fn=collate_fn,
-            persistent_workers=True
+            val_set,
+            batch_sampler=val_sampler,
+            num_workers=args.workers,
+            collate_fn=collate_fn
         )
 
-        self.train_sampler = train_sampler
+        self.train_sampler = tr_sampler
         self.trainloader = trainloader
         self.valloader = valloader
 
@@ -220,35 +220,16 @@ class TRFManager(Manager):
         self.evaluate = evaluate if func_eval is None else func_eval
 
         # Initial specaug module
-        # FIXME: deprecate the error once it's stable
-        if 'specaug_config' in cfg:
-            raise ValueError(
-                "'specaug_config' has been deprecated, use 'specaug' instead. "
-                f"check that in {args.config}"
-            )
         if 'specaug' not in cfg:
             specaug = None
-            coreutils.distprint("> disable SpecAug", args.gpu)
         else:
-            specaug = SpecAug(**cfg['specaug'])
-            specaug = specaug.to(f'cuda:{args.gpu}')
+            specaug = SpecAug(**cfg['specaug']).to(f'cuda:{args.gpu}')
         self.specaug = specaug
 
         # Initial scheduler and optimizer
         assert 'scheduler' in cfg
-        # if hasattr(self.model, "requires_slice") and self.model.requires_slice:
-        #     self.scheduler = build_scheduler(
-        #         cfg['scheduler'],
-        #         filter(lambda x: x.requires_grad, self.model.parameters())
-        #     )
-        # else:
-        #     self.scheduler = build_scheduler(
-        #         cfg['scheduler'], self.model.parameters())
-        
-        # split_zeta = True if 'scheduler_zeta' in cfg else False
-        # split_noise = True if 'scheduler_noise' in cfg else False
-        
-
+        # self.scheduler = build_scheduler(
+        #     cfg['scheduler'], self.model.parameters())
         self.scheduler_zeta = build_scheduler(
                     cfg.get('scheduler_zeta', cfg['scheduler']),
                     map(lambda x: x[1], filter(
@@ -264,7 +245,8 @@ class TRFManager(Manager):
                     map(lambda x: x[1], filter(
                         lambda x: 'noise' not in x[0] and 'zeta' not in x[0] and x[1].requires_grad, 
                         self.model.named_parameters()))
-                )
+        )
+
         # Initialize the grad scaler
         self.scaler = GradScaler(enabled=args.amp)
 
@@ -292,10 +274,7 @@ class TRFManager(Manager):
                 f"> initialize model from: {args.init_model}", args.gpu)
             checkpoint = torch.load(
                 args.init_model, map_location=f'cuda:{args.gpu}')  # type: OrderedDict
-            if 'scheduler' in checkpoint:
-                # load the optimizer params
-                self.scheduler.load_state_dict(
-                    checkpoint['scheduler'], optim_only=True)
+
             try:
                 self.model.load_state_dict(checkpoint['model'])
             except RuntimeError as re:
@@ -309,22 +288,24 @@ class TRFManager(Manager):
             del checkpoint
 
         # Initialize the checkpoint manager
+        try:
+            user = os.getlogin()
+        except OSError:
+            user = "defaultUser"
+
         self.cm = CheckManager(
             os.path.join(args._checkdir, F_CHECKPOINT_LIST),
-            header=f"created at {datetime.today().strftime('%Y-%m-%d %H:%M:%S')}"
+            header=f"created by {user} at {datetime.today().strftime('%Y-%m-%d %H:%M:%S')}"
         )
 
-        # Initialize the monitor
-        self.monitor = MonitorWriter(args._logdir)
-        self.monitor.addWriter(tuple(monitor_anno.values()))
-        if extra_tracks is not None:
-            self.monitor.addWriter(extra_tracks)
-
+        # Initialize the tensorboard
         if args.rank == 0:
             self.writer = SummaryWriter(os.path.join(
                 args._logdir, "{0:%Y%m%d-%H%M%S/}".format(datetime.now())))
         else:
             self.writer = None
+
+
 
         
     def save(self, name: str, PATH: str = '') -> str:
