@@ -529,11 +529,11 @@ class REBM(AbsDecoder):
         noise_config = coreutils.readjson(config_noise_model)
         self.noise_type = list(noise_config.keys())[0]
         self.noise_cls = noise_config['decoder']['type']
-        trf_config = coreutils.readjson(config_trf_model)
+        trf_config = coreutils.readjson(config_ebm_model)
         self.nn_type = list(trf_config.keys())[0] # encoder or decoder
-        if check_trf_model is not None:
+        if check_ebm_model is not None:
             trf_model = lm_builder(trf_config, dist=False)
-            coreutils.load_checkpoint(trf_model, check_trf_model)
+            coreutils.load_checkpoint(trf_model, check_ebm_model)
             self.udlying_nn = trf_model.lm
         else:
             model_cls = eval(trf_config[self.nn_type]['type'])
@@ -754,11 +754,11 @@ class EBM(AbsDecoder):
         noise_config = coreutils.readjson(config_noise_model)
         self.noise_type = list(noise_config.keys())[0]
         self.noise_cls = noise_config['decoder']['type']
-        trf_config = coreutils.readjson(config_trf_model)
+        trf_config = coreutils.readjson(config_ebm_model)
         self.nn_type = list(trf_config.keys())[0] # encoder or decoder
-        if check_trf_model is not None:
+        if check_ebm_model is not None:
             trf_model = lm_builder(trf_config, dist=False)
-            coreutils.load_checkpoint(trf_model, check_trf_model)
+            coreutils.load_checkpoint(trf_model, check_ebm_model)
             self.udlying_nn = trf_model.lm
         else:
             model_cls = eval(trf_config[self.nn_type]['type'])
