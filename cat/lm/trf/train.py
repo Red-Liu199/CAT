@@ -49,29 +49,29 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
     configures = coreutils.readjson(args.config)
     mode = configures['decoder']['kwargs'].get('method', 'nce')
     model_type = configures['decoder']['type']
-    extra_tracks = [
-        'train/loss_data',
-        'train/loss_noise',
-        'train/acc_data',
-        'train/acc_noise',
-        'train/ppl_data',
-        'train/loss_true',
-        'dev/ppl'
-    ]
-    if mode == 'dnce' and model_type=='TRFLM':
-        extra_tracks += [
-            'train/ppl_trfM_noise',
-            'train/ppl_noiseM_data',
-            'train/ppl_noiseM_noise',
-            'train/loss_noise_kl',
-            'train/loss_data_true',
-            'train/loss_noise_true',
-            'dev/ppl',
-            'dev/ppl_noise',
-            'train/zeta_5',
-            'train/zeta_15',
-            'train/zeta_25'
-        ]
+    # extra_tracks = [
+    #     'train/loss_data',
+    #     'train/loss_noise',
+    #     'train/acc_data',
+    #     'train/acc_noise',
+    #     'train/ppl_data',
+    #     'train/loss_true',
+    #     'dev/ppl'
+    # ]
+    # if mode == 'dnce' and model_type=='TRFLM':
+    #     extra_tracks += [
+    #         'train/ppl_trfM_noise',
+    #         'train/ppl_noiseM_data',
+    #         'train/ppl_noiseM_noise',
+    #         'train/loss_noise_kl',
+    #         'train/loss_data_true',
+    #         'train/loss_noise_true',
+    #         'dev/ppl',
+    #         'dev/ppl_noise',
+    #         'train/zeta_5',
+    #         'train/zeta_15',
+    #         'train/zeta_25'
+    #     ]
     evaluate_func = evaluate_trf if mode=='dnce' and model_type=='TRFLM' else evaluate_ebm
     manager_cls = TRFManager if model_type=='TRFLM' and 'scheduler_noise' in configures else Manager
     train_func = custom_train if model_type =='TRFLM' and 'scheduler_noise' in configures else origin_train
@@ -81,7 +81,7 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
         args, build_model,
         func_train=train_func,
         func_eval=evaluate_func,
-        extra_tracks=extra_tracks
+        # extra_tracks=extra_tracks
     )
     manager.trf_mode = mode
 
@@ -128,7 +128,6 @@ def custom_hook(
         for k, v in metrics.items():
             if k in ignore_keys:
                 continue
-            manager.monitor.update(k, (float(v), step_cur))
             manager.writer.add_scalar(k, float(v), step_cur)
 
     return loss

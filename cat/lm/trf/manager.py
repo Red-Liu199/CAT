@@ -386,9 +386,8 @@ def evaluate_trf(testloader: DataLoader, args: argparse.Namespace, manager: Mana
 
     if args.rank == 0:
         manager.writer.add_scalar('loss/dev', avg_loss, manager.step)
-        manager.monitor.update(monitor_anno['dev-metric'], (avg_loss, manager.step))
-        manager.monitor.update('dev/ppl', (PPL_trf, manager.step))
-        manager.monitor.update('dev/ppl_noise', (PPL_noise, manager.step))
+        manager.writer.add_scalar('dev/ppl', PPL_trf, manager.step)
+        manager.writer.add_scalar('dev/ppl_noise', PPL_noise, manager.step)
     return avg_loss
 
 @torch.no_grad()
@@ -426,8 +425,7 @@ def evaluate_ebm(testloader: DataLoader, args: argparse.Namespace, manager: Mana
 
     if args.rank == 0:
         manager.writer.add_scalar('loss/dev', avg_loss, manager.step)
-        manager.monitor.update(monitor_anno['dev-metric'], (avg_loss, manager.step))
-        manager.monitor.update('dev/ppl', (avg_ppl, manager.step))
+        manager.writer.add_scalar('dev/ppl', avg_ppl, manager.step)
     return avg_loss
 
 def train_trf(trainloader: ReadBatchDataLoader, args: argparse.Namespace, manager: Manager, hook_func: Callable = None):
@@ -575,11 +573,6 @@ def train_trf(trainloader: ReadBatchDataLoader, args: argparse.Namespace, manage
                 manager.writer.add_scalar(
                     'lr_n', tolog['lr_n'], manager.step)
 
-                # update monitor
-                manager.monitor.update({
-                    monitor_anno['tr-metric']: (tolog['loss'], manager.step),
-                    monitor_anno['tr-lr']: (tolog['lr'], manager.step)
-                })
 
             if args.verbose:
                 coreutils.distprint(
@@ -747,12 +740,6 @@ def train_ebm(trainloader: ReadBatchDataLoader, args: argparse.Namespace, manage
                     'loss/train_loss', tolog['loss'], manager.step)
                 manager.writer.add_scalar(
                     'lr', tolog['lr'], manager.step)
-
-                # update monitor
-                manager.monitor.update({
-                    monitor_anno['tr-metric']: (tolog['loss'], manager.step),
-                    monitor_anno['tr-lr']: (tolog['lr'], manager.step)
-                })
 
             if args.verbose:
                 coreutils.distprint(
