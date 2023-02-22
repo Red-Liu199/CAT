@@ -24,6 +24,8 @@ if __name__ == "__main__":
                         help="Number of GPUs to be used.")
     parser.add_argument("--silent", action="store_true",
                         help="Disable detailed messages output.")
+    parser.add_argument("--force_retest", action="store_true",
+                        help="force to test again in stage 4 instead using existing results")
 
     args = parser.parse_args()
     s_beg = args.stage_beg
@@ -297,7 +299,7 @@ if __name__ == "__main__":
                             sys.stdout.write(fmt.format(f"{_set}: " + sfmt.set(
                                 k, running_option[k]
                             )))
-                    if os.path.isfile(running_option['output']):
+                    if os.path.isfile(running_option['output']) and not args.force_retest:
                         sys.stderr.write(sfmt.warn(
                             f"{_set}: {sfmt.udl(running_option['output'])} exists, skip.\n"
                         ))
@@ -308,7 +310,7 @@ if __name__ == "__main__":
                         [running_option['nbestlist'], running_option['output']]
                     ))
             else:
-                if os.path.isfile(infr_option['output']):
+                if os.path.isfile(infr_option['output']) and not args.force_retest:
                     sys.stderr.write(sfmt.warn(
                         f"{sfmt.udl(infr_option['output'])} exists, skip.\n"
                     ))

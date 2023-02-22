@@ -72,7 +72,10 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
     #         'train/zeta_15',
     #         'train/zeta_25'
     #     ]
-    evaluate_func = evaluate_trf if mode=='dnce' and model_type=='TRFLM' else evaluate_ebm
+    if model_type=='EBM_IS':
+        evaluate_func = evaluate
+    else:
+        evaluate_func = evaluate_trf if mode=='dnce' and model_type=='TRFLM' else evaluate_ebm
     manager_cls = TRFManager if model_type=='TRFLM' and 'scheduler_noise' in configures else Manager
     train_func = custom_train if model_type =='TRFLM' and 'scheduler_noise' in configures else origin_train
     manager = manager_cls(
@@ -88,8 +91,14 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
     # lm training does not need specaug
     manager.specaug = None
 
+    if hasattr(manager.model.module.lm, 'fp'):
+        print('Device {} has a file pointer for storing samples'.format(dist.get_rank()))
     # training
     manager.run(args)
+    
+    if hasattr(manager.model.module.lm, 'fp'):
+        manager.model.module.lm.fp.close()
+    
 
 
 # training TRF LM

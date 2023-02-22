@@ -295,7 +295,7 @@ class Manager(object):
                 pass
             else:
                 self.train_sampler.set_epoch(self.epoch)
-            if self.step == 0 and not self.DEBUG:
+            if self.step == -1 and not self.DEBUG:
                 # get the initialized perf. before training start
                 self.model.eval()
                 metrics = self.evaluate(self.valloader, args, self)
