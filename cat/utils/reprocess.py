@@ -8,14 +8,19 @@ def delete_ids(input_dir, output_dir, head_del_num, tail_del_num):
     for set in ['train', 'dev', 'test']:
         _seeks = []
         count=0
+        if not os.path.exists(os.path.join(input_dir,'{}.pkl.bin'.format(set))):
+            continue
         with open(os.path.join(output_dir,'{}.pkl.bin'.format(set)), 'wb') as fo:
             with open(os.path.join(input_dir, '{}.pkl.bin'.format(set)), 'rb') as fi:
                 while(fi.tell()<os.fstat(fi.fileno()).st_size):
                     data=pickle.load(fi)
-                    if tail_del_num==0:
-                        new_data=(data[0][head_del_num:], data[1][head_del_num:])
-                    else:
-                        new_data=(data[0][head_del_num:-tail_del_num], data[1][head_del_num:-tail_del_num])
+                    if isinstance(data, tuple):
+                        if tail_del_num==0:
+                            new_data=(data[0][head_del_num:], data[1][head_del_num:])
+                        else:
+                            new_data=(data[0][head_del_num:-tail_del_num], data[1][head_del_num:-tail_del_num])
+                    elif isinstance(data, list):
+                        new_data=data[head_del_num:-tail_del_num] if tail_del_num!=0 else data[head_del_num:]
                     _seeks.append(fo.tell())
                     pickle.dump(new_data, fo)
                     count+=1
@@ -32,16 +37,26 @@ def truncate_seqs(input_dir, output_dir, threshold, truncated_len):
     for set in ['train', 'dev', 'test']:
         _seeks = []
         count=0
+        if not os.path.exists(os.path.join(input_dir,'{}.pkl.bin'.format(set))):
+            continue
         with open(os.path.join(output_dir,'{}.pkl.bin'.format(set)), 'wb') as fo:
             with open(os.path.join(input_dir, '{}.pkl.bin'.format(set)), 'rb') as fi:
                 while(fi.tell()<os.fstat(fi.fileno()).st_size):
                     data=pickle.load(fi)
-                    while(len(data[0])>threshold):
-                        new_data=(data[0][:truncated_len], data[1][:truncated_len])
-                        _seeks.append(fo.tell())
-                        pickle.dump(new_data, fo)
-                        count+=1
-                        data=(data[0][truncated_len:], data[1][truncated_len:])
+                    if isinstance(data, tuple):
+                        while(len(data[0])>threshold):
+                            new_data=(data[0][:truncated_len], data[1][:truncated_len])
+                            _seeks.append(fo.tell())
+                            pickle.dump(new_data, fo)
+                            count+=1
+                            data=(data[0][truncated_len:], data[1][truncated_len:])
+                    elif isinstance(data, list):
+                        while(len(data)+1>threshold):
+                            new_data=data[:truncated_len+1]
+                            _seeks.append(fo.tell())
+                            pickle.dump(new_data, fo)
+                            count+=1
+                            data=data[truncated_len+1:]
                     _seeks.append(fo.tell())
                     pickle.dump(data, fo)
                     count+=1

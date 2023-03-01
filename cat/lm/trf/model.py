@@ -887,7 +887,6 @@ class EBM(AbsDecoder):
         log_pm = -energy_values+self.zeta_factor*in_lens
         ppl_data = torch.exp(-log_pm.sum()/in_lens.sum())
         log_pn = self.noisem_score(inputs, in_lens, targets)
-        # ppl_data = torch.exp(-log_pm.sum()/in_lens.sum())
         with torch.no_grad():
             p1 = torch.sigmoid(math.log(self.noise_rate)- log_pm + log_pn)
         loss_data = -(p1*log_pm).mean(dim=0)
@@ -895,8 +894,8 @@ class EBM(AbsDecoder):
         
         seqs, seqlens, seqtars = self.getnoise(noise_sample_num)
         log_pm_noise = -self.calculate_energy(seqs, seqtars, seqlens)
-        log_pn_noise = self.noisem_score(seqs, seqlens, seqtars)
         with torch.no_grad():
+            log_pn_noise = self.noisem_score(seqs, seqlens, seqtars)
             p0 = torch.sigmoid(-math.log(self.noise_rate) + log_pm_noise - log_pn_noise)
         loss_noise = self.noise_rate*(p0*log_pm_noise).mean(dim=0)
         loss_noise_true = -self.noise_rate*torch.mean(torch.log(1-p0+self.episilon))
@@ -1236,8 +1235,9 @@ class EBM_IS(AbsDecoder):
                     p = log_p[j].exp()
                     rand = torch.rand(1, device=p.device)
                     total += 1
-                    if rand<p:
-                        noise[j, t:t+G] = noise_t[j, :, :].squeeze(-1)
+                    if rand<p and t<init_batch_len[j]-1:
+                        token_num = min(t+G, init_batch_len[j]-1) - t
+                        noise[j, t:t+token_num] = noise_t[j, :token_num, :].squeeze(-1)
                         accept_rate += 1
         accept_rate /= total
         padding_mask = (torch.arange(init_batch.size(1), device=init_batch.device)[
@@ -1375,10 +1375,12 @@ class EBM_IS(AbsDecoder):
             noise, noiselens, noisetars = self.getnoise(noise_sample_num)
             energy_noise = self.calculate_energy(noise, noisetars, noiselens)
             with torch.no_grad():
+                self.noise_model.requires_grad_(False)
                 log_p_theta = -energy_noise
                 log_q_phi = self.noisem_score(noise, noiselens, noisetars) # log probabilities of sentences
                 log_weight = log_p_theta - log_q_phi
                 weight_norm = F.softmax(log_weight, dim=-1)
+                self.noise_model.requires_grad_(True)
             loss_sampling = torch.sum(weight_norm*energy_noise)
         elif self.method=='MIS':
             if self.sampling_method=='sequential':
