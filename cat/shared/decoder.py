@@ -525,10 +525,12 @@ class PretrainedMLM(nn.Module):
     """
     def __init__(self,
                  model_name: str,
-                 model_path: str) -> None:
+                 model_path: str,
+                 energy_model: bool = True) -> None:
         super().__init__()
         model_cls = getattr(transformers, model_name)
         self.model = model_cls.from_pretrained(model_path)
+        self.energy_model = energy_model
 
     
     def forward(self, inputs: torch.Tensor, labels: torch.Tensor, input_lengths=None):
@@ -565,7 +567,11 @@ class PretrainedMLM(nn.Module):
             outputs = self.forward(masked_inputs, labels=None, input_lengths=input_lengths)
             assert 'logits' in outputs, 'The output has no attribute logits'
             logit = outputs.logits[:, t, :] # (B, V)
-            energy[:, t] = -logit.gather(index=input_ids[:, t].unsqueeze(1), dim=-1).squeeze() # (B,T)
+            if not self.energy_model:
+                log_probs = nn.functional.log_softmax(logit, dim=-1)
+                energy[:, t] = -log_probs.gather(index=input_ids[:, t].unsqueeze(1), dim=-1).squeeze() # (B,T)
+            else:
+                energy[:, t] = -logit.gather(index=input_ids[:, t].unsqueeze(1), dim=-1).squeeze() # (B,T)
         padding_mask = torch.arange(input_ids.size(1), device=input_ids.device)[
             None, :] < input_lengths[:, None].to(input_ids.device)
         energy = (energy*padding_mask).sum(-1) # (B,)
