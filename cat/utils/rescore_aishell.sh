@@ -1,6 +1,6 @@
 exp_no=$1
 mode=$2
-python rescore_std.py \
+python utils/rescore_std.py \
   --dev_asr "data/aishell/${mode}-dev.nbest" \
   --dev_lm "${exp_no}/rescore/score-${mode}-dev.nbest"\
   --dev_beta "data/aishell/${mode}-dev-beta.nbest"\

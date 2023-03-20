@@ -1,5 +1,5 @@
 # Train GN-ELM with DNCE
-We use the [LM pipeline](../../README.md) to train the Globally Normalized Energy-based Lanuage Model (GN-ELM) with [DNCE](https://ieeexplore.ieee.org/abstract/document/8639591/).
+We use the [LM pipeline](../../../README.md) to train the Globally Normalized Energy-based Lanuage Model (GN-ELM) with [DNCE](https://ieeexplore.ieee.org/abstract/document/8639591/).
 ```
 python utils/pipeline/lm.py exp/lm/GN-ELM-DNCE --stop 2 --ngpu 4
 mv exp/lm/GN-ELM-DNCE/pkl exp/lm/GN-ELM-DNCE/pkl0

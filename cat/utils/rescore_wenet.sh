@@ -1,5 +1,5 @@
 exp_no=$1
-python rescore_std.py \
+python utils/rescore_std.py \
   --dev_asr "data/wenet/dev.nbest" \
   --dev_lm "${exp_no}/rescore/score_dev.nbest"\
   --dev_beta "data/wenet/beta_dev.nbest"\
