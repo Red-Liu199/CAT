@@ -3,11 +3,12 @@
         "type": "EBM",
         "kwargs": {
             "noise_rate": 1,
-            "method": "dnce",
+            "method": "nce",
             "energy_func": "hidden2scalar-sum",
-            "config_ebm_model": "exp/lm/ebm-dnce/config_ebm.json",
-            "config_noise_model": "exp/lm/ebm-dnce/config_noise.json",
-            "tokenizer_path": "exp/lm/ebm-dnce/tokenizer.tknz",
+            "config_ebm_model": "exp/lm/GN-ELM-NCE/config_ebm.json",
+            "config_noise_model": "exp/lm/GN-ELM-NCE/config_noise.json",
+            "check_noise_model": "exp/lm/lm-gpt2/check/best-2.pt",
+            "tokenizer_path": "exp/lm/GN-ELM-NCE/tokenizer.tknz",
             "bert_tokenizer": true
         }
     },
@@ -15,7 +16,7 @@
         "type": "SchedulerNoam",
         "kwargs": {
             "dim_model": 768,
-            "peak_factor": 0.3,
+            "peak_factor": 0.45,
             "warmup_step": 5000,
             "stop_step": 2000
         },

@@ -18,7 +18,7 @@ from tqdm import tqdm
 from torch.utils.data import DataLoader
 
 
-def main(trset: str, f_linfo: str,  feat_type_file: str = None, f_feats: str = None, batch_size: int = 128, max_len: int = 50):
+def main(trset: str, f_linfo: str,  feat_type_file: str = None, f_feats: str = None, batch_size: int = 128, max_len: int = 200):
     train_set = CorpusDataset(trset)
 
     if feat_type_file is not None:
@@ -75,7 +75,7 @@ if __name__ == "__main__":
     parser.add_argument("--feat_type_file", type=str)
     parser.add_argument("--f_feats", type=str,
                         help="Ouput file of discrete feats.")
-    parser.add_argument("--max_len", type=int, default=50,
+    parser.add_argument("--max_len", type=int, default=200,
                         help="The max length")
     args = parser.parse_args()
 
