@@ -1,0 +1,30 @@
+{
+    "decoder": {
+        "type": "EBM",
+        "kwargs": {
+            "noise_rate": 1,
+            "method": "dnce",
+            "energy_func": "sumtokenlogit",
+            "config_ebm_model": "exp/ELM/config_ebm.json",
+            "config_noise_model": "exp/ELM/config_noise.json",
+            "tokenizer_path": "exp/ELM/tokenizer.tknz",
+            "bert_tokenizer": true
+        }
+    },
+    "scheduler": {
+        "type": "SchedulerNoam",
+        "kwargs": {
+            "dim_model": 768,
+            "peak_factor": 0.16,
+            "warmup_step": 10000,
+            "stop_step": 30000
+        },
+        "optimizer": {
+            "type": "Adam",
+            "zeroredundancy": true,
+            "kwargs": {
+                "lr": 0.0008
+            }
+        }
+    }
+}

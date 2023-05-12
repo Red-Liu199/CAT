@@ -1,0 +1,41 @@
+{
+    "data": {
+        "train": "data/local-lm/ptb.train.txt",
+        "dev": "data/local-lm/ptb.valid.txt",
+        "test": [
+            "data/local-lm/ptb.test.txt",
+            "data/local-lm/ptb.valid.txt"
+        ],
+        "text_processing": {
+            "truncate": 32
+        }
+    },
+    "tokenizer": {
+        "type": "PretrainedTokenizer",
+        "option-init": {
+            "name": "BertTokenizer",
+            "path": "bert-base-chinese"
+        }
+    },
+    "env": {
+        "CUDA_VISIBLE_DEVICES": "0, 1, 2, 3",
+        "TORCH_DISTRIBUTED_DEBUG": "INFO"
+    },
+    "train": {
+        "bin": "cat.lm.trf.train",
+        "option": {
+            "amp": true,
+            "batch_size": 512,
+            "check-freq": 500,
+            "debug": false,
+            "grad-norm": 5.0
+        }
+    },
+    "inference": {
+        "avgmodel": {
+            "mode": "best",
+            "num": 3
+        }
+    },
+    "commit": "b271141e8ea89f95d174705a57ae7491414b6065"
+}
