@@ -1,11 +1,13 @@
 {
     "decoder": {
-        "type": "PretrainedTransformer",
+        "type": "CausalTransformer",
         "kwargs": {
-            "model_name": "BertLMHeadModel",
-            "config_name": "BertConfig",
-            "path": "bert-base-chinese",
-            "model_type": "encoder"
+            "attn_dropout": 0.1,
+            "dim_hid": 320,
+            "num_classes": 10000,
+            "num_head": 8,
+            "num_layers": 6,
+            "with_head": true
         }
     }
 }

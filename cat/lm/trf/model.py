@@ -1,26 +1,20 @@
 # Copyright 2022 Tsinghua University
 # Apache 2.0.
-# Author: Haochen Liu, Huahuan Zheng (maxwellzh@outlook.com)
+# Author: Hong Liu (liuhong21@mails.tsinghua.edu.cn)
 
-from os import truncate
 from ...shared.decoder import *
 from ...shared.encoder import *
 from ...shared import tokenizer as tknz
-from . import feat
 
 import pickle
 import math
 import numpy as np
 from typing import *
-
-import os
-import torch.distributed as dist
 from copy import deepcopy
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from cat.shared import coreutils
-from scipy.stats import norm
 from cat.lm import lm_builder
 
 class EBM(nn.Module):

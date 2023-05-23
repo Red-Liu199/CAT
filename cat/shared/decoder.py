@@ -415,32 +415,6 @@ class CausalTransformer(AbsDecoder):
     def init_states(self, N: int = 1) -> AbsStates:
         return AbsStates(None, CausalTransformer)
     
-    def score(self, input_ids: torch.LongTensor, targets: torch.LongTensor, input_lengths: Optional[torch.LongTensor] = None, *args):
-    
-        U = input_lengths.max()
-        if input_lengths is None:
-            input_lengths = input_ids.new_full(input_ids.size(0), U)
-
-        if input_ids.size(1) > U:
-            input_ids = input_ids[:, :U]
-        if targets.size(1) > U:
-            targets = targets[:, :U]
-
-        # [N, U, K]
-        logits, _ = self.forward(input_ids, input_lengths=input_lengths, *args)
-        # [N, U]
-        log_prob = logits.log_softmax(
-            dim=-1).gather(index=targets.long().unsqueeze(2), dim=-1).squeeze(-1)
-        # True for not masked, False for masked, [N, U]
-        padding_mask = torch.arange(input_ids.size(1), device=input_ids.device)[
-            None, :] < input_lengths[:, None].to(input_ids.device)
-        log_prob *= padding_mask
-        # [N,]
-        score = log_prob.sum(dim=-1)
-        if self.pi is not None:
-            score += torch.log(self.pi[input_lengths]).to(score.device)
-        return score
-
 class PretrainedTransformer(nn.Module):
     """
     This class is used for loading pretrained language model,

@@ -4,7 +4,7 @@
         "kwargs": {
             "noise_rate": 1,
             "method": "dnce",
-            "energy_func": "sumtokenlogit",
+            "energy_func": "sumtargetlogit",
             "config_ebm_model": "exp/ELM/config_ebm.json",
             "config_noise_model": "exp/ELM/config_noise.json",
             "tokenizer_path": "exp/ELM/tokenizer.tknz",

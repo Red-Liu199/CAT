@@ -11,15 +11,8 @@ __all__ = ["TRFLMTrainer", "build_model", "_parser", "main"]
 
 from ...shared import coreutils
 from ...shared.decoder import AbsDecoder
-from .manager import (
-    Manager,
-    TRFManager,
-    train_ebm as origin_train_func,
-    train_trf as default_train_func,
-    evaluate,
-    evaluate_trf,
-    evaluate_ebm
-)
+from ...shared.manager import Manager, evaluate
+from ...shared.manager import train as default_train_func
 from ...shared.data import (
     CorpusDataset,
     sortedPadCollateLM
@@ -49,41 +42,12 @@ def main_worker(gpu: int, ngpus_per_node: int, args: argparse.Namespace):
     configures = coreutils.readjson(args.config)
     mode = configures['decoder']['kwargs'].get('method', 'nce')
     model_type = configures['decoder']['type']
-    # extra_tracks = [
-    #     'train/loss_data',
-    #     'train/loss_noise',
-    #     'train/acc_data',
-    #     'train/acc_noise',
-    #     'train/ppl_data',
-    #     'train/loss_true',
-    #     'dev/ppl'
-    # ]
-    # if mode == 'dnce' and model_type=='TRFLM':
-    #     extra_tracks += [
-    #         'train/ppl_trfM_noise',
-    #         'train/ppl_noiseM_data',
-    #         'train/ppl_noiseM_noise',
-    #         'train/loss_noise_kl',
-    #         'train/loss_data_true',
-    #         'train/loss_noise_true',
-    #         'dev/ppl',
-    #         'dev/ppl_noise',
-    #         'train/zeta_5',
-    #         'train/zeta_15',
-    #         'train/zeta_25'
-    #     ]
-    if model_type=='EBM_IS':
-        evaluate_func = evaluate
-    else:
-        evaluate_func = evaluate_trf if mode=='dnce' and model_type=='TRFLM' else evaluate_ebm
-    manager_cls = TRFManager if model_type=='TRFLM' and 'scheduler_noise' in configures else Manager
-    train_func = custom_train if model_type =='TRFLM' and 'scheduler_noise' in configures else origin_train
-    manager = manager_cls(
+    manager = Manager(
         CorpusDataset,
         sortedPadCollateLM(flatten_target=False),
         args, build_model,
-        func_train=train_func,
-        func_eval=evaluate_func,
+        func_train=custom_train,
+        func_eval=evaluate,
         # extra_tracks=extra_tracks
     )
     manager.trf_mode = mode
@@ -118,7 +82,7 @@ class TRFLMTrainer(nn.Module):
 
 
 def custom_hook(
-        manager: TRFManager,
+        manager: Manager,
         model: TRFLMTrainer,
         args: argparse.Namespace,
         n_step: int,
@@ -144,9 +108,6 @@ def custom_hook(
 
 def custom_train(*args):
     return default_train_func(*args, hook_func=custom_hook)
-
-def origin_train(*args):
-    return origin_train_func(*args, hook_func=custom_hook)
 
 
 @torch.no_grad()

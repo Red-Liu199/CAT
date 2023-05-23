@@ -11,22 +11,26 @@
         }
     },
     "tokenizer": {
-        "type": "PretrainedTokenizer",
-        "option-init": {
-            "name": "BertTokenizer",
-            "path": "bert-base-chinese"
-        }
+        "type": "SentencePieceTokenizer",
+        "option-train": {
+            "model_type": "word",
+            "vocab_size": 10000,
+            "use_all_vocab": true,
+            "model_prefix": "sentencepiece/ptb-word/spm"
+        },
+        "|V|": 10000,
+        "file": "exp/ELM/tokenizer.tknz"
     },
     "env": {
-        "CUDA_VISIBLE_DEVICES": "0, 1, 2, 3",
+        "CUDA_VISIBLE_DEVICES": "2",
         "TORCH_DISTRIBUTED_DEBUG": "INFO"
     },
     "train": {
         "bin": "cat.lm.trf.train",
         "option": {
             "amp": true,
-            "batch_size": 512,
-            "check-freq": 500,
+            "batch_size": 32,
+            "check-freq": 100,
             "debug": false,
             "grad-norm": 5.0
         }
